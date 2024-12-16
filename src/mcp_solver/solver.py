@@ -1,231 +1,220 @@
 import asyncio
 import logging
-import time
-from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from datetime import timedelta
+from typing import Dict, Optional, Tuple, Any
 from minizinc import Model, Instance, Solver, Result
+from minizinc.error import MiniZincError
+import re
 
-logger = logging.getLogger(__name__)
+class SolverError(Exception):
+    """Custom exception for solver-specific errors"""
+    pass
 
-class SolverState(Enum):
-    IDLE = "idle"
-    BUSY = "busy"
-    DONE = "done"
-    ERROR = "error"
+class ModelError(Exception):
+    """Custom exception for model-related errors"""
+    pass
 
 class SolverSession:
     """Manages a MiniZinc constraint programming session."""
 
     def __init__(self, solver_name: str = "chuffed"):
-        """Initialize a new solver session."""
         self.current_model: Optional[Model] = None
         self.current_instance: Optional[Instance] = None
-        self.solver = Solver.lookup(solver_name)
+        self.solver: Solver = Solver.lookup(solver_name)
+        self.defined_parameters: Dict[str, int] = {}
+        self.param_store: Dict[str, int] = {}
+        self.last_solve_time: Optional[float] = None
         self.current_solution: Optional[Dict[str, Any]] = None
-        self.param_store: Dict[str, Any] = {}
-        self.required_parameters: Optional[list] = []
-        self.solve_time: Optional[float] = None
-        self.state: SolverState = SolverState.IDLE
-        self.solve_task: Optional[asyncio.Task] = None
-        self.start_time: Optional[float] = None
 
-    def validate_and_define_model(self, model_str: str) -> Tuple[bool, str]:
-        """Validate and define a new MiniZinc model.
-        
-        Instructions:
-        - Declare parameters without default values (e.g., `int: param;`).
-        - All parameters are assumed to be integers.
+    async def validate_and_define_model(self, model_str: str) -> Tuple[bool, str]:
         """
-        from .validation import validate_minizinc_model, add_required_includes
-        
-        logger.debug("Validating model:\n%s", model_str)
-        
-        # Add required includes before validation
-        model_str = add_required_includes(model_str)
-        logger.debug("Model after adding required includes:\n%s", model_str)
-        
-        # Extract undefined parameters (e.g., `int: n;`)
-        import re
-        parameter_pattern = r"(int): (\w+);"
-        self.required_parameters = [match[1] for match in re.findall(parameter_pattern, model_str)]
-        logger.debug("Undefined parameters detected: %s", self.required_parameters)
-        
-        # Validate the model
-        is_valid, error_msg = validate_minizinc_model(model_str)
-        if not is_valid:
-            return False, f"Model validation failed:\n{error_msg}"
-        
+        Validates a MiniZinc model, converting fixed integers into parameters.
+
+        Args:
+            model_str (str): The MiniZinc model string.
+
+        Returns:
+            Tuple[bool, str]: Validation success and an informative message.
+        """
         try:
+            # Step 1: Convert fixed integers to parameters
+            updated_model_str, extracted_parameters = self.convert_parameters(model_str)
+
+            # Step 2: Add the include globals statement, just in case
+            updated_model_str = 'include "globals.mzn";\n' + updated_model_str
+
+            # Step 3: Validate the modified model
+            is_valid, error_msg = await self.validate_minizinc_model(updated_model_str)
+            if not is_valid:
+                return False, f"Validation failed: {error_msg}"
+
+            # Step 4: Store updated model and parameters
             self.current_model = Model()
-            self.current_model.add_string(model_str)
+            self.current_model.add_string(updated_model_str)
             self.current_instance = Instance(self.solver, self.current_model)
-            return True, "Model validated and prepared for solving"
+            self.defined_parameters = extracted_parameters
+
+            # Step 5: Set parameters dynamically
+            for name, value in extracted_parameters.items():
+                self.current_instance[name] = value
+                self.param_store[name] = value
+
+            return True, "Model validated, and parameters initialized dynamically."
+
         except Exception as e:
-            return False, f"Model definition failed: {str(e)}"
+            logging.error("Error during model processing", exc_info=True)
+            return False, f"Error during model processing: {str(e)}"
 
-    async def solve_model(self, parameters: Optional[Dict[str, Any]] = None, timeout: float = 300) -> Dict[str, Any]:
-        """Solve the current model asynchronously."""
-        # Check if solver is already running
-        if self.state == SolverState.BUSY:
-            elapsed = time.perf_counter() - (self.start_time or 0)
-            return {
-                "status": "BUSY",
-                "message": f"Solver is still running (elapsed time: {elapsed:.1f}s). Please try again later.",
-                "elapsed_time": elapsed
-            }
+    def convert_parameters(self, model_str: str) -> Tuple[str, Dict[str, int]]:
+        """
+        Converts integer declarations with values into parameters.
 
-        if not self.current_instance:
-            raise ValueError("No model has been submitted yet. Use validate_and_define_model first.")
-        
-        # Ensure all required parameters are set
-        parameters = parameters or {}
-        missing_params = [p for p in self.required_parameters if p not in parameters and p not in self.param_store]
-        if missing_params:
-            raise ValueError(f"Missing parameter values for: {', '.join(missing_params)}")
-        
-        # Apply provided parameters
-        for name, value in parameters.items():
-            self.set_parameter(name, value)
-        
+        Args:
+            model_str (str): The MiniZinc model string.
+
+        Returns:
+            Tuple[str, Dict[str, int]]: Updated model string and extracted parameters.
+        """
+        pattern = r"int:\s*(\w+)\s*=\s*(\d+);"
+        matches = re.findall(pattern, model_str)
+        parameters = {name: int(value) for name, value in matches}
+
+        # Replace all fixed declarations with parameter declarations
+        updated_model = re.sub(pattern, r"int: \1;", model_str)
+        return updated_model, parameters
+
+    async def validate_minizinc_model(self, model_str: str) -> Tuple[bool, str]:
+        """
+        Validates a MiniZinc model string.
+
+        Args:
+            model_str (str): The MiniZinc model.
+
+        Returns:
+            Tuple[bool, str]: Whether validation passed and error message if any.
+        """
         try:
-            self.state = SolverState.BUSY
-            self.start_time = time.perf_counter()
-
-            # Create a task for the solve operation
-            solve_coro = self.current_instance.solve_async()
-            self.solve_task = asyncio.create_task(solve_coro)
-
-            # Wait for the result with timeout
-            try:
-                result: Result = await asyncio.wait_for(self.solve_task, timeout=timeout)
-            except asyncio.TimeoutError:
-                self.state = SolverState.ERROR
-                if self.solve_task:
-                    self.solve_task.cancel()
-                return {
-                    "status": "TIMEOUT",
-                    "message": f"Solver exceeded time limit of {timeout} seconds",
-                    "elapsed_time": time.perf_counter() - self.start_time
-                }
-
-            end_time = time.perf_counter()
-            self.solve_time = end_time - self.start_time
-            
-            status = str(result.status.name)
-            solution_dict = {}
-            
-            if not result.status.has_solution():
-                self.current_solution = None
-                self.state = SolverState.DONE
-                return {
-                    "status": status,
-                    "message": f"No solution found (status: {status})",
-                    "solve_time": self.solve_time
-                }
-            
-            if hasattr(result, 'solution') and result.solution is not None:
-                solution_dict = getattr(result.solution, '__dict__', {})
-            
-            self.current_solution = {
-                "status": status,
-                "message": "Solution found",
-                "solution": solution_dict,
-                "solve_time": self.solve_time
-            }
-            
-            self.state = SolverState.DONE
-            return {
-                "status": status,
-                "message": f"Solution found in {self.solve_time:.3f} seconds",
-                "solve_time": self.solve_time,
-                "solution": solution_dict
-            }
-        
+            model = Model()
+            model.add_string(model_str)
+            instance = Instance(self.solver, model)
+            await asyncio.to_thread(instance.flat)
+            return True, ""
+        except MiniZincError as e:
+            return False, f"MiniZinc error: {str(e)}"
         except Exception as e:
-            self.state = SolverState.ERROR
-            error_msg = str(e)
-            if "UNSATISFIABLE" in error_msg:
-                return {
-                    "status": "UNSATISFIABLE",
-                    "message": "The model constraints cannot be satisfied - no solution exists",
-                    "solve_time": self.solve_time if self.solve_time else None
-                }
-            elif "UNKNOWN" in error_msg:
-                return {
-                    "status": "UNKNOWN",
-                    "message": "The solver could not determine if a solution exists (timeout or resource limit reached)",
-                    "solve_time": self.solve_time if self.solve_time else None
-                }
-            else:
-                raise ValueError(f"Solve operation failed: {error_msg}")
+            return False, f"Unexpected error: {str(e)}"
 
-    def set_parameter(self, param_name: str, param_value: Any) -> str:
-        """Set or update a parameter value."""
+    def set_parameter(self, param_name: str, param_value: int) -> None:
+        """
+        Sets a parameter value in the MiniZinc instance.
+
+        Args:
+            param_name (str): The name of the parameter to set.
+            param_value (int): The value to assign to the parameter.
+
+        Raises:
+            ModelError: If the parameter is not defined or the instance is not ready.
+        """
         if not self.current_model:
-            raise ValueError("Cannot set parameters - no model defined yet. Submit a model first.")
-        
-        # Check if this is a known required parameter
-        if param_name not in self.required_parameters:
-            raise ValueError(f"Unknown parameter: {param_name}. Available parameters: {', '.join(self.required_parameters)}")
-        
-        # Enforce integer type for parameters
+            raise ModelError("No model has been defined yet")
+
+        if param_name not in self.defined_parameters:
+            raise ModelError(f"Parameter '{param_name}' is not defined in the model.")
+
         try:
+            # Force param_value to be an integer to avoid MiniZinc string-to-int errors
             param_value = int(param_value)
-        except (ValueError, TypeError):
-            raise ValueError(f"Parameter '{param_name}' must be an integer.")
-        
-        # Store the parameter value
-        self.param_store[param_name] = param_value
-        
-        # Recreate the instance with updated parameters
-        try:
-            self.current_instance = Instance(self.solver, self.current_model)
-            self._apply_parameters()  # Apply all stored parameters to the new instance
+
+            # Update param_store with the new parameter value
+            self.param_store[param_name] = param_value
+
+            # Create a fresh instance
+            new_instance = Instance(self.solver, self.current_model)
+
+            # Assign *all* parameters in a single pass
+            for existing_param, value in self.param_store.items():
+                new_instance[existing_param] = value
+
+            # Replace the current instance
+            self.current_instance = new_instance
+
+            logging.info(f"Parameter '{param_name}' set to {param_value}.")
+
         except Exception as e:
-            logger.error(f"Failed to recreate instance with parameter {param_name}={param_value}: {e}")
-            raise ValueError(f"Failed to apply parameter {param_name}={param_value}")
+            raise ModelError(f"Failed to set parameter '{param_name}': {str(e)}")
+
+    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, any]:
+        """
+        Solves the current model instance.
+
+        Args:
+            timeout (Optional[timedelta]): Timeout for the solve process.
+
+        Returns:
+            Dict[str, any]: Results including status, solution, and solve time.
+        """
+        timeout = timeout or timedelta(seconds=30)
+        if not self.current_instance:
+            raise ModelError("No model has been submitted yet")
+
+        try:
+            result: Result = await asyncio.to_thread(
+                self.current_instance.solve,
+                timeout=timeout
+            )
+            return self._process_result(result)
+
+        except MiniZincError as e:
+            logging.error("MiniZinc error", exc_info=True)
+            return {
+                "status": "ERROR",
+                "message": f"MiniZinc error: {str(e)}",
+            }
+
+
+    def _process_result(self, result: Result) -> Dict[str, any]:
+        """
+        Processes the MiniZinc result and extracts the solution.
+        """
+        # Convert timedelta to float seconds
+        time_stat = result.statistics.get("time", 0)
+        if isinstance(time_stat, timedelta):
+            self.last_solve_time = time_stat.total_seconds()
+        else:
+            self.last_solve_time = float(time_stat)
         
-        return f"Successfully set parameter '{param_name}' = {param_value}"
+        if result.status.has_solution():
+            self.current_solution = result.solution
+            return {
+                "status": "SUCCESS",
+                "solution": self.current_solution,
+                "solve_time": self.last_solve_time,
+            }
+        return {
+            "status": "UNSATISFIABLE",
+            "message": "No solution found."
+        }
+
+
+    
+    def get_solve_time(self) -> Optional[float]:
+        """Return the most recent solve time if available."""
+        return self.last_solve_time
 
     def get_current_solution(self) -> Optional[Dict[str, Any]]:
-        """Get the current stored solution."""
+        """Return the most recent solution if available."""
         return self.current_solution
 
     def get_variable_value(self, variable_name: str) -> Optional[Any]:
-        """Get a specific variable's value from the solution."""
-        if not self.current_solution or "solution" not in self.current_solution:
+        """Return the value of a specific variable from the current solution."""
+        if not self.current_solution:
             return None
-        return self.current_solution["solution"].get(variable_name)
+        return self.current_solution.get(variable_name)
 
-    def get_solve_time(self) -> Optional[float]:
-        """Get the running time of the last solve operation."""
-        return self.solve_time
-
-    def get_solver_state(self) -> Dict[str, Any]:
-        """Get current solver state and elapsed time if running."""
-        response = {
-            "state": self.state.value
-        }
-        
-        if self.state == SolverState.BUSY and self.start_time:
-            elapsed = time.perf_counter() - self.start_time
-            response["elapsed_time"] = elapsed
-            response["message"] = f"Solver is running (elapsed time: {elapsed:.1f}s)"
-        
-        return response
-
-    def _apply_parameters(self) -> None:
-        """Internal helper to apply all stored parameters."""
-        if not self.current_instance:
-            return
-        
-        # First analyze the instance to ensure all parameters are recognized
-        self.current_instance.analyse()
-        
-        # Then apply all stored parameters
-        for name, value in self.param_store.items():
-            try:
-                self.current_instance[name] = value
-            except Exception as e:
-                logger.error(f"Failed to apply parameter {name}={value}: {e}")
-                raise ValueError(f"Failed to apply parameter {name}={value}")
+    def get_solver_state(self) -> str:
+        """Return the current state of the solver."""
+        if not self.current_model:
+            return "No model loaded"
+        if not self.current_solution:
+            return "Model loaded but not solved"
+        return f"Model solved (took {self.last_solve_time:.3f} seconds)"

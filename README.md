@@ -1,9 +1,6 @@
 
 # MCP Solver
-
-[![MCP][mcp-badge]][mcp-url]  
-[![License: MIT][license-badge]][license-url]  
-[![Python Version][python-badge]][python-url]
+[![MCP][mcp-badge]][mcp-url][![License: MIT][license-badge]][license-url]![Python Version][python-badge]
 
 A Model Context Protocol (MCP) server that exposes MiniZinc constraint solving capabilities to Large Language Models.
 
@@ -57,17 +54,15 @@ uv pip install -e .
 ---
 
 
-## Example
-
-### User Prompt (based on an example by  George  Johnson, NYT, July 13, 1999)
+## Example 1
+(Based on an example by George Johnson, NYT, July 13, 1999).
+### User Prompt 
 
 > Suppose that a theatrical director feels obligated to cast either his ingenue, Actress Alvarez, or his nephew, Actor Cohen, in a production. But Miss Alvarez won’t be in a play with Mr. Cohen (her former lover), and she demands that the cast include her new flame, Actor Davenport. The producer, with her own favors to repay, insists that Actor Branislavsky have a part. But Mr. Branislavsky won’t be in any play with Miss Alvarez or Mr. Davenport. Can the director cast the play?
 
 ### LLM
 
 I'll solve this constraint satisfaction problem using MiniZinc. Let me model the theatrical casting constraints.
-
-
 
 > Let me submit this model:
 
@@ -116,6 +111,7 @@ solve satisfy;
 > So yes, the director can cast the play under these specific conditions.
 
 
+
 ---
 
 ## Available Tools (to be extended)
@@ -148,11 +144,11 @@ This MCP Solver is in its prototype stage and should be used with caution. Users
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-[mcp-badge]: https://img.shields.io/badge/MCP-Compatible-blue.svg  
-[mcp-url]: https://modelcontextprotocol.io  
-[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg  
-[license-url]: https://opensource.org/licenses/MIT  
-[python-badge]: https://img.shields.io/pypi/pyversions/mcp-solver  
-[python-url]: https://www.python.org  
+[mcp-badge]: https://img.shields.io/badge/MCP-Compatible-blue.svg
+[mcp-url]: https://modelcontextprotocol.io
+[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
+[license-url]: https://opensource.org/licenses/MIT
+[python-badge]: https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue
+[python-url]: https://www.python.org
 
 ---

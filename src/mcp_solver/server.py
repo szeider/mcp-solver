@@ -1,17 +1,23 @@
 import asyncio
-import json
 import logging
-from enum import Enum
 from typing import List
-
+from datetime import timedelta
+from minizinc import Model, Instance, Solver, Result
+from minizinc.error import MiniZincError
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
+from .constants import (
+    DEFAULT_SOLVE_TIMEOUT,
+    MAX_SOLVE_TIMEOUT,
+    FLATTEN_TIMEOUT,
+    MODEL_INSTRUCTIONS,
+    PROMPT_TEMPLATE
+)
 from .solver import SolverSession
-from .types import ToolNames
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +25,49 @@ async def serve() -> None:
     server = Server("mcp-solver")
     session = SolverSession()
 
+    @server.list_prompts()
+    async def handle_list_prompts() -> list[types.Prompt]:
+        return [
+            types.Prompt(
+                name="constraint-solver",
+                description="Guide for formulating and solving constraint programming problems",
+                arguments=[
+                    types.PromptArgument(
+                        name="topic",
+                        description="Problem domain or specific constraint problem to solve",
+                        required=True,
+                    )
+                ],
+            )
+        ]
+
+    @server.get_prompt()
+    async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+        if name != "constraint-solver":
+            raise ValueError(f"Unknown prompt: {name}")
+
+        if not arguments or "topic" not in arguments:
+            raise ValueError("Missing required argument: topic")
+
+        topic = arguments["topic"]
+        prompt = PROMPT_TEMPLATE.format(topic=topic)
+
+        return types.GetPromptResult(
+            description=f"Constraint solving guide for {topic}",
+            messages=[
+                types.PromptMessage(
+                    role="user",
+                    content=types.TextContent(type="text", text=prompt.strip()),
+                )
+            ],
+        )
+
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
         return [
             types.Tool(
-                name=ToolNames.SUBMIT_MODEL,
-                description="""Submit and validate a MiniZinc constraint model.
-           
-This solver requires models written in standard MiniZinc using:
-- Variable declarations with finite domains
-- Global constraints (alldifferent, circuit, etc.)  
-- Logical constraints (and, or, implication)
-- Reification and channeling constraints
-
-The solver uses Chuffed, a lazy clause generation solver, and does NOT support:
-- Mixed Integer Programming (MIP) formulations
-- Linear programming
-- Optimization with linear objective functions
-- The 'mip' library or any MIP-specific constraints
-
-Please write your model using standard MiniZinc modeling techniques.""",
+                name="submit_model",
+                description=MODEL_INSTRUCTIONS,
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -51,7 +80,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.SOLVE_MODEL,
+                name="solve_model",
                 description="Solve the current constraint model",
                 inputSchema={
                     "type": "object",
@@ -59,7 +88,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.GET_SOLUTION,
+                name="get_solution",
                 description="Retrieve the stored solution from the last solve operation",
                 inputSchema={
                     "type": "object",
@@ -67,7 +96,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.SET_PARAMETER,
+                name="set_parameter",
                 description="Set a parameter value for the current model",
                 inputSchema={
                     "type": "object",
@@ -84,7 +113,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.GET_VARIABLE,
+                name="get_variable",
                 description="Get a variable's value from the most recent solution",
                 inputSchema={
                     "type": "object",
@@ -98,7 +127,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.GET_SOLVE_TIME,
+                name="get_solve_time",
                 description="Get the running time used to find the most recent solution",
                 inputSchema={
                     "type": "object",
@@ -106,7 +135,7 @@ Please write your model using standard MiniZinc modeling techniques.""",
                 }
             ),
             types.Tool(
-                name=ToolNames.GET_SOLVER_STATE,
+                name="get_solver_state",
                 description="Check if the solver is currently running and get elapsed time",
                 inputSchema={
                     "type": "object",
@@ -116,43 +145,43 @@ Please write your model using standard MiniZinc modeling techniques.""",
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> List[types.TextContent]:
+    async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
         try:
             match name:
-                case ToolNames.SUBMIT_MODEL:
-                    success, message = session.validate_and_define_model(arguments["model"])
+                case "submit_model":
+                    success, message = await session.validate_and_define_model(arguments["model"])
                     status = "Success" if success else "Error"
                     return [types.TextContent(type="text", text=f"{status}: {message}")]
 
-                case ToolNames.SOLVE_MODEL:
+                case "solve_model":
                     result = await session.solve_model()
-                    return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+                    return [types.TextContent(type="text", text=str(result))]
 
-                case ToolNames.GET_SOLUTION:
+                case "get_solution":
                     solution = session.get_current_solution()
                     if solution is None:
                         return [types.TextContent(type="text", text="No solution available yet. Use solve-model first.")]
-                    return [types.TextContent(type="text", text=json.dumps(solution, indent=2))]
+                    return [types.TextContent(type="text", text=str(solution))]
 
-                case ToolNames.SET_PARAMETER:
-                    msg = session.set_parameter(arguments["param_name"], arguments["param_value"])
-                    return [types.TextContent(type="text", text=msg)]
+                case "set_parameter":
+                    session.set_parameter(arguments["param_name"], arguments["param_value"])
+                    return [types.TextContent(type="text", text=f"Parameter {arguments['param_name']} set successfully")]
 
-                case ToolNames.GET_VARIABLE:
+                case "get_variable":
                     val = session.get_variable_value(arguments["variable_name"])
                     if val is None:
-                        return [types.TextContent(type="text", text=f"No value found for {arguments['variable_name']}. Make sure you've solved the model first.")]
+                        return [types.TextContent(type="text", text=f"No value found for {arguments['variable_name']}")]
                     return [types.TextContent(type="text", text=f"{arguments['variable_name']} = {val}")]
 
-                case ToolNames.GET_SOLVE_TIME:
+                case "get_solve_time":
                     solve_time = session.get_solve_time()
                     if solve_time is None:
-                        return [types.TextContent(type="text", text="No solve time available. Use solve-model first.")]
-                    return [types.TextContent(type="text", text=f"Solve time: {solve_time:.3f} seconds")]
+                        return [types.TextContent(type="text", text="No solve time available - no solution has been computed yet")]
+                    return [types.TextContent(type="text", text=f"Last solve operation took {solve_time:.3f} seconds")]
 
-                case ToolNames.GET_SOLVER_STATE:
+                case "get_solver_state":
                     state = session.get_solver_state()
-                    return [types.TextContent(type="text", text=json.dumps(state, indent=2))]
+                    return [types.TextContent(type="text", text=str(state))]
 
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
