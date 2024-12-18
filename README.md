@@ -55,62 +55,156 @@ uv pip install -e .
 
 
 ## Example 1
-(Based on an example by George Johnson, NYT, July 13, 1999).
-### User Prompt 
+This is based on an  example by George Johnson (NYT, July 13, 1999).
 
-> Suppose that a theatrical director feels obligated to cast either his ingenue, Actress Alvarez, or his nephew, Actor Cohen, in a production. But Miss Alvarez won’t be in a play with Mr. Cohen (her former lover), and she demands that the cast include her new flame, Actor Davenport. The producer, with her own favors to repay, insists that Actor Branislavsky have a part. But Mr. Branislavsky won’t be in any play with Miss Alvarez or Mr. Davenport. Can the director cast the play?
+**User**
 
-### LLM
+> Suppose that a theatrical director feels obligated to cast either his ingenue, Actress Alvarez, or his nephew, Actor Cohen, in a production. But Miss Alvarez won't be in a play with Mr. Cohen (her former lover), and she demands that the cast include her new flame, Actor Davenport. The producer, with her own favors to repay, insists that Actor Branislavsky have a part. But Mr. Branislavsky won't be in any play with Miss Alvarez or Mr. Davenport. Can the director cast the play?
 
-I'll solve this constraint satisfaction problem using MiniZinc. Let me model the theatrical casting constraints.
+**LLM**
 
-> Let me submit this model:
-
-
-```minizinc
-% Define actors as integers
-int: Alvarez = 1;
-int: Cohen = 2;
-int: Davenport = 3;
-int: Branislavsky = 4;
-
-% Decision variable for casting
-array[1..4] of var 0..1: cast;
-
-% Constraint: Either Alvarez or Cohen, but not both
-constraint cast[Alvarez] + cast[Cohen] = 1;
-
-% Constraint: If Alvarez is in, Davenport must be in
-constraint cast[Alvarez] = 1 -> cast[Davenport] = 1;
-
-% Constraint: Branislavsky must be in
-constraint cast[Branislavsky] = 1;
-
-% Negative constraints: Cannot be cast together
-constraint cast[Alvarez] + cast[Cohen] <= 1;      % Alvarez cannot be with Cohen
-constraint cast[Branislavsky] + cast[Alvarez] <= 1;  % Branislavsky cannot be with Alvarez
-constraint cast[Branislavsky] + cast[Davenport] <= 1;  % Branislavsky cannot be with Davenport
-
-solve satisfy;
-
-```
-
->  Now I'll solve the model.
-
-> The model found a valid casting arrangement:
-> 
-> - Cast: Cohen and Branislavsky
-> - Not Cast: Alvarez and Davenport
+> Let's solve this step by step using a constraint satisfaction model.
 >
-> This satisfies all the constraints:
-> 1. Either Alvarez or Cohen is cast (Cohen is chosen)
-> 2. Branislavsky must be in the play
-> 3. Alvarez and Cohen are not together
-> 4. Branislavsky is not with Alvarez or Davenport
+> **Theater Casting Constraint Model**
+>
+> ```minizinc
+> % Variables for each actor (1 if cast, 0 if not)
+> var 0..1: alvarez;
+> var 0..1: branislavsky; 
+> var 0..1: cohen;
+> var 0..1: davenport;
+> 
+> % Must cast either Alvarez or Cohen
+> constraint alvarez + cohen >= 1;
+> 
+> % Alvarez won't be in play with Cohen
+> constraint alvarez + cohen <= 1;
+> 
+> % If Alvarez is cast, Davenport must be cast
+> constraint alvarez <= davenport;
+> 
+> % Branislavsky must be cast  
+> constraint branislavsky = 1;
+> 
+> % Branislavsky won't be with Alvarez or Davenport
+> constraint branislavsky + alvarez <= 1;
+> constraint branislavsky + davenport <= 1;
+> 
+> solve satisfy;
+> ```
 
-> So yes, the director can cast the play under these specific conditions.
+**MCP Solver:** **`submit_model`**
 
+> `Success: Model validated, and parameters initialized dynamically.`
 
+**MCP Solver:** **`solve_model`**
+
+> ```json
+> {'status': 'SUCCESS', 'solution': Solution(alvarez=0, branislavsky=1, cohen=1, davenport=0, _checker=''), 'solve_time': 0.0}
+> ```
+
+**LLM** 
+
+> The director can cast the play by:
+>
+> * Casting Cohen and Branislavsky 
+> * Not casting Alvarez or Davenport
+>
+> This satisfies all constraints:
+>
+> 1. Cohen is cast (Alvarez-or-Cohen requirement)  
+> 2. Branislavsky is cast (producer's demand)
+> 3. No incompatible pairs appear together
+
+---
+
+## Example 2
+
+This example shows how the same model can be solved with different parameter values, and the solving times can be obtained.
+
+**User**
+
+> Check whether you can place n Queens on an nxn chessboard. Try N=10,20,30,40 and compare the solving times.
+
+**LLM**
+
+> ```minizinc
+> include "globals.mzn";
+> 
+> int: n; 
+> array[1..n] of var 1..n: queens;
+> 
+> constraint alldifferent(queens);
+> constraint alldifferent([ queens[i] + i | i in 1..n ]);  
+> constraint alldifferent([ queens[i] - i | i in 1..n ]);
+> ```
+
+**MCP Solver:** **`submit_model`**
+
+> `Success: Model validated, and parameters initialized dynamically.`
+
+**LLM**
+
+> Testing N=10:
+
+**MCP Solver:** **`set_parameter`**
+
+> `Parameter n set successfully`
+
+**MCP Solver:** **`solve_model`**  
+
+> `{'status': 'SUCCESS', 'solution': Solution(queens=[3, 6, 9, 1, 8, 4, 2, 7, 5, 10], _checker=''), 'solve_time': 0.001}`
+
+**LLM**
+
+> N=20:
+
+**MCP Solver:** **`set_parameter`**
+
+> `Parameter n set successfully`
+
+**MCP Solver:** **`solve_model`**
+
+> `{'status': 'SUCCESS', 'solution': Solution(queens=[4, 18, 16, 11, 13, 1, 3, 19, 8, 12, 17, 2, 10, 15, 6, 14, 9, 7, 5, 20], _checker=''), 'solve_time': 0.004}`  
+
+**LLM**
+
+> N=30:
+
+**MCP Solver:** **`set_parameter`**
+
+> `Parameter n set successfully`
+
+**MCP Solver:** **`solve_model`**
+
+> `{'status': 'SUCCESS', 'solution': Solution(queens=[17, 23, 9, 18, 2, 13, 8, 1, 24, 21, 6, 22, 11, 26, 5, 25, 19, 14, 10, 3, 29, 27, 15, 4, 12, 20, 16, 7, 28, 30], _checker=''), 'solve_time': 0.04}`
+
+**LLM** 
+
+> N=40:
+
+**MCP Solver:** **`set_parameter`**
+
+> `Parameter n set successfully`
+
+**MCP Solver:** **`solve_model`**  
+
+> `{'status': 'SUCCESS', 'solution': Solution(queens=[12, 34, 23, 8, 20, 31, 15, 27, 18, 33, 5, 2, 26, 10, 16, 32, 4, 11, 14, 3, 9, 25, 28, 30, 35, 6, 1, 17, 21, 37, 13, 29, 24, 19, 7, 22, 39, 36, 38, 40], _checker=''), 'solve_time': 0.042}`
+
+**LLM**
+
+> Solutions exist for N=10, 20, 30, 40. Solve times:
+>
+> - N=10: 0.001s 
+> - N=20: 0.004s
+> - N=30: 0.040s
+> - N=40: 0.042s
+>
+> Time complexity appears roughly quadratic.
+
+## 
+
+**Further sample chat dialogs demonstrating tool usage are included in the `examples` folder of the repository.** 
 
 ---
 
@@ -125,12 +219,6 @@ solve satisfy;
 | `get-variable`     | Get a variable's value from the solution.            |
 | `get-solve-time`   | Get solution computation time.                       |
 | `get-solver-state` | Check solver status.                                 |
-
----
-
-## Example Chat Dialogs
-
-Further sample chat dialogs demonstrating tool usage are included in the `examples` folder of the repository. 
 
 ---
 

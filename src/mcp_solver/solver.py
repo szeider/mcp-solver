@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import re
 from datetime import timedelta
 from typing import Dict, Optional, Tuple, Any
+
 from minizinc import Model, Instance, Solver, Result
 from minizinc.error import MiniZincError
-import re
 
 class SolverError(Exception):
     """Custom exception for solver-specific errors"""
@@ -14,6 +15,7 @@ class ModelError(Exception):
     """Custom exception for model-related errors"""
     pass
 
+
 class SolverSession:
     """Manages a MiniZinc constraint programming session."""
 
@@ -21,20 +23,15 @@ class SolverSession:
         self.current_model: Optional[Model] = None
         self.current_instance: Optional[Instance] = None
         self.solver: Solver = Solver.lookup(solver_name)
-        self.defined_parameters: Dict[str, int] = {}
-        self.param_store: Dict[str, int] = {}
+        self.defined_parameters: Dict[str, Optional[int]] = {}
+        self.param_store: Dict[str, Optional[int]] = {}
         self.last_solve_time: Optional[float] = None
         self.current_solution: Optional[Dict[str, Any]] = None
 
     async def validate_and_define_model(self, model_str: str) -> Tuple[bool, str]:
         """
-        Validates a MiniZinc model, converting fixed integers into parameters.
-
-        Args:
-            model_str (str): The MiniZinc model string.
-
-        Returns:
-            Tuple[bool, str]: Validation success and an informative message.
+        Validates a MiniZinc model, converting fixed integers into parameters
+        while leaving 'var int: x' alone.
         """
         try:
             # Step 1: Convert fixed integers to parameters
@@ -54,10 +51,14 @@ class SolverSession:
             self.current_instance = Instance(self.solver, self.current_model)
             self.defined_parameters = extracted_parameters
 
-            # Step 5: Set parameters dynamically
+            # Step 5: Initialize param_store with defaults or None
             for name, value in extracted_parameters.items():
-                self.current_instance[name] = value
-                self.param_store[name] = value
+                self.param_store[name] = value  # could be an int or None
+
+            # Also set them in the current instance if they have a definite value
+            for name, value in self.param_store.items():
+                if value is not None:
+                    self.current_instance[name] = value
 
             return True, "Model validated, and parameters initialized dynamically."
 
@@ -67,36 +68,51 @@ class SolverSession:
 
     def convert_parameters(self, model_str: str) -> Tuple[str, Dict[str, int]]:
         """
-        Converts integer declarations with values into parameters.
-
-        Args:
-            model_str (str): The MiniZinc model string.
-
-        Returns:
-            Tuple[str, Dict[str, int]]: Updated model string and extracted parameters.
+        Converts integer declarations with values into parameters and tracks placeholders.
+        Ensures arrays are not mistakenly converted.
         """
-        pattern = r"int:\s*(\w+)\s*=\s*(\d+);"
-        matches = re.findall(pattern, model_str)
-        parameters = {name: int(value) for name, value in matches}
+        # Match scalar integer declarations: int: name = value;
+        scalar_pattern = r"^\s*int:\s*(\w+)\s*(?:=\s*(\d+))?;"  # Only process lines starting with 'int:'
 
-        # Replace all fixed declarations with parameter declarations
-        updated_model = re.sub(pattern, r"int: \1;", model_str)
+        parameters = {}
+        placeholder_flags = {}
+
+        # Split model string into lines for processing
+        lines = model_str.splitlines()
+        updated_lines = []
+
+        for line in lines:
+            match = re.match(scalar_pattern, line)
+            if match:
+                name, value = match.groups()
+                if value:  # Parameter has a value
+                    parameters[name] = int(value)
+                    placeholder_flags[name] = False  # Not a placeholder
+                else:  # Uninitialized parameter
+                    parameters[name] = 0  # Placeholder value
+                    placeholder_flags[name] = True  # Mark as placeholder
+                # Replace the line with a parameter declaration
+                updated_lines.append(f"int: {name};")
+            else:
+                # Keep non-matching lines unchanged
+                updated_lines.append(line)
+
+        updated_model = "\n".join(updated_lines)
+        self.placeholder_flags = placeholder_flags  # Store placeholder tracking
         return updated_model, parameters
+
+   
+   
 
     async def validate_minizinc_model(self, model_str: str) -> Tuple[bool, str]:
         """
         Validates a MiniZinc model string.
-
-        Args:
-            model_str (str): The MiniZinc model.
-
-        Returns:
-            Tuple[bool, str]: Whether validation passed and error message if any.
         """
         try:
             model = Model()
             model.add_string(model_str)
             instance = Instance(self.solver, model)
+            # Flatten to check syntax or semantics
             await asyncio.to_thread(instance.flat)
             return True, ""
         except MiniZincError as e:
@@ -107,55 +123,42 @@ class SolverSession:
     def set_parameter(self, param_name: str, param_value: int) -> None:
         """
         Sets a parameter value in the MiniZinc instance.
-
-        Args:
-            param_name (str): The name of the parameter to set.
-            param_value (int): The value to assign to the parameter.
-
-        Raises:
-            ModelError: If the parameter is not defined or the instance is not ready.
         """
         if not self.current_model:
             raise ModelError("No model has been defined yet")
 
         if param_name not in self.defined_parameters:
-            raise ModelError(f"Parameter '{param_name}' is not defined in the model.")
+            raise ModelError(f"Parameter '{param_name}' is not defined as a parameter in the model.")
 
         try:
-            # Force param_value to be an integer to avoid MiniZinc string-to-int errors
-            param_value = int(param_value)
-
-            # Update param_store with the new parameter value
+            param_value = int(param_value)  # ensure int
             self.param_store[param_name] = param_value
 
-            # Create a fresh instance
+            # Rebuild instance with the updated param_store
             new_instance = Instance(self.solver, self.current_model)
 
-            # Assign *all* parameters in a single pass
             for existing_param, value in self.param_store.items():
-                new_instance[existing_param] = value
+                if value is not None:
+                    new_instance[existing_param] = value
 
-            # Replace the current instance
             self.current_instance = new_instance
-
             logging.info(f"Parameter '{param_name}' set to {param_value}.")
 
         except Exception as e:
             raise ModelError(f"Failed to set parameter '{param_name}': {str(e)}")
 
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, any]:
+    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
         """
         Solves the current model instance.
-
-        Args:
-            timeout (Optional[timedelta]): Timeout for the solve process.
-
-        Returns:
-            Dict[str, any]: Results including status, solution, and solve time.
         """
         timeout = timeout or timedelta(seconds=30)
         if not self.current_instance:
             raise ModelError("No model has been submitted yet")
+
+        # Ensure all parameters are assigned before solving
+        for pname, pval in self.param_store.items():
+            if pval is None:
+                raise ModelError(f"Parameter '{pname}' is not set. Please assign a value before solving.")
 
         try:
             result: Result = await asyncio.to_thread(
@@ -171,18 +174,16 @@ class SolverSession:
                 "message": f"MiniZinc error: {str(e)}",
             }
 
-
-    def _process_result(self, result: Result) -> Dict[str, any]:
+    def _process_result(self, result: Result) -> Dict[str, Any]:
         """
         Processes the MiniZinc result and extracts the solution.
         """
-        # Convert timedelta to float seconds
         time_stat = result.statistics.get("time", 0)
         if isinstance(time_stat, timedelta):
             self.last_solve_time = time_stat.total_seconds()
         else:
             self.last_solve_time = float(time_stat)
-        
+
         if result.status.has_solution():
             self.current_solution = result.solution
             return {
@@ -190,13 +191,12 @@ class SolverSession:
                 "solution": self.current_solution,
                 "solve_time": self.last_solve_time,
             }
+
         return {
             "status": "UNSATISFIABLE",
             "message": "No solution found."
         }
 
-
-    
     def get_solve_time(self) -> Optional[float]:
         """Return the most recent solve time if available."""
         return self.last_solve_time

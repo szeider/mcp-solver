@@ -43,6 +43,10 @@ async def serve() -> None:
 
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+        """
+        Returns the final prompt to the LLM, including a system message containing
+        general syntax instructions or best practices for MiniZinc.
+        """
         if name != "constraint-solver":
             raise ValueError(f"Unknown prompt: {name}")
 
@@ -52,14 +56,36 @@ async def serve() -> None:
         topic = arguments["topic"]
         prompt = PROMPT_TEMPLATE.format(topic=topic)
 
+        # The system-level instructions. These are injected automatically
+        # once at the start of the conversation so the LLM knows to obey them.
+        system_instructions = """
+        You are a constraint modeling assistant. Always produce valid MiniZinc code.
+        - For 2D arrays, use nested brackets or array2d().
+        - Avoid mixing var declarations with parameter definitions.
+        - Ensure all parameters are set before solving, but keep decision variables as 'var int:'.
+        - Syntax errors must be prevented whenever possible.
+        """
+
+        system_message = types.PromptMessage(
+            role="system",
+            content=types.TextContent(
+                type="text",
+                text=system_instructions.strip()
+            ),
+        )
+
+        user_message = types.PromptMessage(
+            role="user",
+            content=types.TextContent(
+                type="text",
+                text=prompt.strip()
+            ),
+        )
+
         return types.GetPromptResult(
             description=f"Constraint solving guide for {topic}",
-            messages=[
-                types.PromptMessage(
-                    role="user",
-                    content=types.TextContent(type="text", text=prompt.strip()),
-                )
-            ],
+            # The system message appears first, user message second
+            messages=[system_message, user_message],
         )
 
     @server.list_tools()
