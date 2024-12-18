@@ -99,9 +99,8 @@ This is based on an  example by George Johnson (NYT, July 13, 1999).
 
 **MCP Solver:** **`solve_model`**
 
-> ```json
-> {'status': 'SUCCESS', 'solution': Solution(alvarez=0, branislavsky=1, cohen=1, davenport=0, _checker=''), 'solve_time': 0.0}
-> ```
+
+>{'status': 'SUCCESS', 'solution': Solution(alvarez=0, branislavsky=1, cohen=1, davenport=0, _checker=''), 'solve_time': 0.0}
 
 **LLM** 
 
