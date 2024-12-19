@@ -27,34 +27,55 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
 
 ---
 
-## Installation
-
-### Standard Installation
-Install the package directly from GitHub:
-```
-uv pip install git+https://github.com/szeider/mcp-solver.git
-```
-
-### Development Installation
-For local development and testing:
-```
-git clone https://github.com/szeider/mcp-solver.git
-cd mcp-solver
-uv pip install -e .
-```
-
----
-
 ## System Requirements
 
 - Python 3.9+
-- MiniZinc with Chuffed solver.
-- Operating system: Linux, macOS, or Windows.
+- [MiniZinc](https://www.minizinc.org) with Chuffed solver
+- Operating system: 
+  - macOS, 
+  - Windows, 
+  - Linux (requires an alternative to the Claude Dekstop app)
+
+## Installation
+
+1. Install the Claude Desktop app (or other MCP clients)
+
+	https://claude.ai/download
+
+2. Install MCP Server
+
+	```
+	git clone https://github.com/szeider/mcp-solver.git
+	cd mcp-solver
+	uv pip install -e .
+	```
+
+3. Create the file 
+
+  ```
+  ~/Library/Application/Support/Claude/claude_desktop_config.json
+  ```
+  containing
+  ```
+  {
+   "mcpServers": {
+       "minizinc": {
+           "command": "uv",
+           "args": ["--directory", 
+           "/absolute/path/to/mcp-solver", 
+           "run", 
+           "mcp-solver"]
+       }
+     }
+  }
+  ```
 
 ---
 
+## Examples
 
-## Example 1
+### Casting
+
 This is based on an  example by George Johnson (NYT, July 13, 1999).
 
 **User**
@@ -117,7 +138,7 @@ This is based on an  example by George Johnson (NYT, July 13, 1999).
 
 ---
 
-## Example 2
+### N-Queens
 
 This example shows how the same model can be solved with different parameter values, and the solving times can be obtained.
 
