@@ -79,9 +79,13 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
        }
      }
   }
+   // For Windows, replace "/absolute/path/to/mcp-solver" with "C:\\absolute\\path\\to\\mcp-solver"
+  
   ```
 
----
+4. Path to `memo.md`
+
+The default location can be changed in `pyproject.toml`.
 
 ## Examples
 
