@@ -1,152 +1,148 @@
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional, Union, Any
 from datetime import timedelta
-from minizinc import Model, Instance, Solver, Result
-from minizinc.error import MiniZincError
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
-from .constants import (
-    DEFAULT_SOLVE_TIMEOUT,
-    MAX_SOLVE_TIMEOUT,
-    FLATTEN_TIMEOUT,
-    MODEL_INSTRUCTIONS,
-    PROMPT_TEMPLATE
-)
-from .solver import SolverSession
+from .constants import DEFAULT_SOLVE_TIMEOUT, MEMO_FILE, PROMPT_TEMPLATE
+from .model_manager import ModelManager 
+from .memo import MemoManager
 
 logger = logging.getLogger(__name__)
 
 async def serve() -> None:
     server = Server("mcp-solver")
-    session = SolverSession()
+    model_mgr = ModelManager()
+    memo = MemoManager(MEMO_FILE)
 
     @server.list_prompts()
     async def handle_list_prompts() -> list[types.Prompt]:
         return [
             types.Prompt(
-                name="constraint-solver",
-                description="Guide for formulating and solving constraint programming problems",
-                arguments=[
-                    types.PromptArgument(
-                        name="topic",
-                        description="Problem domain or specific constraint problem to solve",
-                        required=True,
-                    )
-                ],
+                name="Guidelines",
+                description="A prompt to help user to solve problems with the MCP solver",
+                arguments=[]
             )
         ]
 
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
-        """
-        Returns the final prompt to the LLM, including a system message containing
-        general syntax instructions or best practices for MiniZinc.
-        """
-        if name != "constraint-solver":
+        if name != "Guidelines":
             raise ValueError(f"Unknown prompt: {name}")
 
-        if not arguments or "topic" not in arguments:
-            raise ValueError("Missing required argument: topic")
-
-        topic = arguments["topic"]
-        prompt = PROMPT_TEMPLATE.format(topic=topic)
-
-        # The system-level instructions. These are injected automatically
-        # once at the start of the conversation so the LLM knows to obey them.
-        system_instructions = """
-        You are a constraint modeling assistant. Always produce valid MiniZinc code.
-        - For 2D arrays, use nested brackets or array2d().
-        - Avoid mixing var declarations with parameter definitions.
-        - Ensure all parameters are set before solving, but keep decision variables as 'var int:'.
-        - Syntax errors must be prevented whenever possible.
-        """
-
-        system_message = types.PromptMessage(
-            role="system",
-            content=types.TextContent(
-                type="text",
-                text=system_instructions.strip()
-            ),
-        )
-
-        user_message = types.PromptMessage(
-            role="user",
-            content=types.TextContent(
-                type="text",
-                text=prompt.strip()
-            ),
-        )
+        current_memo = memo.content or "No knowledge available yet."
+        prompt = PROMPT_TEMPLATE.format(memo=current_memo)
 
         return types.GetPromptResult(
-            description=f"Constraint solving guide for {topic}",
-            # The system message appears first, user message second
-            messages=[system_message, user_message],
+            description="MiniZinc solver template",
+            messages=[
+                types.PromptMessage(
+                    role="user",
+                    content=types.TextContent(type="text", text=prompt),
+                )
+            ],
         )
+
+    def format_array_access(variable_name: str, indices: List[int]) -> str:
+        """Format array access string with indices"""
+        if not indices:
+            return variable_name
+        return f"{variable_name}[{','.join(str(i) for i in indices)}]"
+
+    def get_array_value(array: Any, indices: List[int]) -> Any:
+        """Recursively access array elements using provided indices"""
+        if not indices:
+            return array
+        if not hasattr(array, "__getitem__"):
+            raise ValueError("Variable is not an array")
+            
+        try:
+            # Handle single dimension
+            if len(indices) == 1:
+                return array[indices[0]-1]  # Convert from 1-based to 0-based indexing
+                
+            # Handle multiple dimensions recursively
+            return get_array_value(array[indices[0]-1], indices[1:])
+        except IndexError:
+            raise ValueError(f"Index {indices[0]} is out of bounds")
+        except TypeError:
+            raise ValueError("Invalid index type")
 
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
         return [
             types.Tool(
-                name="submit_model",
-                description=MODEL_INSTRUCTIONS,
+                name="get_model",
+                description="Get current constraint model content.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.Tool(
+                name="edit_model",
+                description="""Edit constraint model content.
+                Supports finite domain variable and global constraints.
+                Solve satisfy or solve optimize.
+                No MIP or linear programming.""",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "model": {
+                        "line_start": {
+                            "type": "integer",
+                            "description": "Starting line number (1-based)"
+                        },
+                        "line_end": {
+                            "type": ["integer", "null"],
+                            "description": "Ending line number, null for end"
+                        },
+                        "content": {
                             "type": "string",
-                            "description": "Full MiniZinc model code"
+                            "description": "New content to insert"
                         }
                     },
-                    "required": ["model"]
+                    "required": ["line_start", "content"]
+                }
+            ),
+            types.Tool(
+                name="validate_model",
+                description="Validate model syntax and semantics.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
                 }
             ),
             types.Tool(
                 name="solve_model",
-                description="Solve the current constraint model",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-            types.Tool(
-                name="get_solution",
-                description="Retrieve the stored solution from the last solve operation",
-                inputSchema={
-                    "type": "object",
-                    "properties": {}
-                }
-            ),
-            types.Tool(
-                name="set_parameter",
-                description="Set a parameter value for the current model",
+                description="Solve the model with the Chuffed constraint solver.",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "param_name": {
-                            "type": "string",
-                            "description": "Name of the parameter to set"
-                        },
-                        "param_value": {
-                            "description": "Value to set for the parameter"
+                        "timeout": {
+                            "type": ["number", "null"],
+                            "description": "Optional solve timeout in seconds"
                         }
-                    },
-                    "required": ["param_name", "param_value"]
+                    }
                 }
             ),
             types.Tool(
                 name="get_variable",
-                description="Get a variable's value from the most recent solution",
+                description="Get specific variable value from solution with optional array indices",
                 inputSchema={
-                    "type": "object",
+                    "type": "object", 
                     "properties": {
                         "variable_name": {
                             "type": "string",
-                            "description": "Name of the variable to retrieve"
+                            "description": "Variable name to retrieve"
+                        },
+                        "indices": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Array indices (optional, 1-based)"
                         }
                     },
                     "required": ["variable_name"]
@@ -154,18 +150,40 @@ async def serve() -> None:
             ),
             types.Tool(
                 name="get_solve_time",
-                description="Get the running time used to find the most recent solution",
+                description="Get last solve execution time",
                 inputSchema={
                     "type": "object",
                     "properties": {}
                 }
             ),
             types.Tool(
-                name="get_solver_state",
-                description="Check if the solver is currently running and get elapsed time",
+                name="get_memo",
+                description="Get current knowledge base",
                 inputSchema={
                     "type": "object",
                     "properties": {}
+                }
+            ),
+            types.Tool(
+                name="edit_memo",
+                description="Edit knowledge base",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "line_start": {
+                            "type": "integer",
+                            "description": "Starting line number (1-based)"
+                        },
+                        "line_end": {
+                            "type": ["integer", "null"],
+                            "description": "Ending line number, null for end"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "New content"
+                        }
+                    },
+                    "required": ["line_start", "content"]
                 }
             )
         ]
@@ -174,45 +192,69 @@ async def serve() -> None:
     async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
         try:
             match name:
-                case "submit_model":
-                    success, message = await session.validate_and_define_model(arguments["model"])
-                    status = "Success" if success else "Error"
+                case "get_model":
+                    return [types.TextContent(type="text", text=model_mgr.model_string)]
+
+                case "edit_model":
+                    model_mgr.edit_range(
+                        arguments["line_start"],
+                        arguments.get("line_end"),
+                        arguments["content"]
+                    )
+                    return [types.TextContent(type="text", text="Model updated")]
+
+                case "validate_model":
+                    valid, message = await model_mgr.validate_model()
+                    status = "Valid" if valid else "Invalid"
                     return [types.TextContent(type="text", text=f"{status}: {message}")]
 
                 case "solve_model":
-                    result = await session.solve_model()
+                    timeout_secs = arguments.get("timeout")
+                    timeout = timedelta(seconds=timeout_secs) if timeout_secs else DEFAULT_SOLVE_TIMEOUT
+                    result = await model_mgr.solve_model(timeout=timeout)
                     return [types.TextContent(type="text", text=str(result))]
 
-                case "get_solution":
-                    solution = session.get_current_solution()
-                    if solution is None:
-                        return [types.TextContent(type="text", text="No solution available yet. Use solve-model first.")]
-                    return [types.TextContent(type="text", text=str(solution))]
-
-                case "set_parameter":
-                    session.set_parameter(arguments["param_name"], arguments["param_value"])
-                    return [types.TextContent(type="text", text=f"Parameter {arguments['param_name']} set successfully")]
-
                 case "get_variable":
-                    val = session.get_variable_value(arguments["variable_name"])
+                    var_name = arguments["variable_name"]
+                    indices = arguments.get("indices", [])
+                    
+                    val = model_mgr.get_variable_value(var_name)
                     if val is None:
-                        return [types.TextContent(type="text", text=f"No value found for {arguments['variable_name']}")]
-                    return [types.TextContent(type="text", text=f"{arguments['variable_name']} = {val}")]
+                        return [types.TextContent(type="text", text=f"No value for {var_name}")]
+                        
+                    try:
+                        if indices:
+                            val = get_array_value(val, indices)
+                            var_display = format_array_access(var_name, indices)
+                        else:
+                            var_display = var_name
+                            
+                        return [types.TextContent(type="text", text=f"{var_display} = {val}")]
+                    except ValueError as e:
+                        return [types.TextContent(type="text", text=f"Error accessing {var_name}: {str(e)}")]
 
                 case "get_solve_time":
-                    solve_time = session.get_solve_time()
+                    solve_time = model_mgr.get_solve_time()
                     if solve_time is None:
-                        return [types.TextContent(type="text", text="No solve time available - no solution has been computed yet")]
-                    return [types.TextContent(type="text", text=f"Last solve operation took {solve_time:.3f} seconds")]
+                        return [types.TextContent(type="text", text="No solve time available")]
+                    return [types.TextContent(type="text", text=f"Last solve: {solve_time:.3f}s")]
 
-                case "get_solver_state":
-                    state = session.get_solver_state()
-                    return [types.TextContent(type="text", text=str(state))]
+                case "get_memo":
+                    return [types.TextContent(type="text", text=memo.content)]
+
+                case "edit_memo":
+                    memo.edit_range(
+                        arguments["line_start"],
+                        arguments.get("line_end"),
+                        arguments["content"]
+                    )
+                    return [types.TextContent(type="text", text="Memo updated")]
 
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
 
         except Exception as e:
+            logger.error("Tool execution failed", exc_info=True)
             raise McpError("Tool execution failed", str(e))
 
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
@@ -231,12 +273,10 @@ async def serve() -> None:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
-    logger.info("MCP Constraint Solver Server starting...")
     try:
         asyncio.run(serve())
         return 0
     except KeyboardInterrupt:
-        logger.info("Server shutting down...")
         return 0
 
 if __name__ == "__main__":
