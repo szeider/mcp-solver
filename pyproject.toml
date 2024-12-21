@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp",
     "minizinc",
+    "tomli;python_version<'3.11'"
 ]
 
 [project.scripts]
@@ -22,3 +23,15 @@ line-length = 88
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.mcp-solver]
+# Override default memo file location by uncommenting and modifying one of these:
+
+# Windows: %APPDATA%\mcp-solver\memo.md
+#memo_file = "%APPDATA%\\mcp-solver\\memo.md"
+
+# macOS: ~/Library/Application Support/mcp-solver/memo.md
+#memo_file = "~/Library/Application Support/mcp-solver/memo.md"
+
+# Linux: ~/.config/mcp-solver/memo.md
+#memo_file = "~/.config/mcp-solver/memo.md"
