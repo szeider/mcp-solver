@@ -6,7 +6,7 @@ from datetime import timedelta
 DEFAULT_SOLVE_TIMEOUT = timedelta(seconds=4)
 MAX_SOLVE_TIMEOUT = timedelta(seconds=10)
 FLATTEN_TIMEOUT = timedelta(seconds=2)
-MEMO_FILE = "/.mcp-solver/memo.md"
+MEMO_FILE = "~/.mcp-solver/memo.md"
 
 
 
