@@ -1,3 +1,53 @@
+SS
+
+A university needs to schedule 8 courses across 4 time slots on 3 days (Mon/Wed/Fri). Each course needs 2 sessions per week. Constraints: 1. Three professors with specific course assignments: • Smith: AI, ML, Networks • Jones: Databases, Security • Brown: Physics, Chemistry, Biology 2. Professors can’t teach overlapping sessions 3. Each course needs a specific lab room: • 2 CS labs and 1 science lab available • CS courses need CS labs • Science courses need science lab 4. Student groups have required course combinations: • CS majors: AI+ML+Databases • Security track: Networks+Security • Pre-med: Physics+Chemistry+Biology 5. No student should have class conflicts
+
+
+
+Let me formulate this scheduling problem.
+
+
+
+
+
+```
+{}
+Valid: Model is valid
+```
+
+
+
+```
+{}
+{'status': 'SAT', 'solution': Solution(schedule=[[[0, 0, 0, 0], [0, 0, 1, 1], [0, 0, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 1]], [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 1]], [[0, 0, 0, 0], [0, 0, 1, 1], [0, 0, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 1, 1]]], _checker=''), 'solve_time': 0.001}
+```
+
+Let me translate the solution into a readable schedule:
+
+Monday:
+
+- No classes scheduled
+
+Wednesday:
+
+- Slots 3-4: AI, Physics
+
+Friday:
+
+- Slots 1-2: Networks, Databases, Chemistry
+- Slots 3-4: ML, Security, Biology
+
+All constraints are satisfied:
+
+1. Each course has 2 sessions
+2. No professor has overlapping sessions
+3. Lab capacity respected (max 2 CS, 1 science concurrent)
+4. No conflicts for student groups
+
+
+
+
+
 ## University Schedule
 
 ---
