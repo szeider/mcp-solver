@@ -16,25 +16,26 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
 ## Features
 * Finite domain and global constraint support
 * Asynchronous solving with configurable timeouts
-* Line-based model editing
+* Item-based model editing
 * Solution state management
 * Knowledge base maintenance
 
 ## Available Tools
 
-| Tool Name        | Description                              |
-| ---------------- | ---------------------------------------- |
-| `get_model`      | Get current constraint model content     |
-| `edit_model`     | Edit model with line-based modifications |
-| `validate_model` | Check model syntax and semantics         |
-| `solve_model`    | Execute solver with timeout management   |
-| `get_variable`   | Get variable values from solution        |
-| `get_solve_time` | Get solution computation time            |
-| `get_memo`       | Access knowledge base content            |
-| `edit_memo`      | Update knowledge base entries            |
+The system has transitioned from a line-based to an item-based editing approach, which improves robustness by validating each item independently. Each model modification operation returns the current model with numbered items in truncated form, ensuring consistent tracking of items and their indices.
 
-
-
+| Tool Name        | Description                                           |
+| ---------------- | ----------------------------------------------------- |
+| `get_model`      | Get current model content with numbered items         |
+| `add_item`       | Add new item at specific index                        |
+| `delete_item`    | Delete item at index                                  |
+| `replace_item`   | Replace item at index                                 |
+| `clear_model`    | Clear all items in the model                         |
+| `solve_model`    | Solve the model with the Chuffed constraint solver   |
+| `get_solution`   | Get specific variable value from solution with optional array indices |
+| `get_solve_time` | Get last solve execution time                        |
+| `get_memo`       | Get current knowledge base                           |
+| `edit_memo`      | Edit knowledge base                                  |
 
 ---
 
@@ -70,7 +71,7 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
   ```
   {
    "mcpServers": {
-       "minizinc": {
+       "MCP Solver": {
            "command": "uv",
            "args": ["--directory", 
            "/absolute/path/to/mcp-solver", 
@@ -95,73 +96,52 @@ This is based on an  example by George Johnson (NYT, July 13, 1999).
 
 **User**
 
-> Suppose that a theatrical director feels obligated to cast either his ingenue, Actress Alvarez, or his nephew, Actor Cohen, in a production. But Miss Alvarez won’t be in a play with Mr. Cohen (her former lover), and she demands that the cast include her new flame, Actor Davenport. The producer, with her own favors to repay, insists that Actor Branislavsky have a part. But Mr. Branislavsky won’t be in any play with Miss Alvarez or Mr. Davenport. Can the director cast the play?
+> Suppose that a theatrical director feels obligated to cast either his ingenue, Actress Alvarez, or his nephew, Actor Cohen, in a production. But Miss Alvarez won't be in a play with Mr. Cohen (her former lover), and she demands that the cast include her new flame, Actor Davenport. The producer, with her own favors to repay, insists that Actor Branislavsky have a part. But Mr. Branislavsky won't be in any play with Miss Alvarez or Mr. Davenport. Can the director cast the play?
 
 **LLM**
 
-> Let me help solve this casting constraint satisfaction problem. Let me break this down systematically and create a MiniZinc model.
->
-> The key constraints are:
->
-> - Must cast either Alvarez or Cohen
-> - If Alvarez is cast, Davenport must be cast
-> - If Alvarez is cast, Cohen cannot be cast
-> - Branislavsky must be cast
-> - If Branislavsky is cast, neither Alvarez nor Davenport can be cast
->
-> Let me create a model with boolean variables for each actor:
->
+> Let me model this casting problem using MiniZinc. We'll use boolean variables to represent whether each actor is cast.
+
+**System:** **`clear_model`**
+
+> ```
+> Model cleared
+> ```
+
+**System:** **`add_item`** (multiple)
+
 > ```minizinc
-> % Variables for each actor (1 if cast, 0 if not)
-> var bool: alvarez;  % Actress Alvarez
-> var bool: cohen;    % Actor Cohen (nephew)
-> var bool: branislavsky;  % Actor Branislavsky
-> var bool: davenport;     % Actor Davenport
-> 
-> % Must cast either Alvarez or Cohen
-> constraint alvarez \/ cohen;
-> 
-> % If Alvarez is cast, Davenport must be cast
-> constraint alvarez -> davenport;
-> 
-> % If Alvarez is cast, Cohen cannot be cast
-> constraint not (alvarez /\ cohen);
-> 
-> % Branislavsky must be cast
-> constraint branislavsky;
-> 
-> % If Branislavsky is cast, neither Alvarez nor Davenport can be cast
-> constraint branislavsky -> (not alvarez /\ not davenport);
-> 
+> var bool: alvarez;
+> var bool: cohen;
+> var bool: branislavsky;
+> var bool: davenport;
+> constraint alvarez \/ cohen;                          % Must cast either Alvarez or Cohen
+> constraint not (alvarez /\ cohen);                    % Alvarez won't work with Cohen
+> constraint alvarez -> davenport;                      % If Alvarez is cast, Davenport must be cast
+> constraint branislavsky;                              % Branislavsky must be cast
+> constraint not (branislavsky /\ alvarez);             % Branislavsky won't work with Alvarez
+> constraint not (branislavsky /\ davenport);           % Branislavsky won't work with Davenport
 > solve satisfy;
 > ```
 
-**System:** **`edit_model`**
-
-> `Success: Model validated, and parameters initialized dynamically.`
-
 **System:** **`solve_model`**
 
-> `{'status': 'SUCCESS', 'solution': Solution(alvarez=0, branislavsky=1, cohen=1, davenport=0, _checker=''), 'solve_time': 0.0}`
+> ```
+> {'status': 'SAT', 'solution': Solution(alvarez=False, cohen=True, branislavsky=True, davenport=False, _checker=''), 'solve_time': 0.0}
+> ```
 
 **LLM**
 
-> Yes, the director can cast the play! Here's the solution:
+> The problem has a solution: cast Cohen and Branislavsky, but not Alvarez or Davenport. Let's verify:
 >
-> - **Actor Cohen:** Cast ✓
-> - **Actor Branislavsky:** Cast ✓
-> - **Actress Alvarez:** Not cast
-> - **Actor Davenport:** Not cast
+> 1. Either Alvarez or Cohen must be cast ✓ (Cohen is cast)
+> 2. Alvarez and Cohen can't both be cast ✓ (only Cohen is cast)
+> 3. If Alvarez is cast, Davenport must be cast ✓ (Alvarez isn't cast)
+> 4. Branislavsky must be cast ✓ (Branislavsky is cast)
+> 5. Branislavsky won't work with Alvarez ✓ (Alvarez isn't cast)
+> 6. Branislavsky won't work with Davenport ✓ (Davenport isn't cast)
 >
-> This solution satisfies all constraints:
->
-> - Cohen is cast, satisfying the requirement to cast either Alvarez or Cohen
-> - Since Alvarez is not cast, we don't need to cast Davenport
-> - The conflict between Alvarez and Cohen is avoided since Alvarez isn't cast
-> - Branislavsky is cast as required
-> - Since Branislavsky is cast, neither Alvarez nor Davenport is cast, respecting his preferences
->
-> Do you have any questions about this solution or would you like to explore any variations of the casting constraints?
+> The director can cast the play with Cohen and Branislavsky.
 
 ------
 
@@ -171,152 +151,104 @@ This example shows how the same model can be solved with different parameter val
 
 **User**
 
-> Check whether you can place n Queens on an nxn chessboard. Try n=10,20,30,40 and compare the solving times.EditI'll help solve the N-Queens problem for different board sizes and compare solving times.
+> Check whether you can place n Queens on an nxn chessboard. Try n=10,20,30,40 and compare the solving times
 
 **LLM**
 
-> I'll help solve the n-Queens problem for different board sizes and compare solving times.
+> Let me create a model for the N-Queens problem and test different sizes.
 
-**System:** **`edit_model`**
+**System:** **`clear_model`**
 
-> ```minizinc
-> int: n;
-> array[1..n] of var 1..n: queens; % queens[i] represents the row position of queen in column i
-> 
-> % No two queens in same row
-> constraint alldifferent(queens);
-> 
-> % No two queens in same diagonal
-> constraint forall(i,j in 1..n where i < j) (
->  abs(queens[i] - queens[j]) != j - i
-> );
-> 
-> solve satisfy;
+> ```
+> Model cleared
 > ```
 
-**System:** **`edit_model`**
-
-> `Model updated`
-
-**LLM**
-
-> Let me validate and solve this model:
-
-**System:** **`validate_model`**
-
-> `{}`  
-> `Valid: Model is valid`
-
-**System:** **`solve_model`**
-
-> `{'status': 'SAT', 'solution': Solution(queens=[4, 6, 3, 9, 2, 8, 5, 7, 10, 1], _checker=''), 'solve_time': 0.005}`
-
-**LLM**
-
-> Let's try n=20:
-
-**System:** **`edit_model`**
+**System:** **`add_item`** (multiple)
 
 > ```minizinc
-> n = 20;
-> int: n;
+> int: n = 10;
 > array[1..n] of var 1..n: queens;
-> 
 > constraint alldifferent(queens);
-> constraint forall(i,j in 1..n where i < j) (
->  abs(queens[i] - queens[j]) != j - i
-> );
-> 
+> constraint alldifferent([queens[i] + i | i in 1..n]);
+> constraint alldifferent([queens[i] - i | i in 1..n]);
 > solve satisfy;
 > ```
 
-**System:** **`edit_model`**
+**LLM**
 
-> `Model updated`
+> Testing n=10:
 
 **System:** **`solve_model`**
 
-> `{'status': 'SAT', 'solution': Solution(queens=[5, 12, 8, 11, 17, 6, 16, 2, 4, 9, 19, 14, 3, 10, 18, 13, 15, 7, 20, 1], _checker=''), 'solve_time': 0.055}`
+> ```
+> {'status': 'SAT', 'solution': Solution(queens=[3, 6, 9, 1, 8, 4, 2, 7, 5, 10], _checker=''), 'solve_time': 0.001}
+> ```
 
 **LLM**
 
-> Let's try n=30:
+> Testing n=20:
 
 **System:** **`edit_model`**
 
 > ```minizinc
-> n = 30;
-> int: n;
-> array[1..n] of var 1..n: queens;
-> 
-> constraint alldifferent(queens);
-> constraint forall(i,j in 1..n where i < j) (
->  abs(queens[i] - queens[j]) != j - i
-> );
-> 
-> solve satisfy;
+> int: n = 20;
 > ```
-
-**System:** **`edit_model`**
-
-> `Model updated`
 
 **System:** **`solve_model`**
 
-> `{'status': 'SAT', 'solution': Solution(queens=[11, 4, 7, 13, 10, 29, 27, 15, 21, 26, 22, 20, 8, 28, 5, 12, 23, 9, 3, 18, 24, 2, 6, 17, 14, 25, 19, 16, 30, 1], _checker=''), 'solve_time': 0.094}`
+> ```
+> {'status': 'SAT', 'solution': Solution(queens=[4, 18, 16, 11, 13, 1, 3, 19, 8, 12, 17, 2, 10, 15, 6, 14, 9, 7, 5, 20], _checker=''), 'solve_time': 0.005}
+> ```
 
 **LLM**
 
-> Finally, let's try n=40:
+> Testing n=30:
 
 **System:** **`edit_model`**
 
 > ```minizinc
-> n = 40;
-> int: n;
-> array[1..n] of var 1..n: queens;
-> 
-> constraint alldifferent(queens);
-> constraint forall(i,j in 1..n where i < j) (
->  abs(queens[i] - queens[j]) != j - i
-> );
-> 
-> solve satisfy;
+> int: n = 30;
 > ```
-
-**System:** **`edit_model`**
-
-> `Model updated`
 
 **System:** **`solve_model`**
 
-> `{'status': 'SAT', 'solution': Solution(queens=[14, 17, 26, 18, 38, 36, 6, 37, 30, 34, 9, 40, 1, 21, 31, 2, 39, 10, 22, 20, 33, 16, 3, 29, 12, 7, 5, 19, 35, 32, 27, 4, 28, 23, 25, 15, 13, 11, 24, 8], _checker=''), 'solve_time': 0.289}`
+> ```
+> {'status': 'SAT', 'solution': Solution(queens=[17, 23, 9, 18, 2, 13, 8, 1, 24, 21, 6, 22, 11, 26, 5, 25, 19, 14, 10, 3, 29, 27, 15, 4, 12, 20, 16, 7, 28, 30], _checker=''), 'solve_time': 0.04}
+> ```
 
 **LLM**
 
-> Here are the solving times for different board sizes:
+> Testing n=40:
+
+**System:** **`edit_model`**
+
+> ```minizinc
+> int: n = 40;
+> ```
+
+**System:** **`solve_model`**
+
+> ```
+> {'status': 'SAT', 'solution': Solution(queens=[12, 34, 23, 8, 20, 31, 15, 27, 18, 33, 5, 2, 26, 10, 16, 32, 4, 11, 14, 3, 9, 25, 28, 30, 35, 6, 1, 17, 21, 37, 13, 29, 24, 19, 7, 22, 39, 36, 38, 40], _checker=''), 'solve_time': 0.043}
+> ```
+
+**LLM**
+
+> Solve times comparison:
+> n=10: 0.001s
+> n=20: 0.005s
+> n=30: 0.040s
+> n=40: 0.043s
 >
-> - **n=10:** 0.005 seconds
-> - **n=20:** 0.055 seconds
-> - **n=30:** 0.094 seconds
-> - **n=40:** 0.289 seconds
->
-> We can observe that:
->
-> - All instances were solvable, which aligns with the knowledge base stating that n-Queens has solutions for all n≥4
-> - The solving time increases non-linearly with the board size
-> - Even for n=40, the solver found a solution relatively quickly (under 0.3 seconds)
->
-> The quick solving times suggest we could try even larger values of N if you're interested. 
+> Solutions exist for all tested board sizes. Time complexity increases non-linearly but remains manageable up to n=40.
 
 ---
 
 ### TSP
 
-**User:**
+**User**
 
 > A saleswoman based in Vienna needs to plan her upcoming tour through Austria, visiting each province capital once. Help find the shortest route. Distances in km:
->
 > 1=Vienna, 2=St. Pölten, 3=Eisenstadt, 4=Linz, 5=Graz, 6=Klagenfurt, 7=Salzburg, 8=Innsbruck, 9=Bregenz
 >
 > |      | 1    | 2    | 3    | 4    | 5    | 6    | 7    | 8    | 9    |
@@ -331,119 +263,67 @@ This example shows how the same model can be solved with different parameter val
 > | 8    | 478  | 413  | 440  | 315  | 459  | 391  | 188  | 0    | 157  |
 > | 9    | 631  | 566  | 593  | 468  | 629  | 566  | 343  | 157  | 0    |
 
-**LLM:**
-> I'll help formulate this as a Traveling Salesperson Problem (TSP) using MiniZinc. We need to find the shortest route that visits each capital exactly once and returns to Vienna.
->
+**LLM**
+
+> I'll model this as a Traveling Salesperson Problem using a circuit constraint.
+
+**System:** **`add_item`** (multiple)
+
 > ```minizinc
-> % TSP for Austrian province capitals
-> int: n = 9;  % number of cities
-> array[1..n,1..n] of int: dist = [| 
-> 0, 65, 60, 184, 195, 319, 299, 478, 631|
-> 65, 0, 125, 119, 130, 254, 234, 413, 566|
-> 60, 125, 0, 184, 157, 281, 261, 440, 593|
-> 184, 119, 184, 0, 208, 252, 136, 315, 468|
-> 195, 130, 157, 208, 0, 136, 280, 459, 629|
-> 319, 254, 281, 252, 136, 0, 217, 391, 566|
-> 299, 234, 261, 136, 280, 217, 0, 188, 343|
-> 478, 413, 440, 315, 459, 391, 188, 0, 157|
-> 631, 566, 593, 468, 629, 566, 343, 157, 0|];
-> 
-> array[1..n] of var 1..n: tour;  % sequence of cities
-> var int: total_distance;  % objective to minimize
-> 
-> % Each city must be visited exactly once (permutation)
-> include "alldifferent.mzn";
-> constraint alldifferent(tour);
-> 
-> % Start from Vienna (city 1)
-> constraint tour[1] = 1;
-> 
-> % Calculate total distance
-> constraint total_distance = sum(i in 1..n-1)(
->  dist[tour[i], tour[i+1]]
-> ) + dist[tour[n], tour[1]];  % Add return to Vienna
-> 
-> solve minimize total_distance;
+> include "globals.mzn";
+> int: n = 9;
+> array[1..n,1..n] of int: dist = [|0,65,60,184,195,319,299,478,631|65,0,125,119,130,254,234,413,566|60,125,0,184,157,281,261,440,593|184,119,184,0,208,252,136,315,468|195,130,157,208,0,136,280,459,629|319,254,281,252,136,0,217,391,566|299,234,261,136,280,217,0,188,343|478,413,440,315,459,391,188,0,157|631,566,593,468,629,566,343,157,0|];
+> array[1..n] of var 1..n: succ;
+> var int: total_dist = sum(i in 1..n)(dist[i,succ[i]]);
+> constraint circuit(succ);
+> solve minimize total_dist;
 > ```
 
-**System:** **`edit_model`**
-> Model updated
-
-**System:** **`validate_model`**
-> Valid: Model is valid
-
 **System:** **`solve_model`**
-> {'status': 'SAT', 'solution': Solution(objective=1564, tour=[1, 3, 5, 6, 8, 9, 7, 4, 2], total_distance=1564, _checker=''), 'solve_time': 0.185}
 
-**LLM:**
-> I've found the optimal route! Here's the sequence of cities to visit:
->
-> 1. Vienna (start)
-> 2. Eisenstadt
-> 3. Graz
-> 4. Klagenfurt
-> 5. Innsbruck
-> 6. Bregenz
-> 7. Salzburg
-> 8. Linz
-> 9. St. Pölten
-> 10. Return to Vienna
->
-> The total distance for this route is 1,564 km. This solution makes intuitive sense because:
->
-> - It starts by visiting the nearby eastern cities first (Eisenstadt)
-> - Then moves south (Graz, Klagenfurt)
-> - Makes an efficient sweep through the western cities (Innsbruck, Bregenz)
-> - Returns via the central route (Salzburg, Linz)
-> - Finishes with the closest city to Vienna (St. Pölten)
->
-> Would you like me to analyze any specific aspects of this solution or explore alternative routes?
+> ```
+> {'status': 'SAT', 'solution': Solution(objective=1564, succ=[2, 4, 1, 7, 3, 5, 9, 6, 8], _checker=''), 'solve_time': 0.002}
+> ```
 
-**User:**
+**LLM**
+
+> Optimal route found: Vienna → St. Pölten → Linz → Salzburg → Bregenz → Innsbruck → Klagenfurt → Graz → Eisenstadt → Vienna
+>
+> Total distance: 1,564 km
+>
+> Route verification:
+>
+> - Each city visited exactly once: ✓ (circuit constraint)
+> - Distance calculation correct: ✓
+> - Starting/ending in Vienna (city 1): ✓
+
+**User**
+
 > Assume the road between Vienna and Eisenstadt is blocked, what is now the shortest tour?
 
-**LLM:**
-> I'll modify the model to exclude the direct connection between Vienna (1) and Eisenstadt (3) by setting it to a very high value.
+**LLM**
 
-**System:** **`edit_model`**
-> Model updated
+> I'll modify the distance matrix to make the Vienna-Eisenstadt route impossible (infinite distance).
 
-**System:** **`validate_model`**
-> Valid: Model is valid
+**System:** **`add_item`**
+
+> ```minizinc
+> array[1..n,1..n] of int: dist = [|0,65,9999,184,195,319,299,478,631|65,0,125,119,130,254,234,413,566|9999,125,0,184,157,281,261,440,593|184,119,184,0,208,252,136,315,468|195,130,157,208,0,136,280,459,629|319,254,281,252,136,0,217,391,566|299,234,261,136,280,217,0,188,343|478,413,440,315,459,391,188,0,157|631,566,593,468,629,566,343,157,0|];
+> ```
 
 **System:** **`solve_model`**
-> {'status': 'SAT', 'solution': Solution(objective=1694, tour=[1, 4, 7, 9, 8, 6, 5, 3, 2], total_distance=1694, _checker=''), 'solve_time': 0.166}
 
-**LLM:**
-> I've found the new optimal route with the blocked road. Here's the sequence:
+> ```
+> {'status': 'SAT', 'solution': Solution(objective=1694, succ=[4, 1, 2, 7, 3, 5, 9, 6, 8], _checker=''), 'solve_time': 0.003}
+> ```
+
+**LLM**
+
+> Optimal route: Vienna → Linz → St. Pölten → Salzburg → Bregenz → Innsbruck → Klagenfurt → Graz → Eisenstadt → Vienna
 >
-> 1. Vienna (start)
-> 2. Linz
-> 3. Salzburg
-> 4. Bregenz
-> 5. Innsbruck
-> 6. Klagenfurt
-> 7. Graz
-> 8. Eisenstadt
-> 9. St. Pölten
-> 10. Return to Vienna
->
-> The total distance is now 1,694 km, which is 130 km longer than the previous route. The tour now takes a different approach:
->
-> - It heads west first through Linz instead of east
-> - Makes a similar western loop through Salzburg, Bregenz, and Innsbruck
-> - Returns via the southern cities (Klagenfurt, Graz)
-> - Reaches Eisenstadt via Graz instead of directly from Vienna
-> - Finishes with St. Pölten before returning to Vienna
->
-> The solver found this alternative route that avoids the blocked Vienna-Eisenstadt road while minimizing the total distance.
-> 
+> Total distance: 1,694 km (+130 km compared to unblocked route)
 
 ------
-
-**Further sample chat dialogs demonstrating tool usage are included in the `examples` folder of the repository.** 
-
----
 
 ## Disclaimer
 
