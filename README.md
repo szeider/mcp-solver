@@ -22,7 +22,7 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
 
 ## Available Tools
 
-The system has transitioned from a line-based to an item-based editing approach, which improves robustness by validating each item independently. Each model modification operation returns the current model with numbered items in truncated form, ensuring consistent tracking of items and their indices.
+Model modification has transitioned in this version from a line-based to an item-based editing approach, which improves robustness by validating each item independently. Each model modification operation returns the current model with numbered items in truncated form, ensuring consistent tracking of items and their indices. Line-based editing remains for handling the memo.
 
 | Tool Name        | Description                                           |
 | ---------------- | ----------------------------------------------------- |
@@ -48,45 +48,61 @@ The system has transitioned from a line-based to an item-based editing approach,
   - Windows 
   - Linux (requires an alternative to the Claude Dekstop app)
 
+------
+
 ## Installation
 
-1. Install the Claude Desktop app (or a different MCP client)
+1. Install an MCP-compatible client (e.g., Claude web interface or desktop app)
 
-	https://claude.ai/download
+2. Install the MCP Solver:
 
-2. Install the MCP Solver
+   ```bash
+   git clone https://github.com/szeider/mcp-solver.git
+   cd mcp-solver
+   uv pip install -e .
+   ```
 
-	```
-	git clone https://github.com/szeider/mcp-solver.git
-	cd mcp-solver
-	uv pip install -e .
-	```
+3. Create the configuration file:
 
-3. Create the file 
+   For macOS/Linux:
 
-  ```
-  ~/Library/Application/Support/Claude/claude_desktop_config.json
-  ```
-  containing
-  ```
-  {
-   "mcpServers": {
-       "MCP Solver": {
-           "command": "uv",
-           "args": ["--directory", 
-           "/absolute/path/to/mcp-solver", 
+   ```bash
+   ~/Library/Application/Support/Claude/claude_desktop_config.json
+   ```
+
+   For Windows:
+
+   ```bash
+   %APPDATA%\Claude\claude_desktop_config.json
+   ```
+
+   Add the following content:
+
+   ```json
+   {
+     "mcpServers": {
+       "minizinc": {
+         "command": "uv",
+         "args": [
+           "--directory", 
+           "/absolute/path/to/mcp-solver",  // Use full path to mcp-solver directory
            "run", 
-           "mcp-solver"]
+           "mcp-solver"
+         ]
        }
      }
-  }
-   // For Windows, replace "/absolute/path/to/mcp-solver" with "C:\\absolute\\path\\to\\mcp-solver"
-  
-  ```
+   }
+   ```
 
-4. Path to `memo.md`
+   Note: For Windows, use backslashes and escape them:
 
-The default location can be changed in `pyproject.toml`.
+   ```json
+   "args": ["--directory", "C:\\absolute\\path\\to\\mcp-solver", "run", "mcp-solver"]
+   ```
+
+4. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
+
+------
 
 ## Examples
 
