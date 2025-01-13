@@ -9,9 +9,14 @@ A Model Context Protocol (MCP) server that exposes MiniZinc constraint solving c
 The MCP Solver integrates MiniZinc constraint programming with LLMs through the Model Context Protocol, enabling AI models to:
 
 * Create, edit and validate constraint models
+
 * Execute constraint solving operations
+
 * Access and update solution knowledge
+
 * Manage solver insights through a memo system
+
+For a detailed description of the system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024. 
 
 ## Features
 * Finite domain and global constraint support
