@@ -228,8 +228,17 @@ async def serve() -> None:
                     raise ValueError(f"Unknown tool: {name}")
 
         except Exception as e:
-            logger.error("Tool execution failed", exc_info=True)
-            raise McpError(f"Tool execution failed: {e}")
+                logger.error("Tool execution failed", exc_info=True)
+                # Instead of converting an error_response dict to JSON, simply return a plain string.
+                error_message = f"Tool execution failed: {str(e)}"
+                return [types.TextContent(type="text", text=error_message)]
+
+
+        
+
+        # except Exception as e:
+        #     logger.error("Tool execution failed", exc_info=True)
+        #     raise McpError(f"Tool execution failed: {e}")
     
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
