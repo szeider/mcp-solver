@@ -1,22 +1,19 @@
-
 # MCP Solver
-[![MCP][mcp-badge]][mcp-url][![License: MIT][license-badge]][license-url]![Python Version][python-badge]
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org)
 
 A Model Context Protocol (MCP) server that exposes MiniZinc constraint solving capabilities to Large Language Models.
 
 ---
+
 ## Overview
 The MCP Solver integrates MiniZinc constraint programming with LLMs through the Model Context Protocol, enabling AI models to:
 
-* Create, edit and validate constraint models
-
+* Create, edit, and validate constraint models
 * Execute constraint solving operations
-
 * Access and update solution knowledge
-
 * Manage solver insights through a memo system
 
-For a detailed description of the system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024. 
+For a detailed description of the system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
 
 ## Features
 * Finite domain and global constraint support
@@ -46,14 +43,15 @@ Model modification has transitioned in this version from a line-based to an item
 
 ## System Requirements
 
-- Python 3.9+
-- [MiniZinc](https://www.minizinc.org) with Chuffed solver
-- Operating system: 
+- **Python 3.11+**  
+  (Note: Python 3.11 is required to support the use of `asyncio.timeout` in the solver code.)
+- [MiniZinc](https://www.minizinc.org) with the Chuffed solver
+- Operating systems:
   - macOS
   - Windows 
-  - Linux (requires an alternative to the Claude Dekstop app)
+  - Linux (with appropriate adaptations)
 
-------
+---
 
 ## Installation
 
@@ -86,7 +84,7 @@ Model modification has transitioned in this version from a line-based to an item
    ```json
    {
      "mcpServers": {
-       "minizinc": {
+       "MCP Solver": {
          "command": "uv",
          "args": [
            "--directory", 

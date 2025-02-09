@@ -15,13 +15,12 @@ from .memo import MemoManager
 
 from importlib.metadata import version
 
-
 logger = logging.getLogger(__name__)
 
 try:
     version_str = version("mcp-solver")
     logger.info(f"Loaded version: {version_str}")
-except:
+except Exception:
     version_str = "0.0.0"
     logger.warning("Failed to load version from package, using default: 0.0.0")
 
@@ -56,7 +55,7 @@ async def serve() -> None:
         return [
             types.Prompt(
                 name="Guidelines",
-                description="Basic instructions for iusing the tools, get this prompt at before any interaction with mcp-solver",
+                description="Basic instructions for using the tools, get this prompt before any interaction with mcp-solver",
                 arguments=[]
             )
         ]
@@ -162,19 +161,17 @@ async def serve() -> None:
                     return [types.TextContent(type="text", 
                         text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
 
-
                 case "delete_item":
                     await model_mgr.delete_item(arguments["index"])
                     items = model_mgr.get_model()
                     return [types.TextContent(type="text", 
-                        text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
-
+                        text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
 
                 case "replace_item":
                     await model_mgr.replace_item(arguments["index"], arguments["content"])
                     items = model_mgr.get_model()
                     return [types.TextContent(type="text", 
-                        text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
+                        text=f"Item replaced\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
 
                 case "clear_model":
                     model_mgr.clear_model()
@@ -187,7 +184,6 @@ async def serve() -> None:
                         raw_timeout = arguments.get("timeout")
                         if raw_timeout is not None:  # Only convert if not None
                             timeout_val = timedelta(seconds=float(raw_timeout))
-                            
                     result = await model_mgr.solve_model(
                         timeout=timeout_val  # Will use DEFAULT_SOLVE_TIMEOUT if None
                     )
@@ -233,10 +229,8 @@ async def serve() -> None:
 
         except Exception as e:
             logger.error("Tool execution failed", exc_info=True)
-            raise McpError("Tool execution failed", str(e))
+            raise McpError(f"Tool execution failed: {e}")
     
-    
-
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -248,7 +242,6 @@ async def serve() -> None:
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
                 ),
-              
             ),
         )
 
@@ -264,7 +257,6 @@ def main() -> int:
         return 0
     except KeyboardInterrupt:
         return 0
-
 
 if __name__ == "__main__":
     main()

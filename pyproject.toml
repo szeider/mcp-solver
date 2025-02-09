@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-solver"
-version = "2.0.0"
+version = "2.1.0"
 description = "MCP server for constraint solving"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.1.2",
+    "mcp>=1.2.0",
     "minizinc",
     "tomli;python_version<'3.11'"
 ]
@@ -20,11 +20,9 @@ mcp-solver = "mcp_solver.server:main"
 line-length = 88
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
-
-
 
 # Override default memo file location by uncommenting and modifying one of these:
 

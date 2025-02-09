@@ -36,11 +36,10 @@ def get_memo_path() -> Path:
 # Potentially truncate items when sent back to client
 ITEM_CHARS = 8  # or None to show full items
 
-
 # Set to True to enable validation on model changes
 VALIDATE_ON_CHANGE = True  
 
-# Timeouts
+# Timeouts (Note: asyncio.timeout requires Python 3.11+)
 DEFAULT_SOLVE_TIMEOUT = timedelta(seconds=4)
 MAX_SOLVE_TIMEOUT = timedelta(seconds=10)
 FLATTEN_TIMEOUT = timedelta(seconds=2)
@@ -49,7 +48,6 @@ CLEANUP_TIMEOUT = timedelta(seconds=1)
 
 # Get memo file path
 MEMO_FILE = str(get_memo_path())
-
 
 PROMPT_TEMPLATE = """Welcome to the MiniZinc Constraint Solver!
 
