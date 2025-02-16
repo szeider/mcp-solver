@@ -362,9 +362,10 @@ async def serve() -> None:
 
 def main() -> int:
     logging.basicConfig(
-        stream=sys.stderr,
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    filename='mcp_solver.log',  # log file path; adjust as needed
+    filemode='a',               # append mode; use 'w' to overwrite each time
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     logging.getLogger(__name__).info(f"Starting MCP solver with version: {version_str}")
     try:
