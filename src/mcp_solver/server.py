@@ -1,5 +1,3 @@
-# src/mcp_solver/server.py
-
 import sys
 import asyncio
 import logging
@@ -19,23 +17,13 @@ from importlib.metadata import version
 import os
 
 # ----------------------
-# Static Prompt Definitions
+# Single Prompt Definition (loaded from markdown file)
 # ----------------------
-PROMPTS = {
-    "quick_prompt": {
-         "name": "quick_prompt",
-         "description": "The default quick prompt with essential guidelines.",
-         "template": "Quick Prompt: Please follow the standard operational guidelines."
-    },
-    "detailed_prompt": {
-         "name": "detailed_prompt",
-         "description": "A detailed prompt with extended instructions.",
-         "template": "Detailed Prompt: Please adhere to the following extended instructions: [Insert comprehensive guidelines here...]"
-    }
-}
-
 def load_prompt_file(filename: str) -> str:
-    filepath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), filename)
+    filepath = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        filename
+    )
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             return f.read()
@@ -43,9 +31,14 @@ def load_prompt_file(filename: str) -> str:
         logging.getLogger(__name__).error(f"Failed to load prompt file {filename}: {e}")
         return f"Error loading prompt: {filename}"
 
-QUICK_PROMPT = load_prompt_file("quick_prompt.md")
-DETAILED_PROMPT = load_prompt_file("detailed_prompt.md")
-# ----------------------
+INSTRUCTIONS_PROMPT = load_prompt_file("instructions_prompt.md")
+PROMPTS = {
+    "instructions": {
+         "name": "instructions",
+         "description": "Instructions on how to use the MCP solver for constraint solving",
+         "template": INSTRUCTIONS_PROMPT
+    }
+}
 
 try:
     version_str = version("mcp-solver")
@@ -165,7 +158,7 @@ async def serve() -> None:
     # Declare capabilities explicitly for prompts and tools.
     capabilities = {
         "prompts": {
-            "default": "quick_prompt",   # Preferred prompt for clients.
+            "default": "instructions",   # Preferred prompt for clients.
             "listChanged": False         # Static list: no dynamic changes.
         },
         "tools": detailed_tools
@@ -179,16 +172,14 @@ async def serve() -> None:
     # --- Prompt Endpoints ---
     @server.list_prompts()
     async def handle_list_prompts() -> list[types.Prompt]:
-        # Return our two static prompts (no arguments)
-        prompt_list = []
-        for prompt in PROMPTS.values():
-            prompt_list.append(
-                types.Prompt(
-                    name=prompt["name"],
-                    description=prompt["description"],
-                    arguments=[]  # Static prompts have no arguments.
-                )
+        # Return the single prompt (no arguments)
+        prompt_list = [
+            types.Prompt(
+                name=PROMPTS["instructions"]["name"],
+                description=PROMPTS["instructions"]["description"],
+                arguments=[]
             )
+        ]
         return prompt_list
 
     @server.get_prompt()
@@ -362,10 +353,9 @@ async def serve() -> None:
 
 def main() -> int:
     logging.basicConfig(
-    filename='mcp_solver.log',  # log file path; adjust as needed
-    filemode='a',               # append mode; use 'w' to overwrite each time
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        stream=sys.stderr,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     logging.getLogger(__name__).info(f"Starting MCP solver with version: {version_str}")
     try:
