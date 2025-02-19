@@ -9,208 +9,80 @@ import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
-from .constants import DEFAULT_SOLVE_TIMEOUT, MEMO_FILE, ITEM_CHARS
+from .constants import DEFAULT_SOLVE_TIMEOUT, MEMO_FILE, ITEM_CHARS, INSTRCUTIONS_PROMPT
 from .model_manager import ModelManager, ModelError
 from .memo import MemoManager
 
 from importlib.metadata import version
 import os
 
-# ----------------------
-# Single Prompt Definition (loaded from markdown file)
-# ----------------------
-def load_prompt_file(filename: str) -> str:
-    filepath = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        filename
-    )
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to load prompt file {filename}: {e}")
-        return f"Error loading prompt: {filename}"
-
-INSTRUCTIONS_PROMPT = load_prompt_file("instructions_prompt.md")
-PROMPTS = {
-    "instructions": {
-         "name": "instructions",
-         "description": "Instructions on how to use the MCP solver for constraint solving",
-         "template": INSTRUCTIONS_PROMPT
-    }
-}
+logger = logging.getLogger(__name__)
 
 try:
     version_str = version("mcp-solver")
-    logging.getLogger(__name__).info(f"Loaded version: {version_str}")
+    logger.info(f"Loaded version: {version_str}")
 except Exception:
     version_str = "0.0.0"
-    logging.getLogger(__name__).warning("Failed to load version from package, using default: 0.0.0")
+    logger.warning("Failed to load version from package, using default: 0.0.0")
+
+def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
+    """Format model items with optional truncation."""
+    if not items:
+        return "Model is empty"
+    def truncate(text: str) -> str:
+        if max_chars is None or len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "..."
+    return "\n".join(f"{i} | {truncate(content)}" for i, content in items)
 
 async def serve() -> None:
     server = Server("mcp-solver")
-    
-    # Build detailed metadata for each tool endpoint.
-    detailed_tools = [
-        {
-            "name": "get_model",
-            "description": "Returns current model content with numbered items.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "supportedOperations": ["read"]
-        },
-        {
-            "name": "add_item",
-            "description": "Adds a new item at a specific index to the model.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer"},
-                    "content": {"type": "string"}
-                },
-                "required": ["index", "content"]
-            },
-            "supportedOperations": ["create"]
-        },
-        {
-            "name": "delete_item",
-            "description": "Deletes an item at a specific index from the model.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer"}
-                },
-                "required": ["index"]
-            },
-            "supportedOperations": ["delete"]
-        },
-        {
-            "name": "replace_item",
-            "description": "Replaces an existing item at a specific index with new content.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "index": {"type": "integer"},
-                    "content": {"type": "string"}
-                },
-                "required": ["index", "content"]
-            },
-            "supportedOperations": ["update"]
-        },
-        {
-            "name": "clear_model",
-            "description": "Clears all items in the model.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "supportedOperations": ["delete"]
-        },
-        {
-            "name": "solve_model",
-            "description": "Solves the model using the Chuffed constraint solver.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "timeout": {"type": ["number", "null"],
-                              "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"}
-                }
-            },
-            "supportedOperations": ["compute"]
-        },
-        {
-            "name": "get_solution",
-            "description": "Retrieves the value of a specified variable from the solution.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "variable_name": {"type": "string"},
-                    "indices": {"type": "array", "items": {"type": "integer"}, "description": "Array indices (optional, 1-based)"}
-                },
-                "required": ["variable_name"]
-            },
-            "supportedOperations": ["read"]
-        },
-        {
-            "name": "get_solve_time",
-            "description": "Returns the last recorded solve execution time.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "supportedOperations": ["read"]
-        },
-        {
-            "name": "get_memo",
-            "description": "Retrieves the current knowledge base (memo).",
-            "inputSchema": {"type": "object", "properties": {}},
-            "supportedOperations": ["read"]
-        },
-        {
-            "name": "edit_memo",
-            "description": "Edits the current knowledge base (memo).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "line_start": {"type": "integer"},
-                    "line_end": {"type": ["integer", "null"]},
-                    "content": {"type": "string"}
-                },
-                "required": ["line_start", "content"]
-            },
-            "supportedOperations": ["update"]
-        }
-    ]
-    
-    # Declare capabilities explicitly for prompts and tools.
-    capabilities = {
-        "prompts": {
-            "default": "instructions",   # Preferred prompt for clients.
-            "listChanged": False         # Static list: no dynamic changes.
-        },
-        "tools": detailed_tools
-    }
-    server.capabilities = capabilities
-    logging.info("Declared MCP Server Capabilities: %s", capabilities)
-    
+    server.capabilities = {"prompts": {}}
     model_mgr = ModelManager()
     memo = MemoManager(MEMO_FILE)
 
-    # --- Prompt Endpoints ---
     @server.list_prompts()
     async def handle_list_prompts() -> list[types.Prompt]:
-        # Return the single prompt (no arguments)
-        prompt_list = [
+        return [
             types.Prompt(
-                name=PROMPTS["instructions"]["name"],
-                description=PROMPTS["instructions"]["description"],
+                name="Instructions",
+                description="Basic instructions for using the tools, get this prompt before any interaction with mcp-solver",
                 arguments=[]
             )
         ]
-        return prompt_list
-
+    
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
-        if name not in PROMPTS:
-            return types.GetPromptResult(
-                description="Error: Unknown prompt",
-                messages=[
-                    types.PromptMessage(
-                        role="assistant",
-                        content=types.TextContent(
-                            type="text",
-                            text=f"Prompt '{name}' not found."
-                        )
-                    )
-                ]
-            )
-        prompt = PROMPTS[name]
+        # Do not clear the model here—let previous model items persist.
+        current_memo = memo.content or "No knowledge available yet."
+        prompt = INSTRCUTIONS_PROMPT.format(memo=current_memo)
         return types.GetPromptResult(
-            description=prompt["description"],
+            description="MCP Solver Guidelines, read first!",
             messages=[
                 types.PromptMessage(
-                    role="user",
+                    role="user", 
                     content=types.TextContent(
                         type="text",
-                        text=prompt["template"]
+                        text=prompt
                     )
                 )
             ]
         )
-    # --- End of Prompt Endpoints ---
+
+    def format_array_access(variable_name: str, indices: List[int]) -> str:
+        return variable_name if not indices else f"{variable_name}[{','.join(str(i) for i in indices)}]"
+
+    def get_array_value(array: Any, indices: List[int]) -> Any:
+        if not indices:
+            return array
+        if not hasattr(array, "__getitem__"):
+            raise ValueError("Variable is not an array")
+        try:
+            return array[indices[0]-1] if len(indices) == 1 else get_array_value(array[indices[0]-1], indices[1:])
+        except IndexError:
+            raise ValueError(f"Index {indices[0]} is out of bounds")
+        except TypeError:
+            raise ValueError("Invalid index type")
 
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
@@ -256,15 +128,6 @@ async def serve() -> None:
                 }, "required": ["line_start", "content"]})
         ]
 
-    def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
-        if not items:
-            return "Model is empty"
-        def truncate(text: str) -> str:
-            if max_chars is None or len(text) <= max_chars:
-                return text
-            return text[:max_chars] + "..."
-        return "\n".join(f"{i} | {truncate(content)}" for i, content in items)
-
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
         try:
@@ -308,7 +171,6 @@ async def serve() -> None:
                         return [types.TextContent(type="text", text=f"No value for {var_name}")]
                     try:
                         if indices:
-                            from .utils import get_array_value, format_array_access
                             val = get_array_value(val, indices)
                             var_display = format_array_access(var_name, indices)
                         else:
@@ -333,7 +195,7 @@ async def serve() -> None:
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
-            logging.getLogger(__name__).error("Tool execution failed", exc_info=True)
+            logger.error("Tool execution failed", exc_info=True)
             error_message = f"Tool execution failed: {str(e)}"
             return [types.TextContent(type="text", text=error_message)]
 
@@ -353,11 +215,12 @@ async def serve() -> None:
 
 def main() -> int:
     logging.basicConfig(
-        stream=sys.stderr,
+        filename='mcp_solver.log',
+        filemode='a',
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    logging.getLogger(__name__).info(f"Starting MCP solver with version: {version_str}")
+    logger.info(f"Starting MCP solver with version: {version_str}")
     try:
         asyncio.run(serve())
         return 0
@@ -366,3 +229,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     main()
+ 
