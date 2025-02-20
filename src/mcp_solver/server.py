@@ -87,45 +87,75 @@ async def serve() -> None:
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
         return [
-            types.Tool(name="get_model", description="Get current model content with numbered items",
-                inputSchema={"type": "object", "properties": {}}),
-            types.Tool(name="add_item", description="Add new item at specific index",
+            types.Tool(
+                name="add_item", 
+                description="Add new minizinc item to the model at a specific index, where indices start at 0; gets back the current model in truncated form. Do not add minizinc output statements. ",
                 inputSchema={"type": "object", "properties": {
                     "index": {"type": "integer"},
                     "content": {"type": "string"}
-                }, "required": ["index", "content"]}),
-            types.Tool(name="delete_item", description="Delete item at index",
-                inputSchema={"type": "object", "properties": {
-                    "index": {"type": "integer"}
-                }, "required": ["index"]}),
-            types.Tool(name="replace_item", description="Replace item at index",
-                inputSchema={"type": "object", "properties": {
-                    "index": {"type": "integer"},
-                    "content": {"type": "string"}
-                }, "required": ["index", "content"]}),
-            types.Tool(name="clear_model", description="Clear all items in the model",
-                inputSchema={"type": "object", "properties": {}}),
-            types.Tool(name="solve_model", description="Solve the model with the Chuffed constraint solver",
+                }, "required": ["index", "content"]}
+            ),
+            types.Tool(
+                name="solve_model", 
+                description="Solve the current minizinc model using the Chuffed constraint solver with an optional timeout parameter, returning the result of the computation.",
                 inputSchema={"type": "object", "properties": {
                     "timeout": {"type": ["number", "null"],
-                              "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"}
-                }}),
-            types.Tool(name="get_solution", description="Get specific variable value from solution with optional array indices",
+                                "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"}
+                }}
+            ),
+            types.Tool(
+                name="get_solution", 
+                description="Retrieve the value of a specific variable from the model's solution, optionally accessing array elements using 1-based indices.",
                 inputSchema={"type": "object", "properties": {
                     "variable_name": {"type": "string"},
                     "indices": {"type": "array", "items": {"type": "integer"},
-                              "description": "Array indices (optional, 1-based)"}
-                }, "required": ["variable_name"]}),
-            types.Tool(name="get_solve_time", description="Get last solve execution time",
-                inputSchema={"type": "object", "properties": {}}),
-            types.Tool(name="get_memo", description="Get current knowledge base",
-                inputSchema={"type": "object", "properties": {}}),
-            types.Tool(name="edit_memo", description="Edit knowledge base",
+                                "description": "Array indices (optional, 1-based)"}
+                }, "required": ["variable_name"]}
+            ),
+            types.Tool(
+                name="get_model", 
+                description="Fetch the current content of the minizinc model, listing each item with its index. To save bandwith, only the first few charaters of each item is shown.",
+                inputSchema={"type": "object", "properties": {}}
+            ),
+            types.Tool(
+                name="clear_model", 
+                description="Remove all items from the minizinc model, effectively resetting it.",
+                inputSchema={"type": "object", "properties": {}}
+            ),
+            types.Tool(
+                name="delete_item", 
+                description="Delete an item from the minizinc model at the specified index, then return the updated model.",
+                inputSchema={"type": "object", "properties": {
+                    "index": {"type": "integer"}
+                }, "required": ["index"]}
+            ),
+            types.Tool(
+                name="replace_item", 
+                description="Replace an existing item in the minizinc model at a specified index with new content, returning the updated model.",
+                inputSchema={"type": "object", "properties": {
+                    "index": {"type": "integer"},
+                    "content": {"type": "string"}
+                }, "required": ["index", "content"]}
+            ),
+            types.Tool(
+                name="get_solve_time", 
+                description="Retrieve the execution time of the most recent solve operation for performance monitoring.",
+                inputSchema={"type": "object", "properties": {}}
+            ),
+            types.Tool(
+                name="get_memo", 
+                description="Retrieve the current knowledge base memo.",
+                inputSchema={"type": "object", "properties": {}}
+            ),
+            types.Tool(
+                name="edit_memo", 
+                description="Edit the knowledge base memo by adding content within a specified line range with new text.",
                 inputSchema={"type": "object", "properties": {
                     "line_start": {"type": "integer"},
                     "line_end": {"type": ["integer", "null"]},
                     "content": {"type": "string"}
-                }, "required": ["line_start", "content"]})
+                }, "required": ["line_start", "content"]}
+            )
         ]
 
     @server.call_tool()
@@ -229,4 +259,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     main()
- 

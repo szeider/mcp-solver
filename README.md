@@ -105,6 +105,11 @@ Model modification has transitioned in this version from a line-based to an item
 
 4. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
 
+5. The setup can be tested with:
+ ```json
+   uv run test-setup
+ ```
+
 ------
 
 ## Examples

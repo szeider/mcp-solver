@@ -20,6 +20,14 @@ The MCP Solver integrates MiniZinc constraint solving capabilities with the Mode
 
 - **Truncated Model Display:**  
   When using tools such as `get_model`, `add_item`, `delete_item`, or `replace_item`, the current model is returned in a truncated form. This truncation is solely for display purposes, to keep item indices consistent and the output concise.
+  
+- **indizes start at 0**
+  
+  You add items one by one, starting with index 0
+  
+  index=0, index=1, etc.
+  
+  
 
 ## Tool Input and Output Details
 
@@ -100,6 +108,8 @@ Each tool provided by the MCP Solver has defined inputs and outputs. Here is a s
 
 - **When to Clear the Model:**  
   Only use `clear_model` if the changes to the model are very extensive and starting over is necessary.
+  
+  You can start adding items without clearing the model first. You will get the current model from the tool as a feedback. You see if there are any unwanted items that you can delete if necessary.
 
 ## Final Notes
 
@@ -115,4 +125,3 @@ Each tool provided by the MCP Solver has defined inputs and outputs. Here is a s
 - **Incremental Modifications:**  
   Modify the existing model rather than starting from scratch unless a complete overhaul is needed.
 
-Thank you for using the MCP Solver. These guidelines should help you effectively interact with each tool and maintain a robust and consistent model.

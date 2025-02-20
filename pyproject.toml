@@ -15,6 +15,8 @@ dependencies = [
 
 [project.scripts]
 mcp-solver = "mcp_solver.server:main"
+test-setup = "mcp_solver.test_setup:main"
+
 
 [tool.black]
 line-length = 88
