@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+Here's a suggestion for the new version number and a corresponding changelog entry:
+
+---
+
+### [2.3.0] - 2025-02-28
+
+- **New Feature:** Introduced Lite Mode for the MCP Solver. When run with the `--lite` flag, the server advertises only a reduced set of tools (clear_model, add_item, replace_item, delete_item, and solve_model).
+- **New Feature:** In Lite Mode, the `solve_model` tool returns only the status (and the solution if SAT) without additional metadata.
+- **New Feature:** The instructions prompt in Lite Mode is loaded from `instructions_prompt_lite.md` instead of `instructions_prompt.md`.
+
 ### [2.2.0] - 2025-02-15
 
 - **New Feature:** Integrated static prompt endpoints (`prompts/list` and `prompts/get`) to advertise MCP prompt templates ("quick_prompt" and "detailed_prompt") without requiring any arguments.

@@ -6,6 +6,7 @@ A Model Context Protocol (MCP) server that exposes MiniZinc constraint solving c
 ---
 
 ## Overview
+
 The MCP Solver integrates MiniZinc constraint programming with LLMs through the Model Context Protocol, enabling AI models to:
 
 * Create, edit, and validate constraint models
@@ -111,6 +112,45 @@ Model modification has transitioned in this version from a line-based to an item
  ```
 
 ------
+
+Below is a proposed new section for your README that describes the Lite Mode. This section highlights the differences, lists the reduced toolset, and shows how to configure the solver to run in Lite Mode using the `--lite` flag.
+
+---
+
+### Lite Mode
+
+The MCP Solver also supports a **Lite Mode**, which provides a streamlined interface with only the essential tools. In Lite Mode, the available tools are limited to:
+
+- **clear_model**
+- **add_item**
+- **replace_item**
+- **delete_item**
+- **solve_model**
+
+In this mode:
+- **solve_model** returns the status of the solution—if the model is satisfiable (`SAT`), it also returns the solution; otherwise, only the status (`UNSAT` or `TIMEOUT`) is provided.
+- The instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`.
+
+To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows:
+
+```json
+{
+  "mcpServers": {
+    "minizinc": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/mcp-solver",
+        "run",
+        "mcp-solver",
+        "--lite"
+      ]
+    }
+  }
+}
+```
+
+---
 
 ## Examples
 

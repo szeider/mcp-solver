@@ -3,6 +3,8 @@ import asyncio
 import logging
 from typing import List, Optional, Any, Tuple
 from datetime import timedelta
+from pathlib import Path
+
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 import mcp.server.stdio
@@ -16,14 +18,15 @@ from .memo import MemoManager
 from importlib.metadata import version
 import os
 
-logger = logging.getLogger(__name__)
+# Global flag to indicate lite mode
+LITE_MODE = False
 
 try:
     version_str = version("mcp-solver")
-    logger.info(f"Loaded version: {version_str}")
+    logging.getLogger(__name__).info(f"Loaded version: {version_str}")
 except Exception:
     version_str = "0.0.0"
-    logger.warning("Failed to load version from package, using default: 0.0.0")
+    logging.getLogger(__name__).warning("Failed to load version from package, using default: 0.0.0")
 
 def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
     """Format model items with optional truncation."""
@@ -46,14 +49,13 @@ async def serve() -> None:
         return [
             types.Prompt(
                 name="Instructions",
-                description="Basic instructions for using the tools, get this prompt before any interaction with mcp-solver",
+                description="Basic instructions for using the tools. Get this prompt before any interaction with mcp-solver.",
                 arguments=[]
             )
         ]
     
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
-        # Do not clear the model here—let previous model items persist.
         current_memo = memo.content or "No knowledge available yet."
         prompt = INSTRCUTIONS_PROMPT.format(memo=current_memo)
         return types.GetPromptResult(
@@ -86,77 +88,137 @@ async def serve() -> None:
 
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
-        return [
-            types.Tool(
-                name="add_item", 
-                description="Add new minizinc item to the model at a specific index, where indices start at 0; gets back the current model in truncated form. Do not add minizinc output statements. ",
-                inputSchema={"type": "object", "properties": {
-                    "index": {"type": "integer"},
-                    "content": {"type": "string"}
-                }, "required": ["index", "content"]}
-            ),
-            types.Tool(
-                name="solve_model", 
-                description="Solve the current minizinc model using the Chuffed constraint solver with an optional timeout parameter, returning the result of the computation.",
-                inputSchema={"type": "object", "properties": {
-                    "timeout": {"type": ["number", "null"],
-                                "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"}
-                }}
-            ),
-            types.Tool(
-                name="get_solution", 
-                description="Retrieve the value of a specific variable from the model's solution, optionally accessing array elements using 1-based indices.",
-                inputSchema={"type": "object", "properties": {
-                    "variable_name": {"type": "string"},
-                    "indices": {"type": "array", "items": {"type": "integer"},
-                                "description": "Array indices (optional, 1-based)"}
-                }, "required": ["variable_name"]}
-            ),
-            types.Tool(
-                name="get_model", 
-                description="Fetch the current content of the minizinc model, listing each item with its index. To save bandwith, only the first few charaters of each item is shown.",
-                inputSchema={"type": "object", "properties": {}}
-            ),
-            types.Tool(
-                name="clear_model", 
-                description="Remove all items from the minizinc model, effectively resetting it.",
-                inputSchema={"type": "object", "properties": {}}
-            ),
-            types.Tool(
-                name="delete_item", 
-                description="Delete an item from the minizinc model at the specified index, then return the updated model.",
-                inputSchema={"type": "object", "properties": {
-                    "index": {"type": "integer"}
-                }, "required": ["index"]}
-            ),
-            types.Tool(
-                name="replace_item", 
-                description="Replace an existing item in the minizinc model at a specified index with new content, returning the updated model.",
-                inputSchema={"type": "object", "properties": {
-                    "index": {"type": "integer"},
-                    "content": {"type": "string"}
-                }, "required": ["index", "content"]}
-            ),
-            types.Tool(
-                name="get_solve_time", 
-                description="Retrieve the execution time of the most recent solve operation for performance monitoring.",
-                inputSchema={"type": "object", "properties": {}}
-            ),
-            types.Tool(
-                name="get_memo", 
-                description="Retrieve the current knowledge base memo.",
-                inputSchema={"type": "object", "properties": {}}
-            ),
-            types.Tool(
-                name="edit_memo", 
-                description="Edit the knowledge base memo by adding content within a specified line range with new text.",
-                inputSchema={"type": "object", "properties": {
-                    "line_start": {"type": "integer"},
-                    "line_end": {"type": ["integer", "null"]},
-                    "content": {"type": "string"}
-                }, "required": ["line_start", "content"]}
-            )
-        ]
+        if LITE_MODE:
+            # In lite mode, only advertise the reduced set of tools.
+            lite_tools = [
+                types.Tool(
+                    name="clear_model", 
+                    description="Remove all items from the minizinc model, effectively resetting it.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
+                    name="add_item", 
+                    description="Add new minizinc item to the model at a specific index (indices start at 0). Do not add minizinc output statements.",
+                    inputSchema={
+                        "type": "object", 
+                        "properties": {
+                            "index": {"type": "integer"},
+                            "content": {"type": "string"}
+                        }, 
+                        "required": ["index", "content"]
+                    }
+                ),
+                types.Tool(
+                    name="replace_item", 
+                    description="Replace an existing item in the minizinc model at a specified index with new content, returning the updated model.",
+                    inputSchema={
+                        "type": "object", 
+                        "properties": {
+                            "index": {"type": "integer"},
+                            "content": {"type": "string"}
+                        }, 
+                        "required": ["index", "content"]
+                    }
+                ),
+                types.Tool(
+                    name="delete_item", 
+                    description="Delete an item from the minizinc model at the specified index, then return the updated model.",
+                    inputSchema={
+                        "type": "object", 
+                        "properties": {
+                            "index": {"type": "integer"}
+                        }, 
+                        "required": ["index"]
+                    }
+                ),
+                types.Tool(
+                    name="solve_model", 
+                    description="Solve the current minizinc model using the Chuffed constraint solver with an optional timeout parameter. In lite mode, returns only status (and solution if SAT).",
+                    inputSchema={
+                        "type": "object", 
+                        "properties": {
+                            "timeout": {
+                                "type": ["number", "null"],
+                                "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"
+                            }
+                        }
+                    }
+                )
+            ]
+            return lite_tools
+        else:
+            # Full set of tools for non-lite mode.
+            return [
+                types.Tool(
+                    name="add_item", 
+                    description="Add new minizinc item to the model at a specific index, where indices start at 0; gets back the current model in truncated form. Do not add minizinc output statements.",
+                    inputSchema={"type": "object", "properties": {
+                        "index": {"type": "integer"},
+                        "content": {"type": "string"}
+                    }, "required": ["index", "content"]}
+                ),
+                types.Tool(
+                    name="solve_model", 
+                    description="Solve the current minizinc model using the Chuffed constraint solver with an optional timeout parameter, returning the result of the computation.",
+                    inputSchema={"type": "object", "properties": {
+                        "timeout": {"type": ["number", "null"],
+                                    "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"}
+                    }}
+                ),
+                types.Tool(
+                    name="get_solution", 
+                    description="Retrieve the value of a specific variable from the model's solution, optionally accessing array elements using 1-based indices.",
+                    inputSchema={"type": "object", "properties": {
+                        "variable_name": {"type": "string"},
+                        "indices": {"type": "array", "items": {"type": "integer"},
+                                    "description": "Array indices (optional, 1-based)"}
+                    }, "required": ["variable_name"]}
+                ),
+                types.Tool(
+                    name="get_model", 
+                    description="Fetch the current content of the minizinc model, listing each item with its index. To save bandwidth, only the first few characters of each item is shown.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
+                    name="clear_model", 
+                    description="Remove all items from the minizinc model, effectively resetting it.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
+                    name="delete_item", 
+                    description="Delete an item from the minizinc model at the specified index, then return the updated model.",
+                    inputSchema={"type": "object", "properties": {
+                        "index": {"type": "integer"}
+                    }, "required": ["index"]}
+                ),
+                types.Tool(
+                    name="replace_item", 
+                    description="Replace an existing item in the minizinc model at a specified index with new content, returning the updated model.",
+                    inputSchema={"type": "object", "properties": {
+                        "index": {"type": "integer"},
+                        "content": {"type": "string"}
+                    }, "required": ["index", "content"]}
+                ),
+                types.Tool(
+                    name="get_solve_time", 
+                    description="Retrieve the execution time of the most recent solve operation for performance monitoring.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
+                    name="get_memo", 
+                    description="Retrieve the current knowledge base memo.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
+                    name="edit_memo", 
+                    description="Edit the knowledge base memo by adding content within a specified line range with new text.",
+                    inputSchema={"type": "object", "properties": {
+                        "line_start": {"type": "integer"},
+                        "line_end": {"type": ["integer", "null"]},
+                        "content": {"type": "string"}
+                    }, "required": ["line_start", "content"]}
+                )
+            ]
 
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
@@ -192,7 +254,15 @@ async def serve() -> None:
                         if raw_timeout is not None:
                             timeout_val = timedelta(seconds=float(raw_timeout))
                     result = await model_mgr.solve_model(timeout=timeout_val)
-                    return [types.TextContent(type="text", text=str(result))]
+                    if LITE_MODE:
+                        status = result.get("status")
+                        if status == "SAT":
+                            filtered_result = {"status": status, "solution": result.get("solution")}
+                        else:
+                            filtered_result = {"status": status}
+                        return [types.TextContent(type="text", text=str(filtered_result))]
+                    else:
+                        return [types.TextContent(type="text", text=str(result))]
                 case "get_solution":
                     var_name = arguments["variable_name"]
                     indices = arguments.get("indices", [])
@@ -208,14 +278,11 @@ async def serve() -> None:
                         return [types.TextContent(type="text", text=f"{var_display} = {val}")]
                     except ValueError as e:
                         return [types.TextContent(type="text", text=f"Error accessing {var_name}: {str(e)}")]
-                    
                 case "get_solve_time":
-                    solve_time_info = model_mgr.get_solve_time()
-                    st = solve_time_info.get("solve_time")
-                    if st is None:
+                    solve_time = model_mgr.get_solve_time()
+                    if solve_time is None:
                         return [types.TextContent(type="text", text="No solve time available")]
-                    return [types.TextContent(type="text", text=f"Last solve: {st:.3f}s")]
-                
+                    return [types.TextContent(type="text", text=f"Last solve: {solve_time:.3f}s")]
                 case "get_memo":
                     return [types.TextContent(type="text", text=memo.content)]
                 case "edit_memo":
@@ -228,7 +295,7 @@ async def serve() -> None:
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
-            logger.error("Tool execution failed", exc_info=True)
+            logging.getLogger(__name__).error("Tool execution failed", exc_info=True)
             error_message = f"Tool execution failed: {str(e)}"
             return [types.TextContent(type="text", text=error_message)]
 
@@ -253,7 +320,22 @@ def main() -> int:
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    logger = logging.getLogger(__name__)
     logger.info(f"Starting MCP solver with version: {version_str}")
+
+    # Check for "--lite" flag in command-line arguments.
+    global LITE_MODE, INSTRCUTIONS_PROMPT
+    if "--lite" in sys.argv:
+        LITE_MODE = True
+        try:
+            lite_prompt_path = Path(__file__).resolve().parents[2] / "instructions_prompt_lite.md"
+            with open(lite_prompt_path, "r", encoding="utf-8") as f:
+                new_prompt = f.read()
+            INSTRCUTIONS_PROMPT = new_prompt
+            logger.info("Lite mode activated: using instructions_prompt_lite.md")
+        except Exception as e:
+            logger.error(f"Failed to load instructions_prompt_lite.md: {e}")
+
     try:
         asyncio.run(serve())
         return 0
