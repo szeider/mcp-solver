@@ -208,11 +208,14 @@ async def serve() -> None:
                         return [types.TextContent(type="text", text=f"{var_display} = {val}")]
                     except ValueError as e:
                         return [types.TextContent(type="text", text=f"Error accessing {var_name}: {str(e)}")]
+                    
                 case "get_solve_time":
-                    solve_time = model_mgr.get_solve_time()
-                    if solve_time is None:
+                    solve_time_info = model_mgr.get_solve_time()
+                    st = solve_time_info.get("solve_time")
+                    if st is None:
                         return [types.TextContent(type="text", text="No solve time available")]
-                    return [types.TextContent(type="text", text=f"Last solve: {solve_time:.3f}s")]
+                    return [types.TextContent(type="text", text=f"Last solve: {st:.3f}s")]
+                
                 case "get_memo":
                     return [types.TextContent(type="text", text=memo.content)]
                 case "edit_memo":
