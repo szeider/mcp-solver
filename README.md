@@ -131,6 +131,7 @@ The MCP Solver also supports a **Lite Mode**, which provides a streamlined inter
 - **replace_item**
 - **delete_item**
 - **solve_model**
+- **get_model**
 
 In this mode:
 - **solve_model** returns the status of the solution—if the model is satisfiable (`SAT`), it also returns the solution; otherwise, only the status (`UNSAT` or `TIMEOUT`) is provided.
