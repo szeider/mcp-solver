@@ -16,6 +16,11 @@ The MCP Solver integrates MiniZinc constraint programming with LLMs through the 
 
 For a detailed description of the system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
 
+## Feedback
+
+You can provide feedback to the author via this [form](https://form.jotform.com/szeider/mcp-solver-feedback-form).
+
+
 ## Features
 * Finite domain and global constraint support
 * Asynchronous solving with configurable timeouts
