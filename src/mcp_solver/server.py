@@ -132,6 +132,11 @@ async def serve() -> None:
                     }
                 ),
                 types.Tool(
+                    name="get_model", 
+                    description="Fetch the current content of the minizinc model, listing each item with its index. To save bandwidth, only the first few characters of each item is shown.",
+                    inputSchema={"type": "object", "properties": {}}
+                ),
+                types.Tool(
                     name="solve_model", 
                     description="Solve the current minizinc model using the Chuffed constraint solver with an optional timeout parameter. In lite mode, returns only status (and solution if SAT).",
                     inputSchema={

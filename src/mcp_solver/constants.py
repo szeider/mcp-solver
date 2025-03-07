@@ -34,7 +34,7 @@ def get_memo_path() -> Path:
 
 
 # Potentially truncate items when sent back to client
-ITEM_CHARS = 8  # or None to show full items
+ITEM_CHARS = None  # or None to show full items
 
 # Set to True to enable validation on model changes
 VALIDATE_ON_CHANGE = True  
