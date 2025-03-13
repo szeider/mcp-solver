@@ -1,9 +1,11 @@
 import sys
 import asyncio
 import logging
+import os
 from typing import List, Optional, Any, Tuple
 from datetime import timedelta
 from pathlib import Path
+from importlib.metadata import version
 
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -12,11 +14,7 @@ import mcp.types as types
 from mcp.shared.exceptions import McpError
 
 from .constants import DEFAULT_SOLVE_TIMEOUT, MEMO_FILE, ITEM_CHARS, INSTRCUTIONS_PROMPT
-from .model_manager import ModelManager, ModelError
 from .memo import MemoManager
-
-from importlib.metadata import version
-import os
 
 # Global flag to indicate lite mode
 LITE_MODE = False
@@ -27,6 +25,9 @@ try:
 except Exception:
     version_str = "0.0.0"
     logging.getLogger(__name__).warning("Failed to load version from package, using default: 0.0.0")
+
+# Import after setting up logging and flags
+from .mzn_solver.model_manager import MiniZincModelManager, ModelError
 
 def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
     """Format model items with optional truncation."""
@@ -41,7 +42,7 @@ def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = 
 async def serve() -> None:
     server = Server("mcp-solver")
     server.capabilities = {"prompts": {}}
-    model_mgr = ModelManager()
+    model_mgr = MiniZincModelManager(lite_mode=LITE_MODE)
     memo = MemoManager(MEMO_FILE)
 
     @server.list_prompts()

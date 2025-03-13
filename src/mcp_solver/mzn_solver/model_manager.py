@@ -5,7 +5,8 @@ from minizinc import Model, Instance, Solver, Result, Status
 from minizinc.error import MiniZincError, SyntaxError, TypeError
 import logging
 
-from .constants import (
+from ..base_manager import SolverManager
+from ..constants import (
     DEFAULT_SOLVE_TIMEOUT,
     MAX_SOLVE_TIMEOUT,
     VALIDATION_TIMEOUT,
@@ -22,8 +23,9 @@ class ModelError(Exception):
     """Custom exception for model-related errors"""
     pass
 
-class ModelManager:
-    def __init__(self, solver_name: str = "chuffed"):
+class MiniZincModelManager(SolverManager):
+    def __init__(self, solver_name: str = "chuffed", lite_mode: bool = False):
+        super().__init__(lite_mode)
         self.items: List[Tuple[int, str]] = []
         self.current_solution: Optional[Any] = None
         self.solver = Solver.lookup(solver_name)
@@ -41,7 +43,7 @@ class ModelManager:
     def get_model(self) -> List[Tuple[int, str]]:
         return self.items
 
-    def clear_model(self) -> Dict[str, Any]:
+    async def clear_model(self) -> Dict[str, Any]:
         self.items = []
         self.current_solution = None
         self.last_solve_time = None
@@ -249,50 +251,55 @@ class ModelManager:
             return error_response("MINIZINC_ERROR", f"MiniZinc error: {str(e)}")
 
     def _process_result(self, result: Result, timeout_seconds: float) -> Dict[str, Any]:
-        time_stat = result.statistics.get("time", 0)
-        self.last_solve_time = float(time_stat.total_seconds()) if isinstance(time_stat, timedelta) else float(time_stat)
-        has_timed_out = self.last_solve_time >= timeout_seconds
-
-        if result.status.has_solution():
-            self.current_solution = result.solution
-            return {
-                "status": "SAT",
-                "solution": self.current_solution,
-                "solve_time": self.last_solve_time
-            }
+        self.current_solution = result
+        self.last_solve_time = result.statistics["solveTime"].total_seconds() if "solveTime" in result.statistics else None
+        
+        # Build a standardized solution format
+        solution = {"status": str(result.status)}
+        
+        if result.status == Status.SATISFIED or result.status == Status.ALL_SOLUTIONS or result.status == Status.OPTIMAL_SOLUTION:
+            solution["satisfiable"] = True
+            
+            # Extract solution values
+            solution_values = {}
+            for name, value in result.solution.__dict__.items():
+                if not name.startswith("_"):  # Skip private attributes
+                    solution_values[name] = value
+            solution["solution"] = solution_values
+            
+            # Add objective value if it exists
+            if hasattr(result, "objective") and result.objective is not None:
+                solution["objective"] = result.objective
+                
+            # Add optimization status
+            if result.status == Status.OPTIMAL_SOLUTION:
+                solution["optimal"] = True
+            else:
+                solution["optimal"] = False
+                
         elif result.status == Status.UNSATISFIABLE:
-            return {
-                "status": "UNSAT",
-                "message": "Problem is unsatisfiable",
-                "solve_time": self.last_solve_time
-            }
-        elif has_timed_out:
-            return {
-                "status": "TIMEOUT",
-                "message": "Solver reached timeout without conclusion",
-                "solve_time": self.last_solve_time
-            }
-        return {
-            "status": "UNKNOWN",
-            "message": "Solver still running",
-            "solve_time": self.last_solve_time
-        }
+            solution["satisfiable"] = False
+        else:
+            solution["satisfiable"] = False
+            solution["message"] = f"Solver status: {result.status} after {timeout_seconds} seconds"
+            
+        return solution
 
     def get_solution(self) -> Dict[str, Any]:
-        if self.current_solution is None:
-            return error_response("NO_SOLUTION", "No solution available. Ensure the model has been solved successfully.")
-        return {"solution": self.current_solution}
+        if not self.current_solution:
+            return error_response("NO_SOLUTION", "No solution is available. Please solve the model first.")
+        return self._process_result(self.current_solution, 0)
 
     def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
-        if self.current_solution is None:
-            return error_response("NO_SOLUTION", "No solution available. Ensure the model has been solved successfully.")
-        try:
-            value = getattr(self.current_solution, variable_name)
-            return {"value": value}
-        except AttributeError:
-            return error_response("VARIABLE_NOT_FOUND", f"Variable '{variable_name}' not found in solution.")
+        if not self.current_solution:
+            return error_response("NO_SOLUTION", "No solution is available. Please solve the model first.")
+        
+        if variable_name not in self.current_solution.solution.__dict__:
+            return error_response("VARIABLE_NOT_FOUND", f"Variable '{variable_name}' not found in solution")
+            
+        return {"name": variable_name, "value": self.current_solution.solution.__dict__[variable_name]}
 
     def get_solve_time(self) -> Dict[str, Any]:
         if self.last_solve_time is None:
-            return error_response("NO_SOLVE_TIME", "No solve time available. The model may not have been solved yet.")
-        return {"solve_time": self.last_solve_time}
+            return error_response("NO_SOLUTION", "No solve time available. Please solve the model first.")
+        return {"solve_time": self.last_solve_time} 
