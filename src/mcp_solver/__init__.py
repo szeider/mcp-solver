@@ -10,7 +10,7 @@ from .base_manager import SolverManager
 from .memo import MemoManager
 
 # Import solver implementations
-from .mzn_solver.model_manager import MiniZincModelManager
+from .mzn.model_manager import MiniZincModelManager
 
 # Import server functionality 
 from .server import serve, main

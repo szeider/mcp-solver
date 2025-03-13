@@ -27,7 +27,7 @@ except Exception:
     logging.getLogger(__name__).warning("Failed to load version from package, using default: 0.0.0")
 
 # Import after setting up logging and flags
-from .mzn_solver.model_manager import MiniZincModelManager, ModelError
+from .mzn.model_manager import MiniZincModelManager, ModelError
 
 def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
     """Format model items with optional truncation."""
