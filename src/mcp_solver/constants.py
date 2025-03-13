@@ -55,6 +55,6 @@ try:
     # Here, we assume this file is at: <repo_root>/instructions_prompt.md
     instructions_path = Path(__file__).resolve().parents[2] / "instructions_prompt.md"
     with open(instructions_path, "r", encoding="utf-8") as f:
-        INSTRCUTIONS_PROMPT = f.read()
+        INSTRUCTIONS_PROMPT = f.read()
 except Exception as e:
-    INSTRCUTIONS_PROMPT = f"Error loading instructions prompt: {e}"
+    INSTRUCTIONS_PROMPT = f"Error loading instructions prompt: {e}"
