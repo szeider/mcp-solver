@@ -43,10 +43,32 @@ MCP Solver includes a subset of Z3's functionality. The following features are a
 - **BitVectors**: Core bit-vector operations
 
 ### Available Templates
-MCP Solver provides the following templates to simplify common patterns:
-- `array_is_sorted`, `all_distinct`, `array_contains`
-- `exactly_k`, `at_most_k`, `at_least_k`
-- `function_is_injective`, `function_is_surjective`
+MCP Solver provides the following templates to simplify common constraint patterns:
+
+```python
+# Import templates
+from mcp_solver.z3.templates import (
+    # Quantifier patterns
+    array_is_sorted,    # Array elements are in non-decreasing order
+    all_distinct,       # All elements in array are different
+    array_contains,     # Array contains a specific element
+    exactly_k,          # Exactly k elements equal to value
+    at_most_k,          # At most k elements equal to value
+    at_least_k,         # At least k elements equal to value
+    
+    # Function properties
+    function_is_injective,  # One-to-one mapping
+    function_is_surjective, # Onto mapping
+    
+    # Function structure templates (recommended)
+    constraint_satisfaction_template,  # For constraint solving
+    optimization_template,             # For optimization
+    array_template,                    # For array handling
+    quantifier_template                # For quantifier patterns
+)
+```
+
+These templates are covered in more detail in later sections.
 
 ### Not Supported
 The following Z3 features are NOT available in MCP Solver:
@@ -61,11 +83,19 @@ If you need functionality that is not supported, you may need to implement it us
 
 ## Working with Multiple Items
 
-Break your Z3 models into modular components rather than writing everything in a single block. This improves:
+Z3 models can be developed using three approaches in MCP Solver, each with different trade-offs:
+
+1. **Multi-Item Approach**: Breaking models into separate items (shown below)
+2. **Function-Based Approach**: Encapsulating all logic in a custom function
+3. **Function Template Approach**: Using pre-built templates for common patterns (recommended)
+
+The multi-item approach breaks your Z3 models into modular components. This improves:
 - **Readability**: Smaller, focused code blocks are easier to understand
 - **Maintainability**: Edit specific parts without rewriting everything
 - **Flexibility**: Try different variations of constraints
 - **Debugging**: Isolate and fix issues in specific components
+
+However, this approach can lead to variable scope issues and import problems. For most users, the **Function Template Approach** (described in the "Function Templates" section) is recommended as it provides the benefits of modularity while avoiding common issues.
 
 ### Example of a Fine-Grained Multi-Item Approach:
 
@@ -167,6 +197,629 @@ This fine-grained approach makes it easier to:
 - Reuse components across problems
 - Identify performance bottlenecks
 
+## Best Practices for Z3 Models
+
+Following these practices will make your Z3 models more robust and less prone to errors:
+
+### Model Structure and Organization
+
+#### Function-Based Approach
+For complex models, wrap your logic in a function to avoid scope issues. There are two ways to do this:
+
+1. **Basic Function-Based Approach** - Create your own function with custom internal structure:
+
+```python
+from z3 import *
+
+def build_model():
+    # Import any additional libraries inside the function
+    from itertools import combinations
+    
+    # Define variables, constraints, objective here in any order
+    x = Int('x')
+    solver = Solver()  # or Optimize()
+    solver.add(x > 0)
+    
+    # Return solver and variables dictionary
+    return solver, {'x': x}
+
+# Call your function and export solution
+solver, variables = build_model()
+export_solution(solver=solver, variables=variables)
+```
+
+2. **Template Function Approach (Recommended)** - Use the pre-built template functions with structured sections:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import constraint_satisfaction_template
+
+def build_model():
+    # The template provides a standardized structure with clear sections
+    # [SECTION: VARIABLE DEFINITION]
+    x = Int('x')
+    
+    # [SECTION: SOLVER CREATION] 
+    # The solver is already created by the template
+    
+    # [SECTION: CONSTRAINTS]
+    # Add your constraints here following the template structure
+    
+    # [SECTION: VARIABLES TO EXPORT]
+    variables = {'x': x}
+    
+    return solver, variables
+
+# Execute the model as usual
+solver, variables = build_model()
+export_solution(solver=solver, variables=variables)
+```
+
+The template function approach is strongly recommended as it provides consistent structure and helps avoid common errors.
+
+### Choosing the Right Template
+
+| Template | When to Use | Key Features |
+|----------|-------------|--------------|
+| `constraint_satisfaction_template()` | For problems focused on finding a valid solution that satisfies all constraints | Uses `Solver()`, emphasizes constraint definition |
+| `optimization_template()` | For problems that maximize or minimize an objective function | Uses `Optimize()`, includes objective section |
+| `array_template()` | For problems involving sequences, lists, or grids | Includes array creation helper functions |
+| `quantifier_template()` | For problems with "for all" or "there exists" constraints | Includes helper functions for common quantifier patterns |
+
+### Using Function Templates
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import optimization_template  # Choose the appropriate template
+
+def build_model():
+    # [SECTION: VARIABLE DEFINITION]
+    # Define all variables, constants, and parameters here
+    x = Int('x')
+    y = Int('y')
+    
+    # [SECTION: SOLVER CREATION]
+    # This is created automatically by the template, but you can customize it
+    optimizer = Optimize()  # Will be Solver() for constraint_satisfaction_template
+    
+    # [SECTION: CONSTRAINTS]
+    # Add all your constraints here
+    optimizer.add(x >= 0)
+    optimizer.add(y >= 0)
+    optimizer.add(x + y <= 10)
+    
+    # [SECTION: OBJECTIVE]  # Only in optimization_template
+    # Define and set your objective function
+    objective = x + 2*y
+    optimizer.maximize(objective)
+    
+    # [SECTION: VARIABLES TO EXPORT]
+    # List all variables you want to see in the solution
+    variables = {'x': x, 'y': y, 'objective': objective}
+    
+    return optimizer, variables
+
+# Execute the model
+solver, variables = build_model()
+export_solution(solver=solver, variables=variables)
+```
+
+### Template Structure Details
+
+Each template provides a different structure optimized for its purpose:
+
+**Constraint Satisfaction Template:**
+```python
+def constraint_satisfaction_template():
+    # [SECTION: VARIABLE DEFINITION]
+    # Define variables here
+    
+    # [SECTION: SOLVER CREATION]
+    solver = Solver()
+    
+    # [SECTION: CONSTRAINTS]
+    # Add constraints here
+    
+    # [SECTION: VARIABLES TO EXPORT]
+    variables = {}
+    
+    return solver, variables
+```
+
+**Optimization Template:**
+```python
+def optimization_template():
+    # [SECTION: VARIABLE DEFINITION]
+    # Define variables here
+    
+    # [SECTION: SOLVER CREATION]
+    optimizer = Optimize()
+    
+    # [SECTION: CONSTRAINTS]
+    # Add constraints here
+    
+    # [SECTION: OBJECTIVE]
+    # Define objective and call maximize() or minimize()
+    
+    # [SECTION: VARIABLES TO EXPORT]
+    variables = {}
+    
+    return optimizer, variables
+```
+
+**Benefits of Using Function Templates:**
+- **Scope Management**: Avoids variable scope issues between items
+- **Import Organization**: Ensures imports are properly scoped
+- **Consistent Structure**: Provides a standardized model structure
+- **Solution Export**: Encourages proper export of solution variables
+- **Readability**: Includes clear section comments for better organization
+- **Reusability**: Makes it easier to adapt and modify models
+
+Function templates are the recommended approach for almost all Z3 models in MCP Solver.
+
+#### Model Organization Recommendations
+- **For Simple Models**: Use a single comprehensive item with clear section comments
+- **For Complex Models**: Split into multiple items, but follow this structure:
+  1. Define ALL constants and imports in the first item
+  2. Define ALL variables in the second item
+  3. Group related constraints in subsequent items
+  4. Include the objective function and export in the final item
+
+### Variable Management
+
+- Use descriptive variable names that reflect the problem domain (e.g., `start_time` instead of `x`)
+- Prefer explicit variable names rather than list indexing where possible
+- When using arrays of variables, create meaningful indexing schemes
+- Document the meaning and units of variables in comments
+
+### Incremental Development
+
+- Build and test your model incrementally
+- Start with basic constraints before adding complex ones
+- Verify satisfiability at checkpoints as you add constraints
+- Use small test cases with known solutions first
+
+### Debugging Tips
+
+- Include comments explaining the purpose of complex constraints
+- Check satisfiability of subcombinations of constraints to isolate issues
+- Add temporary debug constraints (e.g., `s.add(x < 10)`) to narrow down solution space
+- Use Z3's `unsat_core()` when available to identify conflicting constraints
+
+### Common Pitfalls to Avoid
+
+- **Variable Scoping**: Define variables where they'll be visible across all items
+- **Mixing Solvers**: Don't mix constraints between different solver instances
+- **Forgetting Conversions**: Be explicit with type conversions (e.g., `ToReal(x)`)
+- **Quantifier Abuse**: Avoid nested quantifiers when possible—they can lead to performance issues
+- **Empty Arrays**: Initialize arrays with at least one value to avoid unexpected behavior
+
+## Using Quantifier Templates
+
+MCP Solver provides templates to simplify common quantified constraints. These templates offer a more readable and efficient way to express complex constraints without writing ForAll/Exists expressions manually.
+
+### Using Quantifier Pattern Templates
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import array_is_sorted, all_distinct, array_contains
+
+# Create array variables
+arr = Array('arr', IntSort(), IntSort())
+n = 5
+
+# Basic domain constraints
+s = Solver()
+for i in range(n):
+    s.add(arr[i] >= 0, arr[i] < n)
+
+# Use templates instead of complex quantifiers
+s.add(all_distinct(arr, n))
+s.add(array_is_sorted(arr, n))
+
+# These are equivalent to the manual quantifier expressions:
+# i, j = Ints('i j')
+# s.add(ForAll([i, j], Implies(And(0 <= i, i < j, j < n), arr[i] != arr[j])))  # all_distinct
+# s.add(ForAll([i, j], Implies(And(0 <= i, i < j, j < n), arr[i] <= arr[j])))  # array_is_sorted
+
+export_solution(solver=s, variables={f'arr[{i}]': arr[i] for i in range(n)})
+```
+
+### Quantifier Template Best Practices
+
+- Templates often provide better performance than equivalent manually written quantifiers
+- Use templates for common patterns to improve readability
+- Templates can be composed to express more complex constraints
+- When debugging, replace templates with explicit constraints to isolate issues
+
+## Common Challenges and Solutions
+
+When implementing complex optimization models in Z3, you may encounter several common challenges. Here are practical solutions based on real-world experience:
+
+### Variable Scope Issues
+
+**Challenge**: Variables defined in one item may not be accessible in another item, causing errors like `NameError: name 'X' is not defined`.
+
+**Solution**:
+```python
+# AVOID this pattern (splitting variables across items):
+# Item 1
+REGIONS = ["A", "B", "C"]
+
+# Item 2
+for region in REGIONS:  # Error: REGIONS not defined!
+    # ...
+
+# INSTEAD use this pattern (function-based approach):
+def build_model():
+    REGIONS = ["A", "B", "C"]
+    # All model code using REGIONS here
+    return solver, variables
+
+solver, variables = build_model()
+export_solution(solver=solver, variables=variables)
+```
+
+### Import Handling
+
+**Challenge**: Imports in one item may not be available in subsequent items, causing errors like `NameError: name 'combinations' is not defined`.
+
+**Solution**:
+
+#### IMPORTANT: Never Mix Import Strategies!
+
+Choose ONE of these approaches and stick with it for your entire model:
+
+1. **Function-Based Approach (Recommended):** 
+   ```python
+   from z3 import *  # Only Z3 at the top level
+   
+   def build_model():
+       # Place ALL other imports inside the function
+       from itertools import combinations
+       import numpy as np
+       import random
+       
+       # Now use these imports safely within the function scope
+       for combo in combinations(range(5), 2):
+           # ...
+       
+       return solver, variables
+
+   # Build and solve the model
+   solver, variables = build_model()
+   export_solution(solver=solver, variables=variables)
+   ```
+
+2. **Multi-Item Approach (Not Recommended):**
+   ```python
+   # Item 1 - Place ALL imports here
+   from z3 import *
+   from itertools import combinations
+   import numpy as np
+   import random
+   
+   # Item 2 - NO IMPORTS here!
+   x = Int('x')
+   
+   # Item 3 - NO IMPORTS here!
+   s = Solver()
+   s.add(x > 0)
+   ```
+
+#### Common Import Errors and Solutions:
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `NameError: name 'combinations' is not defined` | Import in wrong place | Move import inside function or to first item |
+| `ModuleNotFoundError: No module named 'X'` | Missing dependency | Check available modules in MCP Solver |
+| `ImportError: cannot import name 'X'` | Incorrect import name | Check correct template names and import paths |
+
+#### Best Practices for Imports:
+
+1. **Always Import Z3 First**: `from z3 import *` should always be your first import
+2. **Avoid Duplicate Imports**: Don't import the same module in multiple places
+3. **Use Function Templates**: Templates handle import scoping automatically
+4. **Test Imports First**: When developing complex models, test imports work before adding logic
+
+The most common error in complex Z3 models is import problems. The function template approach eliminates almost all import issues and is strongly recommended.
+
+### Handling Rational Numbers
+
+**Challenge**: Z3 results may include question marks for rational numbers (like `0.33333?` or `0.1666666666?`), causing parsing errors or conversion issues.
+
+**Solution**:
+```python
+# Option 2: If precision matters, use integer variables with scaling (RECOMMENDED)
+# Instead of:
+allocation = Real('allocation')  # Might result in fractions like 0.1666666666?
+
+# Consider:
+allocation_pct = Int('allocation_pct')  # Represents percentage (0-100)
+s.add(allocation_pct >= 0, allocation_pct <= 100)
+# Then work with allocation_pct/100.0 in your constraints
+
+# This approach works best for:
+# - Percentages (scale by 100)
+# - Money values (scale by 100 for dollars/cents)
+# - Probabilities (scale by 1000 for three decimal places)
+
+# Example: Supply chain allocation with integer percentages
+# Define allocation variables as integer percentages (0-100)
+allocations = {}
+for region in regions:
+    allocations[region] = Int(f"allocation_{region}")
+
+# Allocations must sum to 100%
+optimizer.add(Sum([allocations[region] for region in regions]) == 100)
+
+# Each region gets between 5% and 30%
+for region in regions:
+    optimizer.add(allocations[region] >= 5)   # Min 5%
+    optimizer.add(allocations[region] <= 30)  # Max 30%
+
+# Option 3: Accept that some results will be displayed as fractions
+# This is often fine for understanding the model's solution
+```
+
+**Remember**: Z3's rational numbers (like `0.1666666666?`) represent exact fractions (e.g., 1/6) rather than floating-point approximations. The question mark indicates that it's an exact value that can't be precisely represented in decimal.
+
+### Solution Verification
+
+**Challenge**: Z3 may return a solution that looks correct but doesn't fully satisfy all constraints.
+
+**Solution**:
+```python
+# Always verify critical constraints after solving
+def verify_solution(model, variables):
+    # Extract values from model
+    values = {name: model.eval(var) for name, var in variables.items()}
+    
+    # Check key constraints
+    capacity_satisfied = check_capacity_constraint(values)
+    allocation_satisfied = check_allocation_constraints(values)
+    
+    if not (capacity_satisfied and allocation_satisfied):
+        print("Warning: Solution may not satisfy all constraints!")
+        print(f"Capacity constraint satisfied: {capacity_satisfied}")
+        print(f"Allocation constraints satisfied: {allocation_satisfied}")
+    
+    return values
+```
+
+### Comprehensive Solution Verification for Complex Problems
+
+For complex optimization problems (like supply chain optimization), it's essential to verify that the solution satisfies all constraints. This is particularly important for problems with many constraints or where the solver might return approximate solutions.
+
+```python
+def build_supply_chain_model():
+    # ... model definition ...
+    
+    # Return the optimizer and variables
+    return optimizer, export_variables
+
+# Build and solve the model
+optimizer, variables = build_supply_chain_model()
+
+# Get the solution
+if optimizer.check() == sat:
+    model = optimizer.model()
+    
+    # Verify the solution
+    def verify_constraints(model):
+        # Extract actual values from the model
+        allocations = {region: model.eval(variables[region]).as_long() 
+                      for region in regions}
+        
+        print("Verifying solution constraints:")
+        
+        # 1. Check total allocation = 100%
+        total = sum(allocations.values())
+        print(f"Total allocation: {total}% (should be 100%)")
+        
+        # 2. Check min/max constraints
+        min_ok = all(alloc >= 5 for alloc in allocations.values())
+        max_ok = all(alloc <= 30 for alloc in allocations.values())
+        print(f"Min/max constraints: {min_ok and max_ok}")
+        
+        # 3. Check resilience constraints
+        worst_case_capacity = float('inf')
+        for scenario in all_disruption_scenarios:
+            # Calculate capacity with this disruption
+            capacity = calculate_scenario_capacity(scenario, allocations)
+            worst_case_capacity = min(worst_case_capacity, capacity)
+        
+        print(f"Worst-case capacity: {worst_case_capacity}% (minimum: 70%)")
+        resilience_ok = worst_case_capacity >= 70
+        
+        # Overall verification
+        all_constraints_satisfied = (total == 100 and min_ok and max_ok and resilience_ok)
+        print(f"All constraints satisfied: {all_constraints_satisfied}")
+        
+        return all_constraints_satisfied
+    
+    # Run verification
+    verification_result = verify_constraints(model)
+    
+    # Export the solution
+    export_solution(solver=optimizer, variables=variables)
+else:
+    print("No solution found")
+```
+
+Key benefits of comprehensive verification:
+- Confirms that all constraints are actually satisfied
+- Helps identify which specific constraints might be violated
+- Provides confidence in the solution before implementing it
+- Acts as documentation of what the model is supposed to satisfy
+
+Verifying solutions is especially important when:
+- Working with complex multi-constraint problems
+- Using Real variables that may have precision issues
+- Implementing critical business decisions based on the model
+- Dealing with potentially conflicting constraints
+
+### Complex Constraints Generation
+
+**Challenge**: Generating all combinations for complex constraints can lead to scope issues.
+
+**Solution**:
+```python
+# For complex combination constraints, define them explicitly
+constraints = []
+
+# Pre-generate all constraint data
+scenarios = [
+    ["A", "B"],
+    ["A", "C"],
+    ["B", "C"],
+    # etc.
+]
+
+# Then add constraints in a loop
+for scenario in scenarios:
+    capacity = calculate_capacity(scenario)
+    constraints.append(capacity >= MIN_CAPACITY)
+
+# Add all constraints at once
+for c in constraints:
+    optimizer.add(c)
+```
+
+This pattern is particularly useful for complex problems like supply chain optimization with multiple disruption scenarios:
+
+```python
+# Pre-generate all disruption scenarios
+all_disruption_scenarios = []
+for k in range(1, MAX_DISRUPTED_REGIONS + 1):
+    all_disruption_scenarios.extend(list(combinations(regions, k)))
+
+# Then use these scenarios for constraints
+for disruption_scenario in all_disruption_scenarios:
+    capacity = calculate_capacity(disruption_scenario)
+    optimizer.add(capacity >= MIN_TOTAL_CAPACITY * 100)
+```
+
+## Optimization Problems Best Practices
+
+When working with optimization problems in Z3, follow these specific guidelines to ensure efficient and correct models:
+
+### Structuring Optimization Models
+
+1. **Start with feasibility**: First build a model that satisfies all constraints without any objective:
+   ```python
+   # Step 1: Build and check feasibility
+   s = Solver()
+   # Add all constraints
+   if s.check() == sat:
+       # Model is feasible, proceed to optimization
+       opt = Optimize()
+       # Transfer constraints and add objective
+   else:
+       print("Model is infeasible - fix constraints first")
+   ```
+
+2. **Add the objective function last**: Once you know your model is feasible, add the objective:
+   ```python
+   # After ensuring feasibility
+   opt = Optimize()
+   opt.add(s.assertions())  # Transfer all constraints
+   opt.maximize(objective)  # Add objective last
+   ```
+
+3. **Use the optimization template** for complex optimization problems:
+   ```python
+   from mcp_solver.z3.templates import optimization_template
+   
+   def build_model():
+       # [SECTION: VARIABLE DEFINITION]
+       # Define variables
+       
+       # [SECTION: SOLVER CREATION]
+       optimizer = Optimize()
+       
+       # [SECTION: CONSTRAINTS]
+       # Add all constraints
+       
+       # [SECTION: OBJECTIVE]
+       # Define your objective and set maximize/minimize
+       objective = Sum([...])
+       optimizer.maximize(objective)
+       
+       # [SECTION: VARIABLES TO EXPORT]
+       variables = {..., 'objective': objective}
+       
+       return optimizer, variables
+   ```
+
+### Handling Multiple Objectives
+
+For problems with multiple objectives, set priorities:
+
+```python
+# Primary objective
+opt.maximize(primary_objective)
+
+# Secondary objective (considered only after primary is optimized)
+opt.maximize(secondary_objective)
+```
+
+### Pre-generate Complex Constraints
+
+For optimization problems with many similar constraints (like the disruption scenarios in supply chain problems):
+
+```python
+# Pre-generate all constraint data
+all_scenarios = []
+for k in range(1, MAX_DISRUPTED_REGIONS + 1):
+    all_scenarios.extend(list(combinations(regions, k)))
+
+# Build constraints list
+constraints = []
+for scenario in scenarios:
+    capacity = calculate_capacity(scenario)
+    constraints.append(capacity >= MIN_CAPACITY)
+
+# Add all constraints at once
+for c in constraints:
+    optimizer.add(c)
+```
+
+### Performance Tips for Optimization
+
+1. **Set timeout for complex problems**: 
+   ```python
+   optimizer.set("timeout", 10000)  # 10 second timeout
+   ```
+
+2. **Try different objective structures**: Sometimes reformulating the objective function can make solving easier:
+   ```python
+   # Instead of:
+   objective = Sum([complex_expression(i) for i in range(n)])
+   
+   # Try:
+   objective_parts = []
+   for i in range(n):
+       part = complex_expression(i)
+       objective_parts.append(part)
+   objective = Sum(objective_parts)
+   ```
+
+3. **Use incremental solving** for complex problems:
+   ```python
+   # Start with core constraints only
+   opt.add(core_constraints)
+   
+   # Get an initial solution
+   if opt.check() == sat:
+       model = opt.model()
+       # Extract initial values for variables
+       
+       # Now add harder constraints
+       opt.add(harder_constraints)
+       # Solve again, potentially using initial values as hints
+   ```
+
 ## Examples
 
 ### Basic Constraint Solving
@@ -262,6 +915,110 @@ s.add(arr[i] > 15)
 export_solution(solver=s, variables={'i': i, 'arr[1]': Select(arr, 1), 'arr[2]': Select(arr, 2), 'arr[3]': Select(arr, 3)})
 ```
 
+### Complex Example: Supply Chain Optimization with Function Templates
+
+This example demonstrates how to use function templates for a complex optimization problem:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import optimization_template
+
+def build_supply_chain_model():
+    # Import needed libraries within the function scope
+    from itertools import combinations
+    
+    # [SECTION: VARIABLE DEFINITION]
+    # Define the regions and their cost efficiency scores
+    regions = ["North America", "South America", "Western Europe", "Eastern Europe", 
+               "Southeast Asia", "East Asia", "Oceania"]
+    efficiency_scores = {
+        "North America": 75,
+        "South America": 88,
+        "Western Europe": 70,
+        "Eastern Europe": 85,
+        "Southeast Asia": 92,
+        "East Asia": 78,
+        "Oceania": 65
+    }
+
+    # Constants
+    DISRUPTION_REDUCTION = 0.6  # 60% capacity reduction
+    MIN_TOTAL_CAPACITY = 0.7    # 70% minimum capacity required
+    MIN_ALLOCATION = 0.05       # 5% minimum allocation per region
+    MAX_ALLOCATION = 0.3        # 30% maximum allocation per region
+    MAX_DISRUPTED_REGIONS = 3   # Up to 3 regions can be disrupted simultaneously
+
+    # Define allocation variables (as percentages)
+    # Using Int variables to avoid rational number issues
+    allocations = {}
+    for region in regions:
+        # Using integer percentages (0-100) instead of Real (0.0-1.0)
+        allocations[region] = Int(f"allocation_{region}")
+
+    # [SECTION: SOLVER CREATION]
+    optimizer = Optimize()
+
+    # [SECTION: CONSTRAINTS]
+    # Constraint 1: Allocations must sum to 100%
+    optimizer.add(Sum([allocations[region] for region in regions]) == 100)
+
+    # Constraint 2 & 3: Each region must receive at least 5% and at most 30%
+    for region in regions:
+        optimizer.add(allocations[region] >= 5)  # 5%
+        optimizer.add(allocations[region] <= 30) # 30%
+
+    # Constraint 5: Supply chain resilience against disruptions
+    # Pre-generate all possible disruption scenarios
+    all_disruption_scenarios = []
+    for k in range(1, MAX_DISRUPTED_REGIONS + 1):
+        all_disruption_scenarios.extend(list(combinations(regions, k)))
+
+    # Helper function to calculate capacity for a given disruption scenario
+    def calculate_capacity(disrupted_regions):
+        """Calculate total capacity when certain regions are disrupted"""
+        capacity = 0
+        for region in regions:
+            if region in disrupted_regions:
+                # Disrupted regions operate at 40% capacity (60% reduction)
+                capacity += allocations[region] * 40 / 100.0  # Scale to match Int variables
+            else:
+                # Non-disrupted regions operate at full capacity
+                capacity += allocations[region]
+        return capacity
+
+    # Add resilience constraints for each disruption scenario
+    for disruption_scenario in all_disruption_scenarios:
+        capacity = calculate_capacity(disruption_scenario)
+        optimizer.add(capacity >= MIN_TOTAL_CAPACITY * 100)  # Scale to match Int variables
+
+    # [SECTION: OBJECTIVE]
+    # Constraint 4: Maximize overall cost efficiency
+    # Calculate the weighted average of efficiency scores
+    total_efficiency = Sum([allocations[region] * efficiency_scores[region] for region in regions]) / 100.0
+
+    # Set the objective to maximize efficiency
+    optimizer.maximize(total_efficiency)
+
+    # [SECTION: VARIABLES TO EXPORT]
+    # Prepare variables for export
+    export_variables = {region: allocations[region] for region in regions}
+    export_variables["total_efficiency"] = total_efficiency
+
+    return optimizer, export_variables
+
+# Build and solve the model
+optimizer, variables = build_supply_chain_model()
+export_solution(solver=optimizer, variables=variables)
+```
+
+Key features of this example:
+- Uses the function template structure with clear sections
+- Imports libraries within the function scope
+- Uses integer variables (percentages 0-100) to avoid rational number issues
+- Pre-generates all disruption scenarios before adding constraints
+- Scales calculations appropriately for integer variables
+- Uses a well-structured objective function
+
 ## Working with Quantifiers
 
 Z3 supports powerful universal (∀) and existential (∃) quantifiers for expressing properties over entire domains:
@@ -324,77 +1081,215 @@ exists_better_item = ForAll([i_var], Implies(
 s.add(exists_better_item)
 ```
 
-## Using Quantifier Templates
+## Tips for Successful Z3 Modeling
 
-To simplify working with quantifiers, MCP Solver provides a library of pre-built quantifier patterns that you can import and use directly:
+1. **Always call `export_solution()`** at the end of your model to ensure results are properly returned.
+
+2. **Use the Function Template approach** when possible:
+   ```python
+   from z3 import *
+   from mcp_solver.z3.templates import constraint_satisfaction_template
+   
+   # Either customize a template for your problem (recommended):
+   def build_model():
+       # Define your variables, constraints, etc.
+       return solver, variables
+   
+   solver, variables = build_model()
+   export_solution(solver=solver, variables=variables)
+   ```
+
+3. **Structure your model clearly** with sections for variables, constraints, and solution export.
+
+4. **Document constraints** with clear comments explaining their purpose.
+
+5. **Check satisfiability incrementally** to identify problematic constraints.
+
+6. **Validate your solution** after solving to ensure all constraints are satisfied.
+
+7. **Start with simple models** and incrementally add complexity.
+
+8. **Use quantifier templates** instead of writing complex ForAll/Exists expressions manually.
+
+9. **Review examples** to learn idiomatic Z3 modeling patterns.
+
+10. **Avoid common pitfalls** like scope issues, mixing solvers, and forgetting type conversions.
+
+## Troubleshooting Common Errors
+
+When working with Z3 in MCP Solver, you might encounter these common errors and their solutions:
+
+### Error: "NameError: name 'X' is not defined"
+
+**Problem**: Variables or imports defined in one code item aren't accessible in another item.
+
+**Solution**: 
+- Use the function template approach to encapsulate all code
+- Put all imports at the top of your function
+- Define all variables inside your function
 
 ```python
 from z3 import *
-from z3_templates import array_is_sorted, all_distinct, exactly_k
 
-# Using templates instead of writing complex quantifiers
-n = 10  # Size of array
-arr = Array('arr', IntSort(), IntSort())
-s = Solver()
+def build_model():
+    # Local imports inside function
+    from itertools import combinations
+    
+    # Define ALL variables here
+    
+    # Rest of model...
+    
+    return solver, variables
 
-# This single line replaces a complex ForAll quantifier
-s.add(array_is_sorted(arr, n))
-
-# Ensure all elements are different
-s.add(all_distinct(arr, n))
-
-# Cardinality constraints for boolean variables
-bool_vars = [Bool(f'b_{i}') for i in range(5)]
-s.add(exactly_k(bool_vars, 2))  # Exactly 2 must be true
-
-# Export solution
-export_solution(solver=s, variables={
-    **{f'arr[{i}]': arr[i] for i in range(n)},
-    **{f'b_{i}': bool_vars[i] for i in range(5)}
-})
+# Call your function and export solution
+solver, variables = build_model()
+export_solution(solver=solver, variables=variables)
 ```
 
-### Available Template Functions
+### Error: "unknown sort" or "solver does not support this feature"
 
-| Function | Description |
-|----------|-------------|
-| `array_is_sorted(arr, size, strict=False)` | Array elements are in ascending order |
-| `all_distinct(arr, size)` | All elements in the array are different |
-| `array_contains(arr, size, value)` | Array contains a specific value |
-| `exactly_k(bool_vars, k)` | Exactly k boolean variables are true |
-| `at_most_k(bool_vars, k)` | At most k boolean variables are true |
-| `at_least_k(bool_vars, k)` | At least k boolean variables are true |
-| `function_is_injective(func, domain_size)` | Function is one-to-one (injective) |
-| `function_is_surjective(func, domain_size, range_size)` | Function maps onto the entire range (surjective) |
+**Problem**: You're using Z3 features not supported by MCP Solver.
 
-Using these templates can significantly simplify your code and help avoid common errors in quantifier patterns. The template functions are optimized for performance and provide clear semantics.
+**Solution**:
+- Check the "Supported Z3 Features" section for available functionality
+- Try restructuring your model to use supported features
+- Break down complex constraints into simpler ones
 
-## Tips
+### Error: "unknown"/"unsat"/"timeout" with complex models
 
-1. Always call `export_solution()` at the end of your code
-2. Use descriptive variable names in the `variables` dictionary
-3. For optimization problems, include the objective in the `export_solution()` call
-4. Z3 supports integers, reals, booleans, bit-vectors, arrays, and more
-5. Complex constraints can be built using Z3's operators and functions
-6. The solver has a timeout of 10 seconds by default
-7. Break large models into multiple items for better organization
-8. Name quantifier variables descriptively to avoid confusion (e.g., `row_idx` instead of `i`)
-9. Quantified formulas can be slow to solve - use them only when necessary
-10. Include bounds for quantifier variables to restrict their domains
+**Problem**: Z3 can't find a solution or is taking too long.
 
-## Quantifier Best Practices
+**Solution**:
+- Start with a simplified version of your model
+- Add constraints incrementally to identify the problematic one
+- Set a timeout parameter: `optimizer.set("timeout", 5000)`
+- Check if constraints are contradictory
+- Try different constraint formulations
 
-1. **Bounded Domains**: Always include explicit bounds for quantifier variables
+### Error: "solver.check() == unknown"
+
+**Problem**: Z3 can't determine if the model is satisfiable (often with non-linear constraints).
+
+**Solution**:
+- Simplify complex non-linear constraints
+- Try a different approach to model the same constraint
+- Add bounds to variables to restrict the search space
+
+### Error: "Z3 segmentation fault" or unexpected crash
+
+**Problem**: Z3 crashed due to excessive memory usage or infinite recursion.
+
+**Solution**:
+- Reduce the complexity of quantified formulas
+- Break the model into smaller subproblems
+- Add bounds to all variables
+- Avoid creating excessively large arrays or complex expressions
+
+### Error: Unexpected solutions or missing solutions
+
+**Problem**: Z3 gives results that don't seem correct or expected values are missing.
+
+**Solution**:
+- Verify constraints are correctly formulated
+- Check that all variables are properly exported in the variables dictionary
+- Ensure that bounds on variables aren't excluding valid solutions
+- Test constraints individually to ensure they're working as expected
+
+## Best Practices for Handling Rational Numbers
+
+Z3 represents fractions as exact rational numbers, which can appear in results with a question mark (like `0.1666666666?`). The MCP Solver might show errors like:
+
+```
+Error extracting value for x: could not convert string to float: '0.1666666666?'
+```
+
+### Using Integer Variables with Scaling (Recommended Approach)
+
+The most reliable approach is to avoid Real variables entirely by using Int variables with appropriate scaling:
+
+```python
+# INSTEAD OF using Real variables like this:
+allocation = Real('allocation')  # Range: 0.0 to 1.0
+solver.add(allocation >= 0.0, allocation <= 1.0)
+solver.add(allocation * 3 + other_allocation * 2 >= 1.5)
+
+# USE Integer variables with scaling:
+allocation_pct = Int('allocation_pct')  # Range: 0 to 100 (percentage)
+solver.add(allocation_pct >= 0, allocation_pct <= 100)
+solver.add(allocation_pct * 3 + other_allocation_pct * 2 >= 150)  # Scaled by 100
+```
+
+This approach works especially well for:
+- **Percentages**: Scale by 100 (e.g., 0.05 becomes 5)
+- **Money values**: Scale by 100 for dollars/cents
+- **Probabilities**: Scale by 1000 for three decimal places
+- **Measurements**: Choose appropriate scaling factor (e.g., mm instead of m)
+
+### Example: Supply Chain Allocation with Integer Percentages
+
+```python
+def build_supply_chain_model():
+    # [SECTION: VARIABLE DEFINITION]
+    regions = ["A", "B", "C"]
+    
+    # Define allocation variables as integer percentages (0-100)
+    allocations = {}
+    for region in regions:
+        allocations[region] = Int(f"allocation_{region}")
+    
+    # [SECTION: CONSTRAINTS]
+    # Allocations must sum to 100%
+    optimizer.add(Sum([allocations[region] for region in regions]) == 100)
+    
+    # Each region gets between 5% and 30%
+    for region in regions:
+        optimizer.add(allocations[region] >= 5)   # Min 5%
+        optimizer.add(allocations[region] <= 30)  # Max 30%
+    
+    # When calculating capacity, remember to account for the scaling
+    def calculate_capacity(disrupted_regions):
+        capacity = 0
+        for region in regions:
+            if region in disrupted_regions:
+                # 40% capacity (scaled) for disrupted regions
+                capacity += allocations[region] * 40 / 100.0
+            else:
+                capacity += allocations[region]  # Full capacity
+        return capacity
+    
+    # Add constraints using the scaled capacity calculation
+    optimizer.add(capacity >= MIN_CAPACITY * 100)  # Scale threshold too
+    
+    # [SECTION: OBJECTIVE]
+    # Calculate weighted efficiency (remember to scale back for the objective)
+    total_efficiency = Sum([allocations[region] * efficiency_scores[region] 
+                           for region in regions]) / 100.0
+    
+    return optimizer, variables
+```
+
+### Alternative Options
+
+If you must use Real variables or are dealing with existing rational number results:
+
+1. **Approximate the Values**: 
+   - Treat `0.1666666666?` as approximately 0.167
+   - Use `round(float(value_str.replace('?', '')), 6)` to get a usable approximation
+
+2. **Extract Numerator/Denominator**:
    ```python
-   # Good: Bounded domain
-   ForAll([i], Implies(And(0 <= i, i < n), arr[i] > 0))
-   
-   # Bad: Unbounded domain can cause performance problems
-   ForAll([i], arr[i] > 0)
+   # If you have access to the Z3 model directly:
+   def get_fraction(model, var):
+       value = model.eval(var)
+       if is_real(var):
+           num = float(value.numerator_as_long())
+           den = float(value.denominator_as_long())
+           return num/den
+       return value
    ```
 
-2. **Avoid Nested Quantifiers** where possible as they can significantly slow down solving
+3. **Accept the Fractions**:
+   - Sometimes approximate values are sufficient for understanding the solution
+   - Document that results contain exact rational numbers
 
-3. **Start Simple**: Begin with non-quantified constraints, then add quantifiers incrementally
-
-4. **Debug Quantifiers**: If your model is unsatisfiable or slow, try removing quantifiers to isolate issues
+Remember that Z3's rational numbers represent exact mathematical values, so the Integer scaling approach gives you both precision and easier handling of results.
