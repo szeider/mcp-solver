@@ -98,8 +98,10 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     # Import solution module
     from .solution import export_solution
     
-    # Import templates module
+    # Import templates modules
     from .templates import z3_templates
+    from .templates import function_templates
+    from .templates import subset_templates
     
     # Reset last solution
     global _LAST_SOLUTION
@@ -113,7 +115,10 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
         # Skip import lines but keep Z3 namespace imports and templates imports
         if (line.strip().startswith('from z3 import') or 
             line.strip().startswith('import z3') or
-            line.strip().startswith('from z3_templates import')):
+            line.strip().startswith('from z3_templates import') or
+            line.strip().startswith('from mcp_solver.z3.templates import') or
+            line.strip().startswith('from function_templates import') or
+            line.strip().startswith('from subset_templates import')):
             continue
         else:
             processed_code.append(line)
@@ -194,6 +199,18 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     restricted_globals["at_least_k"] = z3_templates.at_least_k
     restricted_globals["function_is_injective"] = z3_templates.function_is_injective
     restricted_globals["function_is_surjective"] = z3_templates.function_is_surjective
+    
+    # Add function templates
+    restricted_globals["function_templates"] = function_templates
+    restricted_globals["constraint_satisfaction_template"] = function_templates.constraint_satisfaction_template
+    restricted_globals["optimization_template"] = function_templates.optimization_template
+    restricted_globals["array_template"] = function_templates.array_template
+    restricted_globals["quantifier_template"] = function_templates.quantifier_template
+    restricted_globals["demo_template"] = function_templates.demo_template
+    
+    # Add subset templates
+    restricted_globals["subset_templates"] = subset_templates
+    restricted_globals["smallest_subset_with_property"] = subset_templates.smallest_subset_with_property
     
     # Prepare result dictionary
     result = {
