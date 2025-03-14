@@ -98,6 +98,9 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     # Import solution module
     from .solution import export_solution
     
+    # Import templates module
+    from .templates import z3_templates
+    
     # Reset last solution
     global _LAST_SOLUTION
     _LAST_SOLUTION = None
@@ -107,8 +110,10 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     processed_code = []
     
     for line in code_lines:
-        # Skip import lines but keep Z3 namespace imports
-        if line.strip().startswith('from z3 import') or line.strip().startswith('import z3'):
+        # Skip import lines but keep Z3 namespace imports and templates imports
+        if (line.strip().startswith('from z3 import') or 
+            line.strip().startswith('import z3') or
+            line.strip().startswith('from z3_templates import')):
             continue
         else:
             processed_code.append(line)
@@ -178,6 +183,17 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     
     # Add our export_solution function
     restricted_globals["export_solution"] = export_solution
+    
+    # Add Z3 templates module functions
+    restricted_globals["z3_templates"] = z3_templates
+    restricted_globals["array_is_sorted"] = z3_templates.array_is_sorted
+    restricted_globals["all_distinct"] = z3_templates.all_distinct
+    restricted_globals["array_contains"] = z3_templates.array_contains
+    restricted_globals["exactly_k"] = z3_templates.exactly_k
+    restricted_globals["at_most_k"] = z3_templates.at_most_k
+    restricted_globals["at_least_k"] = z3_templates.at_least_k
+    restricted_globals["function_is_injective"] = z3_templates.function_is_injective
+    restricted_globals["function_is_surjective"] = z3_templates.function_is_surjective
     
     # Prepare result dictionary
     result = {
