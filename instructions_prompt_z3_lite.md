@@ -1486,3 +1486,120 @@ This represents a real-world problem of identifying single points of failure or 
 2. **Use Incremental Solving**: For related subproblems, consider using Z3's incremental solving capabilities.
 
 3. **Pre-filtering**: Filter out obviously irrelevant items before passing to the template.
+```
+
+### Array Template
+
+The `array_template` provides a structured approach for problems involving arrays and sequences:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import array_template
+
+def build_model():
+    # [SECTION: PROBLEM SIZE]
+    n = 5  # Size of your arrays
+
+    # [SECTION: VARIABLE DEFINITION]
+    # Define array variables
+    arr = Array("arr", IntSort(), IntSort())
+
+    # [SECTION: ARRAY INITIALIZATION]
+    # Initialize array elements
+    for i in range(n):
+        s.add(arr[i] >= 0)
+        s.add(arr[i] < 100)
+
+    # [SECTION: CONSTRAINTS]
+    # Add array-specific constraints
+    for i in range(n - 1):
+        s.add(arr[i] <= arr[i + 1])  # Ensure array is sorted
+
+    # [SECTION: VARIABLES TO EXPORT]
+    variables = {f"arr[{i}]": arr[i] for i in range(n)}
+
+    return s, variables
+```
+
+### Demo Template
+
+The `demo_template` provides a complete example of how to structure a Z3 model using the function-based approach:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import demo_template
+
+def build_model():
+    # [SECTION: PROBLEM PARAMETERS]
+    n_items = 5
+    max_weight = 10
+
+    # [SECTION: VARIABLE DEFINITION]
+    weights = [Int(f"weight_{i}") for i in range(n_items)]
+    selected = [Bool(f"selected_{i}") for i in range(n_items)]
+    total_weight = Int("total_weight")
+
+    # [SECTION: CORE CONSTRAINTS]
+    # Define relationships between variables
+    weight_sum = 0
+    for i in range(n_items):
+        weight_sum += If(selected[i], weights[i], 0)
+
+    s.add(total_weight == weight_sum)
+    s.add(total_weight <= max_weight)
+
+    # Must select at least 2 items
+    s.add(Sum([If(selected[i], 1, 0) for i in range(n_items)]) >= 2)
+
+    return s, variables
+```
+
+### Function Property Templates
+
+MCP Solver provides templates for common function properties:
+
+#### Injective (One-to-One) Functions
+
+The `function_is_injective` template ensures that a function maps each input to a unique output:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import function_is_injective
+
+# Create a function as an array
+func = Array('func', IntSort(), IntSort())
+domain_size = 5
+range_size = 5
+
+# Add injective constraint
+s.add(function_is_injective(func, domain_size))
+
+# This ensures no two inputs map to the same output
+# For example, if func[1] = 3, then func[2] cannot also be 3
+```
+
+#### Surjective (Onto) Functions
+
+The `function_is_surjective` template ensures that every element in the range is mapped to by at least one element in the domain:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import function_is_surjective
+
+# Create a function as an array
+func = Array('func', IntSort(), IntSort())
+domain_size = 5
+range_size = 3
+
+# Add surjective constraint
+s.add(function_is_surjective(func, domain_size, range_size))
+
+# This ensures every value in range [0, range_size) is mapped to
+# For example, if range_size = 3, there must be inputs that map to 0, 1, and 2
+```
+
+These function property templates are particularly useful for:
+- Modeling resource allocation problems
+- Verifying mapping properties
+- Ensuring unique assignments
+- Checking coverage requirements
