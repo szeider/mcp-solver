@@ -48,23 +48,24 @@ MCP Solver provides the following templates to simplify common constraint patter
 ```python
 # Import templates
 from mcp_solver.z3.templates import (
-    # Quantifier patterns
-    array_is_sorted,    # Array elements are in non-decreasing order
-    all_distinct,       # All elements in array are different
-    array_contains,     # Array contains a specific element
-    exactly_k,          # Exactly k elements equal to value
-    at_most_k,          # At most k elements equal to value
-    at_least_k,         # At least k elements equal to value
+    # Quantifier pattern templates
+    array_is_sorted,
+    all_distinct,
+    array_contains,
+    exactly_k,
+    at_most_k,
+    at_least_k,
+    function_is_injective,
+    function_is_surjective,
     
-    # Function properties
-    function_is_injective,  # One-to-one mapping
-    function_is_surjective, # Onto mapping
+    # Function templates
+    constraint_satisfaction_template,
+    optimization_template,
+    array_template,
+    quantifier_template,
     
-    # Function structure templates (recommended)
-    constraint_satisfaction_template,  # For constraint solving
-    optimization_template,             # For optimization
-    array_template,                    # For array handling
-    quantifier_template                # For quantifier patterns
+    # Subset templates
+    smallest_subset_with_property
 )
 ```
 
@@ -1293,3 +1294,195 @@ If you must use Real variables or are dealing with existing rational number resu
    - Document that results contain exact rational numbers
 
 Remember that Z3's rational numbers represent exact mathematical values, so the Integer scaling approach gives you both precision and easier handling of results.
+
+## Using Subset Templates
+
+The Z3 templates module includes tools for finding optimal subsets with specific properties, which can be particularly useful for minimality problems.
+
+### Finding the Smallest Subset with a Property
+
+The `smallest_subset_with_property` template helps you efficiently find the smallest collection of items that satisfies a particular property. This is useful for problems like:
+
+- Finding the smallest set of constraints that makes a system unsatisfiable
+- Identifying the minimal subset of nodes needed to cover a graph
+- Determining the smallest subset of states requiring 4 colors in a map coloring problem
+
+#### How to Use the Template:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import smallest_subset_with_property
+
+# Define your items
+items = [...list of items...]
+
+# Define a property checker function that returns True when a subset has the property
+def has_property(subset):
+    # Use Z3 to verify the property
+    s = Solver()
+    # ... set up constraints based on subset ...
+    return s.check() == unsat  # or whatever indicates the property is true
+
+# Call the template with your items and property checker
+result = smallest_subset_with_property(items, has_property, min_size=2)
+
+# Use the result
+if result:
+    print(f"Found smallest subset: {result}")
+else:
+    print("No subset with the property found")
+
+# Finally, export the solution
+export_solution({"smallest_subset": result})
+```
+
+#### Example: Finding the Smallest Set of Conflicting Tasks
+
+Suppose we have tasks with specific time slots, and we want to find the smallest subset that cannot be scheduled without conflicts:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import smallest_subset_with_property
+
+# Task data: (task_id, start_time, end_time)
+tasks = [
+    ('A', 9, 10),   # Task A: 9 AM to 10 AM
+    ('B', 9, 11),   # Task B: 9 AM to 11 AM
+    ('C', 10, 12),  # Task C: 10 AM to 12 PM
+    ('D', 11, 13),  # Task D: 11 AM to 1 PM
+    ('E', 12, 14)   # Task E: 12 PM to 2 PM
+]
+
+# Property checker: returns True if tasks CANNOT be scheduled without conflicts
+def is_unschedulable(task_subset):
+    if len(task_subset) <= 1:
+        return False  # A single task is always schedulable
+        
+    s = Solver()
+    
+    # Create boolean variables for whether each task is doable
+    can_do = {}
+    for task_id, start, end in task_subset:
+        can_do[task_id] = Bool(f"can_do_{task_id}")
+        s.add(can_do[task_id])  # We want to do all tasks
+    
+    # Add constraints for conflicting tasks
+    for i, (task1_id, start1, end1) in enumerate(task_subset):
+        for task2_id, start2, end2 in task_subset[i+1:]:
+            # Tasks conflict if their time ranges overlap
+            if not (end1 <= start2 or end2 <= start1):
+                # If tasks overlap, we can't do both
+                s.add(Not(And(can_do[task1_id], can_do[task2_id])))
+    
+    # If unsatisfiable, the tasks cannot all be scheduled
+    return s.check() == unsat
+
+# Find the smallest unschedulable subset
+smallest = smallest_subset_with_property(tasks, is_unschedulable, min_size=2)
+
+print("Smallest unschedulable subset of tasks:")
+for task in smallest:
+    print(f"Task {task[0]}: {task[1]} to {task[2]}")
+
+# Export the solution
+export_solution({"smallest_subset": smallest})
+```
+
+This example would find the smallest set of tasks that cannot be scheduled together, which might be tasks A and B (both starting at 9 AM) or some other minimum conflicting set.
+
+#### Performance Optimization Tips:
+
+1. **Provide Candidate Subsets**: If you have domain knowledge about likely candidates, you can attach them to your property function:
+   ```python
+   is_unschedulable.candidate_subsets = [
+       [tasks[0], tasks[1]],  # A and B
+       [tasks[1], tasks[2], tasks[3]]  # B, C, and D
+   ]
+   ```
+
+2. **Use Incremental Solving**: For related subproblems, consider using Z3's incremental solving capabilities.
+
+3. **Pre-filtering**: Filter out obviously irrelevant items before passing to the template.
+
+#### Example 2: Finding the Minimal Set of Critical Servers
+
+This example demonstrates how to find the smallest subset of servers that, if taken offline simultaneously, would cause a network to fail:
+
+```python
+from z3 import *
+from mcp_solver.z3.templates import smallest_subset_with_property
+
+# Network data: (server_id, capacity, services)
+servers = [
+    ('S1', 50, ['web', 'auth']),
+    ('S2', 75, ['web', 'database']),
+    ('S3', 60, ['auth', 'cache']),
+    ('S4', 80, ['web', 'api']),
+    ('S5', 65, ['database', 'cache']),
+    ('S6', 70, ['api', 'storage'])
+]
+
+# Required services and minimum capacity
+required_services = ['web', 'auth', 'database', 'api']
+MIN_TOTAL_CAPACITY = 150
+
+# Property checker: returns True if taking these servers offline would break the network
+def breaks_network(offline_servers):
+    """Check if removing these servers would make the network non-functional"""
+    if not offline_servers:
+        return False  # No servers offline can't break the network
+    
+    # Find which servers remain online
+    online_servers = [s for s in servers if s not in offline_servers]
+    
+    # Create solver to check if requirements can be met
+    s = Solver()
+    
+    # Check if minimum capacity is maintained
+    total_capacity = sum(capacity for _, capacity, _ in online_servers)
+    if total_capacity < MIN_TOTAL_CAPACITY:
+        return True  # Network broken due to insufficient capacity
+    
+    # Check if all required services are still available
+    available_services = set()
+    for _, _, services in online_servers:
+        available_services.update(services)
+    
+    # If any required service is missing, the network is broken
+    for service in required_services:
+        if service not in available_services:
+            return True
+    
+    # Network still functional
+    return False
+
+# Find the smallest subset of servers that would break the network
+smallest = smallest_subset_with_property(servers, breaks_network, min_size=1)
+
+print("Smallest critical set of servers:")
+for server in smallest:
+    print(f"Server {server[0]}: Capacity {server[1]}, Services {server[2]}")
+
+# Export the solution
+export_solution({"critical_servers": [s[0] for s in smallest]})
+```
+
+This example would identify the smallest set of servers that, if taken offline together, would cause the network to fail by either:
+1. Reducing total capacity below the minimum required threshold
+2. Removing all servers that provide a critical service
+
+This represents a real-world problem of identifying single points of failure or critical components in a system - useful for risk assessment and resilience planning.
+
+#### Performance Optimization Tips:
+
+1. **Provide Candidate Subsets**: If you have domain knowledge about likely candidates, you can attach them to your property function:
+   ```python
+   breaks_network.candidate_subsets = [
+       [servers[0], servers[1]],  # S1 and S2
+       [servers[2], servers[3], servers[4]]  # S3, S4, and S5
+   ]
+   ```
+
+2. **Use Incremental Solving**: For related subproblems, consider using Z3's incremental solving capabilities.
+
+3. **Pre-filtering**: Filter out obviously irrelevant items before passing to the template.
