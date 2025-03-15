@@ -44,6 +44,11 @@ except ImportError:
 
 # Local imports - must be after path adjustment
 from .solution import export_solution, _LAST_SOLUTION
+from .constraints import (
+    at_most_k, at_least_k, exactly_k,
+    at_most_one, exactly_one, 
+    implies, mutually_exclusive, if_then_else
+)
 
 # Exception for timeouts
 class TimeoutException(Exception):
@@ -148,6 +153,15 @@ def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]
         "export_solution": export_solution,
         # Python standard libraries
         "time": time,
+        # Our helper functions for cardinality constraints
+        "at_most_k": at_most_k,
+        "at_least_k": at_least_k,
+        "exactly_k": exactly_k,
+        "at_most_one": at_most_one,
+        "exactly_one": exactly_one,
+        "implies": implies,
+        "mutually_exclusive": mutually_exclusive,
+        "if_then_else": if_then_else,
     }
     
     # Process imports and add to globals

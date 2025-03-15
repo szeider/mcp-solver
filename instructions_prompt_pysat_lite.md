@@ -86,7 +86,84 @@ PySAT includes several SAT solvers with different performance characteristics:
 
 ## Advanced Features
 
-### Cardinality Constraints
+### Cardinality Constraints Helper Functions
+
+PySAT mode includes several helper functions for easily creating common cardinality constraints:
+
+| Function            | Description                                             |
+|---------------------|---------------------------------------------------------|
+| `at_most_k`         | At most k variables are true                            |
+| `at_least_k`        | At least k variables are true                           |
+| `exactly_k`         | Exactly k variables are true                            |
+| `at_most_one`       | At most one variable is true (optimized for k=1)        |
+| `exactly_one`       | Exactly one variable is true (optimized for k=1)        |
+| `implies`           | If a is true, then b must be true                       |
+| `mutually_exclusive`| At most one variable is true (same as at_most_one)      |
+| `if_then_else`      | If condition then x else y                              |
+
+These helper functions are reliable and work for any valid k values. Here's how to use them:
+
+```python
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+
+# Create a formula
+formula = CNF()
+
+# Variables representing courses on different days
+# 1, 2, 3 = Courses A, B, C on Monday
+# 4, 5, 6 = Courses A, B, C on Tuesday
+# 7, 8, 9 = Courses A, B, C on Wednesday
+
+# Each course must be scheduled exactly once
+formula.extend(exactly_one([1, 4, 7]))  # Course A on exactly one day
+formula.extend(exactly_one([2, 5, 8]))  # Course B on exactly one day
+formula.extend(exactly_one([3, 6, 9]))  # Course C on exactly one day
+
+# At most 2 courses per day
+formula.extend(at_most_k([1, 2, 3], 2))  # At most 2 courses on Monday
+formula.extend(at_most_k([4, 5, 6], 2))  # At most 2 courses on Tuesday
+formula.extend(at_most_k([7, 8, 9], 2))  # At most 2 courses on Wednesday
+
+# Dependency: If Course A is on Monday, Course B cannot be on Monday
+formula.extend(implies(1, -2))
+
+# Solve the formula
+solver = Glucose3(bootstrap_with=formula)
+result = solver.solve()
+
+if result:
+    model = solver.get_model()
+    
+    # Extract the schedule
+    days = ["Monday", "Tuesday", "Wednesday"]
+    courses = ["A", "B", "C"]
+    schedule = {}
+    
+    for day_idx, day_vars in enumerate([[1, 2, 3], [4, 5, 6], [7, 8, 9]]):
+        day_courses = []
+        for course_idx, var in enumerate(day_vars):
+            if var in model:  # If variable is true (positive in model)
+                day_courses.append(courses[course_idx])
+        
+        schedule[days[day_idx]] = day_courses
+    
+    # Export the solution
+    export_solution({
+        "satisfiable": True,
+        "model": model,
+        "schedule": schedule
+    })
+else:
+    export_solution({
+        "satisfiable": False
+    })
+
+# Free solver memory
+solver.delete()
+```
+
+### Traditional Cardinality Constraints
 
 ```python
 from pysat.formula import CNF
@@ -139,4 +216,4 @@ with RC2(wcnf) as rc2:
 - Variable IDs must be positive integers
 - Clauses are lists of integers (negative for negated variables)
 
-For more advanced usage, refer to the [PySAT documentation](https://pysathq.github.io/). 
+For more advanced usage, refer to the [PySAT documentation](https://pysathq.github.io/).
