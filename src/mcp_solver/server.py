@@ -19,6 +19,7 @@ from .memo import MemoManager
 # Global flags for mode selection
 LITE_MODE = False
 Z3_MODE = False
+PYSAT_MODE = False
 
 try:
     version_str = version("mcp-solver")
@@ -49,6 +50,10 @@ async def serve() -> None:
         from .z3.model_manager import Z3ModelManager
         model_mgr = Z3ModelManager(lite_mode=LITE_MODE)
         logging.getLogger(__name__).info("Using Z3 model manager")
+    elif PYSAT_MODE:
+        from .pysat.model_manager import PySATModelManager
+        model_mgr = PySATModelManager(lite_mode=LITE_MODE)
+        logging.getLogger(__name__).info("Using PySAT model manager")
     else:
         model_mgr = MiniZincModelManager(lite_mode=LITE_MODE)
         logging.getLogger(__name__).info("Using MiniZinc model manager")
@@ -59,35 +64,41 @@ async def serve() -> None:
     async def handle_list_prompts() -> list[types.Prompt]:
         return [
             types.Prompt(
-                name="Instructions",
-                description="Basic instructions for using the tools. Get this prompt before any interaction with mcp-solver.",
-                arguments=[]
+                name="instructions",
+                title="MCP Solver Instructions",
+                description="Instructions for using the MCP Solver"
             )
         ]
     
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         # In lite mode, don't try to format a memo into the prompt
-        if LITE_MODE:
-            # Use the instruction prompt directly without attempting to format
-            prompt = INSTRUCTIONS_PROMPT
-        else:
-            # Only in full mode, format the memo into the prompt
-            current_memo = memo.content or "No knowledge available yet."
-            prompt = INSTRUCTIONS_PROMPT.format(memo=current_memo)
+        if name == "instructions":
+            # Choose the appropriate instruction prompt based on mode
+            if Z3_MODE and LITE_MODE:
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3_lite.md")
+            elif Z3_MODE:
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3.md")
+            elif PYSAT_MODE and LITE_MODE:
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat_lite.md")
+            elif LITE_MODE:
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
+            else:
+                prompt_path = INSTRUCTIONS_PROMPT
             
-        return types.GetPromptResult(
-            description="MCP Solver Guidelines, read first!",
-            messages=[
-                types.PromptMessage(
-                    role="user", 
-                    content=types.TextContent(
-                        type="text",
-                        text=prompt
-                    )
-                )
-            ]
-        )
+            try:
+                with open(prompt_path, "r") as f:
+                    content = f.read()
+                    if not LITE_MODE:
+                        content += "\n\n## Memo\n\n" + memo.get_memo()
+            except FileNotFoundError:
+                logging.getLogger(__name__).error(f"Prompt file not found: {prompt_path}")
+                return types.GetPromptResult(content="Error: Prompt file not found")
+            
+            return types.GetPromptResult(content=content)
+        else:
+            logging.getLogger(__name__).error(f"Unknown prompt: {name}")
+            return types.GetPromptResult(content="Error: Unknown prompt")
 
     def format_array_access(variable_name: str, indices: List[int]) -> str:
         return variable_name if not indices else f"{variable_name}[{','.join(str(i) for i in indices)}]"
@@ -288,51 +299,32 @@ async def serve() -> None:
         )
 
 def main() -> int:
-    logging.basicConfig(
-        filename='mcp_solver.log',
-        filemode='a',
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starting MCP solver with version: {version_str}")
-
-    # Process command-line flags
-    global LITE_MODE, Z3_MODE, INSTRUCTIONS_PROMPT
+    import argparse
     
-    # Check for Z3 mode
-    if "--z3" in sys.argv:
-        Z3_MODE = True
-        logger.info("Z3 mode activated")
-        
-    # Check for lite mode
-    if "--lite" in sys.argv:
-        LITE_MODE = True
-        logger.info("Lite mode activated")
+    parser = argparse.ArgumentParser(description="MCP Solver")
+    parser.add_argument("--lite", action="store_true", help="Run in lite mode")
+    parser.add_argument("--z3", action="store_true", help="Use Z3 solver")
+    parser.add_argument("--pysat", action="store_true", help="Use PySAT solver")
+    parser.add_argument("--port", type=int, help="Port to listen on (debug)")
+    args = parser.parse_args()
     
-    # Load the appropriate instruction prompt
-    if Z3_MODE and LITE_MODE:
-        try:
-            prompt_path = Path(__file__).resolve().parents[2] / "instructions_prompt_z3_lite.md"
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                INSTRUCTIONS_PROMPT = f.read()
-            logger.info("Using instructions_prompt_z3_lite.md")
-        except Exception as e:
-            logger.error(f"Failed to load instructions_prompt_z3_lite.md: {e}")
-    elif LITE_MODE:
-        try:
-            prompt_path = Path(__file__).resolve().parents[2] / "instructions_prompt_lite.md"
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                INSTRUCTIONS_PROMPT = f.read()
-            logger.info("Using instructions_prompt_lite.md")
-        except Exception as e:
-            logger.error(f"Failed to load instructions_prompt_lite.md: {e}")
-
-    try:
-        asyncio.run(serve())
-        return 0
-    except KeyboardInterrupt:
-        return 0
+    # Set global flags based on arguments
+    global LITE_MODE, Z3_MODE, PYSAT_MODE
+    LITE_MODE = args.lite
+    Z3_MODE = args.z3
+    PYSAT_MODE = args.pysat
+    
+    # Check for incompatible flags
+    if Z3_MODE and PYSAT_MODE:
+        print("Error: Cannot use both --z3 and --pysat flags at the same time")
+        return 1
+    
+    # Setup logging
+    log_level = logging.INFO
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    asyncio.run(serve())
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
