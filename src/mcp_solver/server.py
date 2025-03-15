@@ -60,6 +60,33 @@ async def serve() -> None:
     
     memo = MemoManager(MEMO_FILE)
 
+    # Helper function to get mode-specific descriptions
+    def get_description(descriptions: dict) -> str:
+        """
+        Get the appropriate description based on the current mode.
+        
+        Args:
+            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'mzn')
+                          or a string for a common description across all modes
+        
+        Returns:
+            The appropriate description string for the current mode
+        """
+        if isinstance(descriptions, str):
+            return descriptions
+            
+        if Z3_MODE and 'z3' in descriptions:
+            return descriptions['z3']
+        elif PYSAT_MODE and 'pysat' in descriptions:
+            return descriptions['pysat']
+        elif not Z3_MODE and not PYSAT_MODE and 'mzn' in descriptions:
+            return descriptions['mzn']
+        elif 'default' in descriptions:
+            return descriptions['default']
+        else:
+            # Return the first available description if no matching mode is found
+            return next(iter(descriptions.values()))
+
     @server.list_prompts()
     async def handle_list_prompts() -> list[types.Prompt]:
         return [
@@ -72,21 +99,22 @@ async def serve() -> None:
     
     @server.get_prompt()
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
-        # In lite mode, don't try to format a memo into the prompt
+        # Choose the appropriate instruction prompt based on mode
         if name == "instructions":
-            # Choose the appropriate instruction prompt based on mode
-            if Z3_MODE and LITE_MODE:
+            # Z3 and PySAT modes always use lite mode
+            if Z3_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3_lite.md")
-            elif Z3_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3.md")
-            elif PYSAT_MODE and LITE_MODE:
-                # Use the correct PySAT instructions now that the format issue is fixed
+                logging.getLogger(__name__).info("Using Z3 lite instructions")
+            elif PYSAT_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat_lite.md")
                 logging.getLogger(__name__).info("Using PySAT lite instructions")
+            # MiniZinc mode can be lite or full
             elif LITE_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
+                logging.getLogger(__name__).info("Using MiniZinc lite instructions")
             else:
                 prompt_path = INSTRUCTIONS_PROMPT
+                logging.getLogger(__name__).info("Using MiniZinc full instructions")
             
             try:
                 with open(prompt_path, "r", encoding="utf-8") as f:
@@ -172,12 +200,20 @@ async def serve() -> None:
         base_tools = [
             types.Tool(
                 name="clear_model", 
-                description=f"Remove all items from the {'Z3' if Z3_MODE else 'minizinc'} model, effectively resetting it.",
+                description=get_description({
+                    'mzn': "Remove all items from the minizinc model, effectively resetting it.",
+                    'z3': "Remove all items from the Z3 Python model, effectively resetting it.",
+                    'pysat': "Remove all items from the PySAT Python model, effectively resetting it."
+                }),
                 inputSchema={"type": "object", "properties": {}}
             ),
             types.Tool(
                 name="add_item", 
-                description=f"Add new {'Python code' if Z3_MODE else 'minizinc item'} to the model at a specific index (indices start at 1).",
+                description=get_description({
+                    'mzn': "Add new minizinc item to the model at a specific index (indices start at 1).",
+                    'z3': "Add new Python code to the Z3 model at a specific index (indices start at 1).",
+                    'pysat': "Add new Python code to the PySAT model at a specific index (indices start at 1)."
+                }),
                 inputSchema={
                     "type": "object", 
                     "properties": {
@@ -189,7 +225,11 @@ async def serve() -> None:
             ),
             types.Tool(
                 name="replace_item", 
-                description=f"Replace an existing item in the {'Z3' if Z3_MODE else 'minizinc'} model at a specified index with new content.",
+                description=get_description({
+                    'mzn': "Replace an existing item in the minizinc model at a specified index with new content.",
+                    'z3': "Replace an existing item in the Z3 Python model at a specified index with new content.",
+                    'pysat': "Replace an existing item in the PySAT Python model at a specified index with new content."
+                }),
                 inputSchema={
                     "type": "object", 
                     "properties": {
@@ -201,7 +241,11 @@ async def serve() -> None:
             ),
             types.Tool(
                 name="delete_item", 
-                description=f"Delete an item from the {'Z3' if Z3_MODE else 'minizinc'} model at the specified index.",
+                description=get_description({
+                    'mzn': "Delete an item from the minizinc model at the specified index.",
+                    'z3': "Delete an item from the Z3 Python model at the specified index.",
+                    'pysat': "Delete an item from the PySAT Python model at the specified index."
+                }),
                 inputSchema={
                     "type": "object", 
                     "properties": {
@@ -212,12 +256,20 @@ async def serve() -> None:
             ),
             types.Tool(
                 name="get_model", 
-                description=f"Fetch the current content of the {'Z3' if Z3_MODE else 'minizinc'} model, listing each item with its index.",
+                description=get_description({
+                    'mzn': "Fetch the current content of the minizinc model, listing each item with its index.",
+                    'z3': "Fetch the current content of the Z3 Python model, listing each item with its index.",
+                    'pysat': "Fetch the current content of the PySAT Python model, listing each item with its index."
+                }),
                 inputSchema={"type": "object", "properties": {}}
             ),
             types.Tool(
                 name="solve_model", 
-                description=f"Solve the current {'Z3' if Z3_MODE else 'minizinc'} model with an optional timeout parameter.",
+                description=get_description({
+                    'mzn': "Solve the current minizinc model with an optional timeout parameter.",
+                    'z3': "Solve the current Z3 Python model with an optional timeout parameter.",
+                    'pysat': "Solve the current PySAT Python model with an optional timeout parameter."
+                }),
                 inputSchema={
                     "type": "object", 
                     "properties": {
@@ -235,7 +287,10 @@ async def serve() -> None:
             ),
             types.Tool(
                 name="get_variable_value", 
-                description="Get the value of a specific variable from the solution.",
+                description=get_description({
+                    'default': "Get the value of a specific variable from the solution.",
+                    'pysat': "Get the value of a specific variable from the PySAT solution."
+                }),
                 inputSchema={
                     "type": "object", 
                     "properties": {
@@ -255,24 +310,29 @@ async def serve() -> None:
             # In lite mode, return a reduced set of tools
             return base_tools
         else:
-            # Full set of tools for non-lite mode
-            full_tools = base_tools + [
-                types.Tool(
-                    name="get_memo", 
-                    description="Retrieve the current knowledge base memo.",
-                    inputSchema={"type": "object", "properties": {}}
-                ),
-                types.Tool(
-                    name="edit_memo", 
-                    description="Edit the knowledge base memo by adding content within a specified line range with new text.",
-                    inputSchema={"type": "object", "properties": {
-                        "line_start": {"type": "integer"},
-                        "line_end": {"type": ["integer", "null"]},
-                        "content": {"type": "string"}
-                    }, "required": ["line_start", "content"]}
-                )
-            ]
-            return full_tools
+            # Only MiniZinc supports non-lite mode for now
+            if not Z3_MODE and not PYSAT_MODE:
+                # Full set of tools for non-lite MiniZinc mode
+                full_tools = base_tools + [
+                    types.Tool(
+                        name="get_memo", 
+                        description="Retrieve the current knowledge base memo for MiniZinc models.",
+                        inputSchema={"type": "object", "properties": {}}
+                    ),
+                    types.Tool(
+                        name="edit_memo", 
+                        description="Edit the MiniZinc knowledge base memo by adding content within a specified line range.",
+                        inputSchema={"type": "object", "properties": {
+                            "line_start": {"type": "integer"},
+                            "line_end": {"type": ["integer", "null"]},
+                            "content": {"type": "string"}
+                        }, "required": ["line_start", "content"]}
+                    )
+                ]
+                return full_tools
+            else:
+                # Z3 and PySAT modes only support lite mode for now
+                return base_tools
 
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
@@ -364,6 +424,15 @@ def main() -> int:
     LITE_MODE = args.lite
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
+    
+    # Z3 and PySAT only support lite mode for now
+    if Z3_MODE or PYSAT_MODE:
+        LITE_MODE = True
+        logging.getLogger(__name__).info("Server running in lite mode as currently Z3/PySAT are only supported in lite mode")
+    elif LITE_MODE:
+        logging.getLogger(__name__).info("Server running in lite mode")
+    else:
+        logging.getLogger(__name__).info("Server running in full mode")
     
     # Check for incompatible flags
     if Z3_MODE and PYSAT_MODE:
