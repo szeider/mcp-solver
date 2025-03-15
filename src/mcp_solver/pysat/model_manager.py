@@ -149,29 +149,70 @@ class PySATModelManager(SolverManager):
         # Join code items into a single string
         code_string = "\n".join(content for _, content in sorted_items)
         
+        # Modify the code to ensure it prints the satisfiability result
+        # We'll add a simple print statement that we can parse later
+        # Look for 'is_sat = solver.solve()' pattern and add a print after it
+        modified_code = ""
+        for line in code_string.split("\n"):
+            modified_code += line + "\n"
+            if "is_sat" in line and "solver.solve()" in line:
+                modified_code += "print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={is_sat}\")\n"
+        
         # Set timeout
         timeout_seconds = timeout.total_seconds()
         
         # Execute code with timeout
         start_time = time.time()
-        self.last_result = execute_pysat_code(code_string, timeout=timeout_seconds)
+        self.last_result = execute_pysat_code(modified_code, timeout=timeout_seconds)
         self.last_solve_time = time.time() - start_time
+        
+        # Extract solver output to check for satisfiability
+        output = self.last_result.get("output", "")
+        satisfiable = False
+        
+        # Parse output for explicit satisfiability result
+        import re
+        sat_match = re.search(r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output)
+        if sat_match:
+            satisfiable = sat_match.group(1).lower() == "true"
+            logging.getLogger(__name__).debug(f"Found explicit satisfiability result: {satisfiable}")
+        else:
+            # Also try to find a standard output message
+            if "Is satisfiable: True" in output:
+                satisfiable = True
+                logging.getLogger(__name__).debug("Found 'Is satisfiable: True' in output")
         
         # Extract solution if available
         if self.last_result.get("solution"):
             self.last_solution = self.last_result["solution"]
+            
+            # Check if the solution contains satisfiability info
+            if "satisfiable" in self.last_solution:
+                # Use our parsed result if available, otherwise use solution's value
+                if sat_match:
+                    self.last_solution["satisfiable"] = satisfiable
+        else:
+            # Create a minimal solution with just the satisfiability flag
+            self.last_solution = {
+                "satisfiable": satisfiable,
+                "status": "sat" if satisfiable else "unsat",
+                "values": {}
+            }
         
         # Determine success/failure message
         if self.last_result.get("success", False):
             message = "Model solved successfully"
-            if self.last_solution:
-                status = self.last_solution.get("status", "unknown")
-                if status == "sat":
-                    message += " (satisfiable)"
-                elif status == "unsat":
-                    message += " (unsatisfiable)"
-                else:
-                    message += f" (status: {status})"
+            status = self.last_solution.get("status", "unknown")
+            if satisfiable:
+                message += " (satisfiable)"
+                # Ensure status is consistent with satisfiability
+                self.last_solution["status"] = "sat"
+            elif satisfiable is False:  # Explicitly False, not just falsy
+                message += " (unsatisfiable)"
+                # Ensure status is consistent with satisfiability
+                self.last_solution["status"] = "unsat"
+            else:
+                message += f" (status: {status})"
         else:
             message = "Failed to solve model"
             if self.last_result.get("error"):
@@ -182,14 +223,20 @@ class PySATModelManager(SolverManager):
             "message": message,
             "success": self.last_result.get("success", False),
             "solve_time": f"{self.last_solve_time:.6f} seconds",
-            "output": self.last_result.get("output", ""),
+            "output": output,
+            "satisfiable": satisfiable  # Always include the satisfiability flag
         }
         
         # Add solution information if available
         if self.last_solution:
-            result["satisfiable"] = self.last_solution.get("satisfiable", False)
+            # Include status and values from solution
+            if "status" in self.last_solution:
+                result["status"] = self.last_solution["status"]
+            if "values" in self.last_solution:
+                result["values"] = self.last_solution["values"]
         
-        logging.getLogger(__name__).info(f"Model solved: {result['success']}")
+        logging.getLogger(__name__).info(f"Model solved: {result['success']}, satisfiable: {satisfiable}")
+        
         return result
     
     def get_solution(self) -> Dict[str, Any]:

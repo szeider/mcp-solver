@@ -8,6 +8,7 @@ and converting it to a standardized format.
 import sys
 import os
 from typing import Dict, Any, Optional, Union, List
+import logging
 
 # IMPORTANT: Properly import the PySAT library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -63,6 +64,9 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
         "status": "unknown"
     }
     
+    # Log what we're exporting for debugging
+    logging.getLogger(__name__).debug(f"Exporting solution: solver={type(solver)}, variables={variables is not None}")
+    
     # Case 1: Direct variable dictionary (no solver)
     if variables is not None and solver is None:
         result["satisfiable"] = True
@@ -73,6 +77,7 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
         
         # Store result and return
         _LAST_SOLUTION = result
+        logging.getLogger(__name__).debug(f"Exported solution (case 1): {result}")
         return result
     
     # Case 2: Solver instance (PySAT Solver or RC2)
@@ -81,9 +86,15 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
         if isinstance(solver, Solver):
             # Check if the problem was solved
             if hasattr(solver, '_solved') and solver._solved:
+                # BUG FIX: Get the satisfiability result directly
+                is_sat = solver.get_model() is not None
+                
+                # Log the actual solver satisfiability result for debugging
+                logging.getLogger(__name__).debug(f"PySAT solver result - is_sat: {is_sat}, model: {solver.get_model() is not None}")
+                
                 model = solver.get_model()
-                result["satisfiable"] = model is not None
-                result["status"] = "sat" if model is not None else "unsat"
+                result["satisfiable"] = is_sat
+                result["status"] = "sat" if is_sat else "unsat"
                 
                 # Extract variable values if we have a mapping
                 if variables is not None and model is not None:
@@ -111,8 +122,14 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
             model = solver.model
             cost = solver.cost if hasattr(solver, 'cost') else None
             
-            result["satisfiable"] = model is not None
-            result["status"] = "sat" if model is not None else "unsat"
+            # BUG FIX: Get the satisfiability result directly
+            is_sat = model is not None
+            
+            # Log the actual solver satisfiability result for debugging
+            logging.getLogger(__name__).debug(f"RC2 solver result - is_sat: {is_sat}, model: {model is not None}")
+            
+            result["satisfiable"] = is_sat
+            result["status"] = "sat" if is_sat else "unsat"
             
             # Extract variable values if we have a mapping
             if variables is not None and model is not None:
@@ -139,5 +156,8 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
     caller_globals = inspect.currentframe().f_back.f_globals
     caller_locals = inspect.currentframe().f_back.f_locals
     caller_locals["solution"] = result
+    
+    # Log the final exported solution for debugging
+    logging.getLogger(__name__).debug(f"Exported solution (final): {result}")
     
     return result 
