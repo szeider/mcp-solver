@@ -2,9 +2,41 @@
 
 This document provides information about using MCP Solver with the PySAT backend. For general information about the MCP Solver, see the [main README](README.md).
 
+## Installation
+
+To install MCP Solver with PySAT support:
+
+```bash
+uv pip install -e ".[pysat]"
+```
+
 ## Configuration
 
-To use the PySAT mode in your client (e.g., Claude Desktop), add the following flags to your configuration:
+There are two ways to use the PySAT mode:
+
+### Option 1: Dedicated Command (Recommended)
+
+Use the dedicated PySAT entry point in your client (e.g., Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "MCP Solver PySAT": { 
+      "command": "uv", 
+      "args": [
+        "--directory", 
+        "/path/to/mcp-solver", 
+        "run", 
+        "mcp-solver-pysat"
+      ] 
+    }
+  }
+}
+```
+
+### Option 2: Command Line Flags
+
+Alternatively, you can use command line flags with the main entry point:
 
 ```json
 {

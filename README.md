@@ -26,10 +26,74 @@ You can provide feedback to the author via this [form](https://form.jotform.com/
 
 ## PySAT and Z3 Python Modes
 
-Orginally the MCP server was implemented as an intercae to the MiniZinc constraint solving platform. Recently we added support for PySAT and Z3 Python. These additions are still experimental and we cover them in sparate readmes: 
+Originally the MCP server was implemented as an interface to the MiniZinc constraint solving platform. Recently we added support for PySAT and Z3 Python. These additions are still experimental and we cover them in separate READMEs: 
 
 - [PySAT Mode](README-PySAT.md)
 - [Z3 Mode](README-Z3.md)
+
+### Using Different Solver Backends
+
+MCP Solver now provides dedicated commands for each solver backend:
+
+1. **MiniZinc** (default): `mcp-solver`
+2. **Z3 Mode**: `mcp-solver-z3` (requires installing Z3 dependencies)
+3. **PySAT Mode**: `mcp-solver-pysat` (requires installing PySAT dependencies)
+
+#### Installation for Specific Backends
+
+Install only the dependencies you need:
+
+```bash
+# Default MiniZinc mode
+uv pip install -e .
+
+# Z3 mode
+uv pip install -e ".[z3]"
+
+# PySAT mode
+uv pip install -e ".[pysat]"
+
+# All modes
+uv pip install -e ".[all]"
+```
+
+#### Claude Desktop Configuration
+
+To use different solver backends in Claude Desktop, update your configuration:
+
+```json
+{
+  "mcpServers": {
+    "MCP Solver": { 
+      "command": "uv", 
+      "args": [
+        "--directory", 
+        "/path/to/mcp-solver", 
+        "run", 
+        "mcp-solver"
+      ] 
+    },
+    "MCP Solver Z3": { 
+      "command": "uv", 
+      "args": [
+        "--directory", 
+        "/path/to/mcp-solver", 
+        "run", 
+        "mcp-solver-z3"
+      ] 
+    },
+    "MCP Solver PySAT": { 
+      "command": "uv", 
+      "args": [
+        "--directory", 
+        "/path/to/mcp-solver", 
+        "run", 
+        "mcp-solver-pysat"
+      ] 
+    }
+  }
+}
+```
 
 ## Available Tools
 

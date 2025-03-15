@@ -2,9 +2,41 @@
 
 This document provides information about using MCP Solver with the Z3 SMT Solver backend. For general information about the MCP Solver, see the [main README](README.md).
 
+## Installation
+
+To install MCP Solver with Z3 support:
+
+```bash
+uv pip install -e ".[z3]"
+```
+
 ## Configuration
 
-To use the Z3 mode in your client (e.g., Claude Desktop), add the following flags to your configuration:
+There are two ways to use the Z3 mode:
+
+### Option 1: Dedicated Command (Recommended)
+
+Use the dedicated Z3 entry point in your client (e.g., Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "MCP Solver Z3": { 
+      "command": "uv", 
+      "args": [
+        "--directory", 
+        "/path/to/mcp-solver", 
+        "run", 
+        "mcp-solver-z3"
+      ] 
+    }
+  }
+}
+```
+
+### Option 2: Command Line Flags
+
+Alternatively, you can use command line flags with the main entry point:
 
 ```json
 {

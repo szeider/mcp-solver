@@ -11,20 +11,29 @@ dependencies = [
     "mcp>=1.2.0",
     "minizinc",
     "tomli;python_version<'3.11'",
-    "z3-solver>=4.12.1",
-    "python-sat",
     "six"
 ]
 
-[project.scripts]
-mcp-solver = "mcp_solver.server:main"
-test-setup = "mcp_solver.test_setup:main"
-
 [project.optional-dependencies]
+z3 = [
+    "z3-solver>=4.12.1",
+]
+pysat = [
+    "python-sat",
+]
+all = [
+    "mcp-solver[z3,pysat]",
+]
 dev = [
     "coverage",
     "pytest",
 ]
+
+[project.scripts]
+mcp-solver = "mcp_solver.__main__:main"
+mcp-solver-z3 = "mcp_solver.__main__:main_z3"
+mcp-solver-pysat = "mcp_solver.__main__:main_pysat"
+test-setup = "mcp_solver.test_setup:main"
 
 [tool.black]
 line-length = 88

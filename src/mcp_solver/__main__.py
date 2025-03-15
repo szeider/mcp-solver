@@ -5,7 +5,39 @@ Main entry point for running the MCP Solver package.
 import sys
 import logging
 import asyncio
-from .server import main
+
+def main():
+    """Default entry point for MiniZinc mode"""
+    from .server import main as server_main
+    return server_main()
+
+def main_z3():
+    """Entry point for Z3 mode"""
+    try:
+        import z3
+    except ImportError:
+        print("Z3 dependencies not installed. Please install with:")
+        print("    uv pip install -e '.[z3]'")
+        return 1
+        
+    from .server import main as server_main
+    # Set command line arguments for Z3 mode
+    sys.argv = [sys.argv[0], "--z3", "--lite"]
+    return server_main()
+
+def main_pysat():
+    """Entry point for PySAT mode"""
+    try:
+        import pysat
+    except ImportError:
+        print("PySAT dependencies not installed. Please install with:")
+        print("    uv pip install -e '.[pysat]'")
+        return 1
+        
+    from .server import main as server_main
+    # Set command line arguments for PySAT mode
+    sys.argv = [sys.argv[0], "--pysat", "--lite"]
+    return server_main()
 
 if __name__ == "__main__":
     try:
