@@ -266,13 +266,13 @@ async def serve() -> None:
             types.Tool(
                 name="solve_model", 
                 description=get_description({
-                    'mzn': "Solve the current minizinc model with an optional timeout parameter.",
-                    'z3': "Solve the current Z3 Python model with an optional timeout parameter.",
-                    'pysat': "Solve the current PySAT Python model with an optional timeout parameter."
+                    'mzn': "Solve the current minizinc model" + ("" if LITE_MODE else " with an optional timeout parameter."),
+                    'z3': "Solve the current Z3 Python model" + ("" if LITE_MODE else " with an optional timeout parameter."),
+                    'pysat': "Solve the current PySAT Python model" + ("" if LITE_MODE else " with an optional timeout parameter.")
                 }),
                 inputSchema={
                     "type": "object", 
-                    "properties": {
+                    "properties": {} if LITE_MODE else {
                         "timeout": {
                             "type": ["number", "null"],
                             "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"
@@ -363,7 +363,7 @@ async def serve() -> None:
                     return [types.TextContent(type="text", text="Model cleared")]
                 case "solve_model":
                     timeout_val = None
-                    if arguments and "timeout" in arguments:
+                    if not LITE_MODE and arguments and "timeout" in arguments:
                         raw_timeout = arguments.get("timeout")
                         if raw_timeout is not None:
                             timeout_val = timedelta(seconds=float(raw_timeout))

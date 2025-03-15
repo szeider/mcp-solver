@@ -3,6 +3,57 @@
 
 A Model Context Protocol (MCP) server that exposes MiniZinc constraint solving capabilities to Large Language Models.
 
+## Project Structure
+
+The MCP Solver project has been restructured to support multiple solvers:
+
+- `src/mcp_solver/` - Core package
+  - `base_manager.py` - Base class for solver managers
+  - `server.py` - MCP server implementation
+  - `mzn_solver/` - MiniZinc solver implementation
+  - `z3/` - Z3 solver implementation (placeholder for future development)
+
+## Running the Server
+
+You can run the server in several ways:
+
+1. As a module:
+   ```
+   uv run -m mcp_solver
+   ```
+
+2. Using the entry point:
+   ```
+   uv run mcp-solver
+   ```
+
+3. For development with auto-reload:
+   ```
+   uvicorn mcp_solver.server:main --reload
+   ```
+
+## Testing
+
+To verify that the installation is working correctly, run:
+
+```
+uv run test-setup
+```
+
+This will test that MiniZinc is installed and properly configured.
+
+## Options
+
+- `--lite`: Run in lite mode with reduced functionality
+  ```
+  uv run mcp-solver --lite
+  ```
+
+## Development
+
+The codebase supports multiple solvers through a common interface defined in `SolverManager`.
+Currently, the MiniZinc solver is fully implemented, while Z3 support is planned for future releases.
+
 ---
 
 ## Overview
@@ -148,6 +199,7 @@ The MCP Solver also supports a **Lite Mode**, which provides a streamlined inter
 In this mode:
 - **solve_model** returns the status of the solution—if the model is satisfiable (`SAT`), it also returns the solution; otherwise, only the status (`UNSAT` or `TIMEOUT`) is provided.
 - The instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`.
+- No timeout can be specified for the **solve_model** tool in Lite Mode.
 
 To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows (similar for Windows):
 
@@ -364,70 +416,3 @@ This example shows how the same model can be solved with different parameter val
 **System:** **`solve_model`**
 
 > ```
-> {'status': 'SAT', 'solution': Solution(objective=1564, succ=[2, 4, 1, 7, 3, 5, 9, 6, 8], _checker=''), 'solve_time': 0.002}
-> ```
-
-**LLM**
-
-> Optimal route found: Vienna → St. Pölten → Linz → Salzburg → Bregenz → Innsbruck → Klagenfurt → Graz → Eisenstadt → Vienna
->
-> Total distance: 1,564 km
->
-> Route verification:
->
-> - Each city visited exactly once: ✓ (circuit constraint)
-> - Distance calculation correct: ✓
-> - Starting/ending in Vienna (city 1): ✓
-
-**User**
-
-> Assume the road between Vienna and Eisenstadt is blocked, what is now the shortest tour?
-
-**LLM**
-
-> I'll modify the distance matrix to make the Vienna-Eisenstadt route impossible (infinite distance).
-
-**System:** **`add_item`**
-
-> ```minizinc
-> array[1..n,1..n] of int: dist = [|0,65,9999,184,195,319,299,478,631|65,0,125,119,130,254,234,413,566|9999,125,0,184,157,281,261,440,593|184,119,184,0,208,252,136,315,468|195,130,157,208,0,136,280,459,629|319,254,281,252,136,0,217,391,566|299,234,261,136,280,217,0,188,343|478,413,440,315,459,391,188,0,157|631,566,593,468,629,566,343,157,0|];
-> ```
-
-**System:** **`solve_model`**
-
-> ```
-> {'status': 'SAT', 'solution': Solution(objective=1694, succ=[4, 1, 2, 7, 3, 5, 9, 6, 8], _checker=''), 'solve_time': 0.003}
-> ```
-
-**LLM**
-
-> Optimal route: Vienna → Linz → St. Pölten → Salzburg → Bregenz → Innsbruck → Klagenfurt → Graz → Eisenstadt → Vienna
->
-> Total distance: 1,694 km (+130 km compared to unblocked route)
-
-------
-
-## Disclaimer
-
-This MCP Solver is in its prototype stage and should be used with caution. Users are encouraged to experiment, but any use in critical environments is at their own risk.
-
----
-
-## Changelog 
-
-See the [CHANGELOG.md](./CHANGELOG.md) for details on version history and changes.
-
----
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-[mcp-badge]: https://img.shields.io/badge/MCP-Compatible-blue.svg
-[mcp-url]: https://modelcontextprotocol.io
-[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
-[license-url]: https://opensource.org/licenses/MIT
-[python-badge]: https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue
-[python-url]: https://www.python.org
-
----
