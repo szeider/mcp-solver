@@ -44,8 +44,7 @@ solver = Glucose3()
 solver.append_formula(formula)
 
 # Solve the formula
-satisfiable = solver.solve()
-model = solver.get_model() if satisfiable else None
+is_satisfiable = solver.solve()
 
 # Create a mapping of variable names to IDs
 variables = {
@@ -54,20 +53,23 @@ variables = {
     "c": 3
 }
 
-# Print the results
-if satisfiable:
-    print("Satisfiable!")
-    result = {}
+# Process the results based on the solver output
+if is_satisfiable:
+    model = solver.get_model()
+    result = {
+        "satisfiable": True,
+        "assignment": {}
+    }
     for var_name, var_id in variables.items():
-        is_true = var_id in model
-        is_false = -var_id in model
-        result[var_name] = is_true
+        result["assignment"][var_name] = var_id in model
     
     # Export solution
     export_solution(result)
 else:
-    print("Unsatisfiable")
-    export_solution({"status": "UNSAT"})
+    # Export unsatisfiable result
+    export_solution({
+        "satisfiable": False
+    })
 
 # Free solver memory
 solver.delete()
@@ -130,9 +132,9 @@ formula.extend(implies(1, -2))
 
 # Solve the formula
 solver = Glucose3(bootstrap_with=formula)
-result = solver.solve()
+is_satisfiable = solver.solve()
 
-if result:
+if is_satisfiable:
     model = solver.get_model()
     
     # Extract the schedule
@@ -168,6 +170,7 @@ solver.delete()
 ```python
 from pysat.formula import CNF
 from pysat.card import CardEnc, EncType
+from pysat.solvers import Glucose3
 
 # Enforce that at most 2 variables can be true
 vars = [1, 2, 3, 4, 5]
@@ -176,7 +179,27 @@ atmost2 = CardEnc.atmost(vars, 2, encoding=EncType.pairwise)
 formula = CNF()
 formula.extend(atmost2.clauses)
 
-# Continue with solving as before
+# Create solver and add the formula
+solver = Glucose3()
+solver.append_formula(formula)
+
+# Solve the formula
+is_satisfiable = solver.solve()
+
+if is_satisfiable:
+    model = solver.get_model()
+    export_solution({
+        "satisfiable": True,
+        "model": model,
+        "variables": vars
+    })
+else:
+    export_solution({
+        "satisfiable": False
+    })
+
+# Free solver memory
+solver.delete()
 ```
 
 ### MaxSAT Solving
@@ -198,8 +221,20 @@ wcnf.append([2], weight=3)  # b (weight 3)
 # Solve with RC2
 with RC2(wcnf) as rc2:
     model = rc2.compute()
-    cost = rc2.cost
-    print(f"Model: {model}, Cost: {cost}")
+    
+    if model is not None:
+        cost = rc2.cost
+        # Export the successful solution
+        export_solution({
+            "satisfiable": True,
+            "model": model,
+            "cost": cost
+        })
+    else:
+        # Export unsatisfiable result
+        export_solution({
+            "satisfiable": False
+        })
 ```
 
 ### Important Tips
@@ -209,6 +244,33 @@ with RC2(wcnf) as rc2:
 3. In clauses, positive numbers represent variables, negative ones represent negation
 4. For complex problems, use `export_solution()` to format and return results
 5. Use the right solver for your problem type
+
+### Handling Solver Results
+
+When working with PySAT solver results:
+
+1. Always store the solver's return value in a variable and use that variable consistently in conditional logic
+2. Don't hardcode expected results in print statements
+3. The solver returns `True` if satisfiable and `False` if unsatisfiable
+4. Only process the model/solution when the solver returns `True`
+
+Example of the correct pattern:
+```python
+# Correct pattern
+is_sat = solver.solve()
+if is_sat:  # Use the actual return value
+    model = solver.get_model()
+    # Process solution
+    export_solution({
+        "satisfiable": True,
+        "model": model
+    })
+else:
+    # Handle unsatisfiable case
+    export_solution({"satisfiable": False})
+```
+
+This ensures your code correctly handles both satisfiable and unsatisfiable results, and that the JSON output matches any printed output.
 
 ## Special Functions
 

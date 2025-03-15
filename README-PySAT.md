@@ -113,4 +113,31 @@ solver.delete()
 4. For complex problems, use the template library:
    ```python
    from mcp_solver.pysat.templates import weighted_maxsat_template
-   ``` 
+   ```
+
+## Handling Solver Results
+
+When using PySAT to solve boolean satisfaction problems:
+
+1. Always store the solver's return value in a variable and use that variable consistently in conditional logic
+2. Don't hardcode expected results in print statements
+3. The solver returns `True` if satisfiable and `False` if unsatisfiable
+4. Only process the model/solution when the solver returns `True`
+
+Example of the correct pattern:
+```python
+# Correct pattern
+is_sat = solver.solve()
+if is_sat:  # Use the actual return value
+    model = solver.get_model()
+    # Process solution
+    export_solution({
+        "satisfiable": True,
+        "model": model
+    })
+else:
+    # Handle unsatisfiable case
+    export_solution({"satisfiable": False})
+```
+
+This pattern ensures that your code correctly handles both satisfiable and unsatisfiable results, and that the JSON output matches your printed output. 
