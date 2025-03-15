@@ -4,8 +4,13 @@ This script tests the integration of the function templates with the Z3 environm
 """
 
 import sys
-from src.mcp_solver.z3.environment import execute_z3_code
-from src.mcp_solver.z3.templates import (
+import os
+
+# Add parent directory to path to ensure we can import from project root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from mcp_solver.z3.environment import execute_z3_code
+from mcp_solver.z3.templates import (
     constraint_satisfaction_template,
     optimization_template,
     array_template,

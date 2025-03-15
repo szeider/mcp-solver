@@ -4,8 +4,13 @@ This script tests the integration of the templates module with the Z3 environmen
 """
 
 import sys
-from src.mcp_solver.z3.environment import execute_z3_code
-from src.mcp_solver.z3.templates import (
+import os
+
+# Add parent directory to path to ensure we can import from project root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from mcp_solver.z3.environment import execute_z3_code
+from mcp_solver.z3.templates import (
     array_is_sorted, all_distinct, array_contains,
     exactly_k, at_most_k, at_least_k,
     function_is_injective, function_is_surjective
