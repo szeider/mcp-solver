@@ -49,12 +49,6 @@ CLEANUP_TIMEOUT = timedelta(seconds=1)
 # Get memo file path
 MEMO_FILE = str(get_memo_path())
 
-# Load instructions prompt from file instructions_prompt.md
-try:
-    # Adjust the relative path if needed.
-    # Here, we assume this file is at: <repo_root>/instructions_prompt.md
-    instructions_path = Path(__file__).resolve().parents[2] / "instructions_prompt.md"
-    with open(instructions_path, "r", encoding="utf-8") as f:
-        INSTRUCTIONS_PROMPT = f.read()
-except Exception as e:
-    INSTRUCTIONS_PROMPT = f"Error loading instructions prompt: {e}"
+# Store the path to the instructions prompt file
+instructions_path = Path(__file__).resolve().parents[2] / "instructions_prompt.md"
+INSTRUCTIONS_PROMPT = str(instructions_path)

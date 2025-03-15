@@ -1,35 +1,35 @@
-# MCP Solver with PySAT - Lite Mode
+# PySAT Solver (Lite Mode)
 
-This is a constraint solving system using PySAT (Python SAT Solver). PySAT provides Python interfaces to several SAT solvers and allows for propositional constraint modeling using CNF (Conjunctive Normal Form).
+This MCP server provides access to PySAT (Python SAT Solver) through a Python interface. PySAT provides interfaces to several SAT solvers and allows for propositional constraint modeling using CNF (Conjunctive Normal Form).
 
 ## Available Tools
 
-In PySAT mode (lite), the following tools are available:
-
-1. **Add Item**: Add Python code to the model
-2. **Replace Item**: Replace code in the model
-3. **Delete Item**: Delete code from the model
-4. **Solve Model**: Solve the current model using PySAT
-5. **Get Variable**: Get the value of a variable from the solution
-6. **Get Solution**: Get the complete solution
-7. **Get Solve Time**: Get the time taken to solve the model
+| Tool | Description |
+|------|-------------|
+| `clear_model` | Reset the PySAT model |
+| `add_item` | Add Python code to the model |
+| `replace_item` | Replace code in the model |
+| `delete_item` | Delete code from the model |
+| `solve_model` | Solve the current model using PySAT |
+| `get_variable_value` | Get the value of a variable from the solution |
+| `get_solution` | Get the complete solution |
+| `get_solve_time` | Get the time taken to solve the model |
 
 ## Using PySAT
 
 PySAT models are written as Python code. Here's a basic workflow:
 
-1. Define your problem using PySAT's CNF formulas
-2. Solve the formula
-3. Extract and export the solution
+1. Create a CNF formula
+2. Add clauses (logical constraints)
+3. Create a SAT solver and add the formula
+4. Solve and get the model (solution)
+5. Export the solution
 
-## Basic PySAT Example
-
-Here's a basic example of a PySAT model:
+### Example: Simple SAT Problem
 
 ```python
-# Import PySAT components
 from pysat.formula import CNF
-from pysat.solvers import Cadical153
+from pysat.solvers import Glucose3
 
 # Create a CNF formula
 formula = CNF()
@@ -40,7 +40,7 @@ formula.append([-1, 3])      # Clause 2: NOT a OR c
 formula.append([-2, -3])     # Clause 3: NOT b OR NOT c
 
 # Create solver and add the formula
-solver = Cadical153()
+solver = Glucose3()
 solver.append_formula(formula)
 
 # Solve the formula
@@ -54,118 +54,89 @@ variables = {
     "c": 3
 }
 
-# Export the solution
-export_solution(solver, variables)
+# Print the results
+if satisfiable:
+    print("Satisfiable!")
+    result = {}
+    for var_name, var_id in variables.items():
+        is_true = var_id in model
+        is_false = -var_id in model
+        result[var_name] = is_true
+    
+    # Export solution
+    export_solution(result)
+else:
+    print("Unsatisfiable")
+    export_solution({"status": "UNSAT"})
 
-# Free solver memory (important for PySAT)
+# Free solver memory
 solver.delete()
 ```
 
-## Key PySAT Components
+## Available Solvers
 
-### 1. Formulas
+PySAT includes several SAT solvers with different performance characteristics:
 
-- **CNF**: Standard CNF formula
-- **WCNF**: Weighted CNF for MaxSAT problems
+- `Glucose3`: Good general-purpose solver
+- `Glucose4`: Updated version of Glucose3
+- `Lingeling`: Efficient for large problems
+- `MiniSat22`: Classic solver with good stability
+- `Minicard`: Extension of MiniSat with cardinality constraints
+- `MapleCM`: Award-winning competitive solver
 
-### 2. Solvers
+## Advanced Features
 
-- **Cadical153**: Recommended for standard SAT problems
-- **Glucose3**, **Glucose4**: Alternative solvers
-- **RC2**: For MaxSAT optimization problems
-
-### 3. Encoding Cardinality Constraints
-
-PySAT provides efficient encodings for cardinality constraints:
+### Cardinality Constraints
 
 ```python
+from pysat.formula import CNF
 from pysat.card import CardEnc, EncType
 
-# Variables (1 to 5)
-variables = [1, 2, 3, 4, 5]
+# Enforce that at most 2 variables can be true
+vars = [1, 2, 3, 4, 5]
+atmost2 = CardEnc.atmost(vars, 2, encoding=EncType.pairwise)
 
-# At most 2 variables can be True
-atmost2 = CardEnc.atmost(variables, 2, encoding=EncType.seqcounter)
-
-# Add these constraints to your formula
 formula = CNF()
-for clause in atmost2.clauses:
-    formula.append(clause)
+formula.extend(atmost2.clauses)
+
+# Continue with solving as before
 ```
 
-### 4. MaxSAT Problems
-
-For optimization problems, use MaxSAT with the RC2 solver:
+### MaxSAT Solving
 
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
 
-# Create a WCNF formula
+# Create weighted MaxSAT problem
 wcnf = WCNF()
 
-# Add hard constraints (must be satisfied)
+# Hard clauses (must be satisfied)
 wcnf.append([1, 2])  # a OR b
 
-# Add soft constraints with weights
-wcnf.append([-1], weight=10)  # NOT a (weight 10)
-wcnf.append([-2], weight=5)   # NOT b (weight 5)
+# Soft clauses with weights
+wcnf.append([1], weight=5)  # a (weight 5)
+wcnf.append([2], weight=3)  # b (weight 3)
 
 # Solve with RC2
 with RC2(wcnf) as rc2:
     model = rc2.compute()
     cost = rc2.cost
-
-# Export solution with variables and objective
-variables = {"a": 1, "b": 2}
-export_solution(rc2, variables, cost)
+    print(f"Model: {model}, Cost: {cost}")
 ```
 
-## Important Notes
+### Important Tips
 
-1. **Memory Management**: Always call `solver.delete()` after using a solver to free memory.
+1. Always call `solver.delete()` to free memory
+2. Use appropriate variable IDs (positive integers)
+3. In clauses, positive numbers represent variables, negative ones represent negation
+4. For complex problems, use `export_solution()` to format and return results
+5. Use the right solver for your problem type
 
-2. **Variable IDs**: PySAT uses integer IDs for variables:
-   - Positive numbers represent variables
-   - Negative numbers represent negated variables
+## Special Functions
 
-3. **Accessing Results**: Use the exported solution to access results:
-   ```python
-   export_solution(solver, variables)
-   ```
+- `export_solution(data)`: Export data as a solution
+- Variable IDs must be positive integers
+- Clauses are lists of integers (negative for negated variables)
 
-4. **Best Practices**:
-   - Use Cadical153 for standard SAT problems (fastest)
-   - Use RC2 for MaxSAT optimization problems
-   - Use sequential counter encoding (EncType.seqcounter) for cardinality constraints
-
-## Tips for Success
-
-1. **Properly Format Clauses**: Each clause is a list of integer literals.
-
-2. **Variable ID Mapping**: Maintain a clear mapping from meaningful variable names to PySAT's numeric IDs.
-
-3. **Free Resources**: Always delete solvers when finished to prevent memory leaks.
-
-4. **Test Incrementally**: Build and test your model in small steps.
-
-5. **Handle Complexity**: For complex models, break down the problem into smaller parts.
-
-## Exporting Your Solution
-
-Always end your code with:
-
-```python
-export_solution(solver, variables, objective)
-```
-
-Where:
-- `solver`: Your PySAT solver instance
-- `variables`: Dictionary mapping variable names to their IDs
-- `objective`: Optional objective value for optimization problems
-
-## Troubleshooting
-
-- If the solver fails: Check your constraints for contradictions
-- If you get a memory error: Make sure you're calling `solver.delete()`
-- If variables are missing from the solution: Check your variable mapping dictionary 
+For more advanced usage, refer to the [PySAT documentation](https://pysathq.github.io/). 

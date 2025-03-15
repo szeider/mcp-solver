@@ -80,25 +80,76 @@ async def serve() -> None:
             elif Z3_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3.md")
             elif PYSAT_MODE and LITE_MODE:
+                # Use the correct PySAT instructions now that the format issue is fixed
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat_lite.md")
+                logging.getLogger(__name__).info("Using PySAT lite instructions")
             elif LITE_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
             else:
                 prompt_path = INSTRUCTIONS_PROMPT
             
             try:
-                with open(prompt_path, "r") as f:
+                with open(prompt_path, "r", encoding="utf-8") as f:
                     content = f.read()
                     if not LITE_MODE:
                         content += "\n\n## Memo\n\n" + memo.get_memo()
+                    
+                    # Add debugging logs
+                    logging.getLogger(__name__).info(f"Prompt loaded from: {prompt_path}")
+                    logging.getLogger(__name__).info(f"Prompt content length: {len(content)}")
+                    logging.getLogger(__name__).info(f"Prompt content first 100 chars: {content[:100]}")
             except FileNotFoundError:
                 logging.getLogger(__name__).error(f"Prompt file not found: {prompt_path}")
-                return types.GetPromptResult(content="Error: Prompt file not found")
+                return types.GetPromptResult(
+                    messages=[
+                        types.PromptMessage(
+                            role="user",
+                            content=types.TextContent(
+                                type="text",
+                                text="Error: Prompt file not found"
+                            )
+                        )
+                    ]
+                )
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Error reading prompt file: {str(e)}")
+                return types.GetPromptResult(
+                    messages=[
+                        types.PromptMessage(
+                            role="user",
+                            content=types.TextContent(
+                                type="text",
+                                text=f"Error reading prompt file: {str(e)}"
+                            )
+                        )
+                    ]
+                )
             
-            return types.GetPromptResult(content=content)
+            # Return with the new format
+            return types.GetPromptResult(
+                messages=[
+                    types.PromptMessage(
+                        role="user",
+                        content=types.TextContent(
+                            type="text",
+                            text=content
+                        )
+                    )
+                ]
+            )
         else:
             logging.getLogger(__name__).error(f"Unknown prompt: {name}")
-            return types.GetPromptResult(content="Error: Unknown prompt")
+            return types.GetPromptResult(
+                messages=[
+                    types.PromptMessage(
+                        role="user",
+                        content=types.TextContent(
+                            type="text",
+                            text="Error: Unknown prompt"
+                        )
+                    )
+                ]
+            )
 
     def format_array_access(variable_name: str, indices: List[int]) -> str:
         return variable_name if not indices else f"{variable_name}[{','.join(str(i) for i in indices)}]"
