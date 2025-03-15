@@ -56,7 +56,7 @@ These tools let you construct your model incrementally and solve it using the Ch
 
 5. **solve_model**  
    - **Input:**  
-     - Optional `timeout` (number): Maximum time in seconds allowed for solving.
+     - `timeout` (number): Time in seconds allowed for solving (between 1 and 10 seconds).
    - **Output:**  
      - A JSON object with:
        - **status:** `"SAT"`, `"UNSAT"`, or `"TIMEOUT"`.

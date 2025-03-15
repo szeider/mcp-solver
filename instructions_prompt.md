@@ -64,7 +64,7 @@ Each tool provided by the MCP Solver has defined inputs and outputs. Here is a s
 
 6. **solve_model**  
    - **Input:**  
-     - Optional `timeout` (number): The maximum time in seconds to allow for solving.  
+     - `timeout` (number): Time in seconds allowed for solving (between 1 and 10 seconds).
    - **Output:**  
      - A JSON/dictionary object with:
        - **status:** e.g., `"SAT"`, `"UNSAT"`, or `"TIMEOUT"`.
@@ -99,7 +99,7 @@ Each tool provided by the MCP Solver has defined inputs and outputs. Here is a s
 ## Model Solving and Verification
 
 - **Solution Verification:**  
-  After a model is solved, the LLM should verify that the returned solution satisfies all constraints mentioned by the user. Ensure that the solver’s output is consistent with your expectations.
+  After a model is solved, the LLM should verify that the returned solution satisfies all constraints mentioned by the user. Ensure that the solver's output is consistent with your expectations.
 
 ## Model Modification Guidelines
 

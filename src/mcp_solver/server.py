@@ -13,7 +13,7 @@ import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
-from .constants import DEFAULT_SOLVE_TIMEOUT, MEMO_FILE, ITEM_CHARS, INSTRUCTIONS_PROMPT
+from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT, CLEANUP_TIMEOUT, MEMO_FILE, ITEM_CHARS, INSTRUCTIONS_PROMPT
 from .memo import MemoManager
 
 # Global flags for mode selection
@@ -266,18 +266,19 @@ async def serve() -> None:
             types.Tool(
                 name="solve_model", 
                 description=get_description({
-                    'mzn': "Solve the current minizinc model" + ("" if LITE_MODE else " with an optional timeout parameter."),
-                    'z3': "Solve the current Z3 Python model" + ("" if LITE_MODE else " with an optional timeout parameter."),
-                    'pysat': "Solve the current PySAT Python model" + ("" if LITE_MODE else " with an optional timeout parameter.")
+                    'mzn': "Solve the current minizinc model with a timeout parameter.",
+                    'z3': "Solve the current Z3 Python model with a timeout parameter.",
+                    'pysat': "Solve the current PySAT Python model with a timeout parameter."
                 }),
                 inputSchema={
                     "type": "object", 
-                    "properties": {} if LITE_MODE else {
+                    "properties": {
                         "timeout": {
-                            "type": ["number", "null"],
-                            "description": f"Optional solve timeout in seconds, must be smaller than the default of {DEFAULT_SOLVE_TIMEOUT} seconds"
+                            "description": f"Solve timeout in seconds (minimum: {MIN_SOLVE_TIMEOUT.seconds}, maximum: {MAX_SOLVE_TIMEOUT.seconds})",
+                            "type": "number"
                         }
-                    }
+                    },
+                    "required": ["timeout"]
                 }
             ),
             types.Tool(
@@ -363,10 +364,24 @@ async def serve() -> None:
                     return [types.TextContent(type="text", text="Model cleared")]
                 case "solve_model":
                     timeout_val = None
-                    if not LITE_MODE and arguments and "timeout" in arguments:
+                    try:
                         raw_timeout = arguments.get("timeout")
-                        if raw_timeout is not None:
-                            timeout_val = timedelta(seconds=float(raw_timeout))
+                        # Default to MIN_SOLVE_TIMEOUT if missing or not a number
+                        if raw_timeout is None or not isinstance(raw_timeout, (int, float)):
+                            timeout_val = MIN_SOLVE_TIMEOUT
+                        else:
+                            # Cap at MAX_SOLVE_TIMEOUT if too large
+                            if raw_timeout > MAX_SOLVE_TIMEOUT.seconds:
+                                timeout_val = MAX_SOLVE_TIMEOUT
+                            # Use MIN_SOLVE_TIMEOUT if too small
+                            elif raw_timeout < MIN_SOLVE_TIMEOUT.seconds:
+                                timeout_val = MIN_SOLVE_TIMEOUT
+                            else:
+                                timeout_val = timedelta(seconds=float(raw_timeout))
+                    except (ValueError, TypeError):
+                        # Use MIN_SOLVE_TIMEOUT for any parsing errors
+                        timeout_val = MIN_SOLVE_TIMEOUT
+                        
                     result = await model_mgr.solve_model(timeout=timeout_val)
                     return [types.TextContent(type="text", text=str(result))]
                 case "get_solution":

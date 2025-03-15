@@ -40,9 +40,8 @@ ITEM_CHARS = None  # or None to show full items
 VALIDATE_ON_CHANGE = True  
 
 # Timeouts (Note: asyncio.timeout requires Python 3.11+)
-DEFAULT_SOLVE_TIMEOUT = timedelta(seconds=4)
+MIN_SOLVE_TIMEOUT = timedelta(seconds=1)
 MAX_SOLVE_TIMEOUT = timedelta(seconds=10)
-FLATTEN_TIMEOUT = timedelta(seconds=2)
 VALIDATION_TIMEOUT = timedelta(seconds=2)
 CLEANUP_TIMEOUT = timedelta(seconds=1)
 

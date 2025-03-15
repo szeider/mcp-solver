@@ -10,7 +10,7 @@ This MCP server provides access to PySAT (Python SAT Solver) through a Python in
 | `add_item` | Add Python code to the model |
 | `replace_item` | Replace code in the model |
 | `delete_item` | Delete code from the model |
-| `solve_model` | Solve the current model using PySAT |
+| `solve_model` | Solve the current model using PySAT (requires timeout parameter between 1-10 seconds) |
 | `get_variable_value` | Get the value of a variable from the solution |
 | `get_solution` | Get the complete solution |
 | `get_solve_time` | Get the time taken to solve the model |
