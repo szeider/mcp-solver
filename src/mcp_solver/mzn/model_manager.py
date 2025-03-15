@@ -7,7 +7,7 @@ import logging
 
 from ..base_manager import SolverManager
 from ..constants import (
-    DEFAULT_SOLVE_TIMEOUT,
+    MIN_SOLVE_TIMEOUT,
     MAX_SOLVE_TIMEOUT,
     VALIDATION_TIMEOUT,
     CLEANUP_TIMEOUT
@@ -212,14 +212,14 @@ class MiniZincModelManager(SolverManager):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._cleanup()
 
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         if not self.model_string.strip():
             return error_response("MODEL_EMPTY", "Model is empty. Cannot solve an empty model.")
         async with self:
             return await self._solve_model_impl(timeout)
 
-    async def _solve_model_impl(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
-        timeout = timeout or DEFAULT_SOLVE_TIMEOUT
+    async def _solve_model_impl(self, timeout: timedelta) -> Dict[str, Any]:
+        # We should now always have a valid timeout from the server
         if timeout > MAX_SOLVE_TIMEOUT:
             return error_response("TIMEOUT_EXCEEDED", f"Timeout {timeout} exceeds maximum allowed timeout {MAX_SOLVE_TIMEOUT}")
         

@@ -71,12 +71,12 @@ class SolverManager(ABC):
         pass
     
     @abstractmethod
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
         Solve the current model.
         
         Args:
-            timeout: Optional timeout for the solve operation
+            timeout: Timeout for the solve operation
             
         Returns:
             A dictionary with the result of the solve operation

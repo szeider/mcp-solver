@@ -12,6 +12,7 @@ from datetime import timedelta
 import time
 
 from ..base_manager import SolverManager
+from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_pysat_code
 
 class PySATModelManager(SolverManager):
@@ -128,12 +129,12 @@ class PySATModelManager(SolverManager):
         logging.getLogger(__name__).warning(f"Item at index {index} not found, adding new item")
         return await self.add_item(index, content)
     
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
         Solve the current model.
         
         Args:
-            timeout: Optional timeout for the solve operation
+            timeout: Timeout for the solve operation
             
         Returns:
             A dictionary with the result of the solve operation
@@ -148,10 +149,8 @@ class PySATModelManager(SolverManager):
         # Join code items into a single string
         code_string = "\n".join(content for _, content in sorted_items)
         
-        # Set timeout (default to 30 seconds if not specified)
-        timeout_seconds = 30.0
-        if timeout:
-            timeout_seconds = timeout.total_seconds()
+        # Set timeout
+        timeout_seconds = timeout.total_seconds()
         
         # Execute code with timeout
         start_time = time.time()

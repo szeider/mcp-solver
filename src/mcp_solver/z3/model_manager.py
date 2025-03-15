@@ -10,6 +10,7 @@ from typing import Dict, Optional, Any, List, Tuple
 from datetime import timedelta
 
 from ..base_manager import SolverManager
+from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_z3_code
 
 class Z3ModelManager(SolverManager):
@@ -136,12 +137,12 @@ class Z3ModelManager(SolverManager):
             "model": self.get_model()
         }
     
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
         Solve the current model.
         
         Args:
-            timeout: Optional timeout for the solve operation
+            timeout: Timeout for the solve operation
             
         Returns:
             A dictionary with the result of the solve operation
@@ -157,7 +158,7 @@ class Z3ModelManager(SolverManager):
         combined_code = "\n".join(self.code_items)
         
         # Set timeout in seconds
-        timeout_seconds = timeout.total_seconds() if timeout else 10.0
+        timeout_seconds = timeout.total_seconds()
         
         # Execute the code
         result = execute_z3_code(combined_code, timeout=timeout_seconds)
