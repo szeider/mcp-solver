@@ -15,6 +15,8 @@ This MCP server provides access to PySAT (Python SAT Solver) through a Python in
 | `get_solution` | Get the complete solution |
 | `get_solve_time` | Get the time taken to solve the model |
 
+> **Note:** MaxSAT optimization functionality is not currently supported. Only standard SAT solving capabilities are available.
+
 ## Using PySAT
 
 PySAT models are written as Python code. Here's a basic workflow:

@@ -150,7 +150,7 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
         # Cardinality constraints
         "CardEnc": CardEnc,
         "EncType": EncType,
-        # MaxSAT solver
+        # PySAT solver
         "RC2": RC2,
         # Solution export
         "export_solution": export_solution,

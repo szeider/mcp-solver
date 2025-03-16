@@ -28,7 +28,7 @@ for p in reversed(site_packages):
 
 # Now try to import PySAT
 try:
-    from pysat.formula import CNF
+    from pysat.formula import CNF, WCNF
     from pysat.solvers import Solver
     from pysat.examples.rc2 import RC2
 except ImportError:
@@ -48,116 +48,53 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
     Args:
         solver: PySAT Solver object or dictionary containing solution data
         variables: Dictionary mapping variable names to their values or IDs
-        objective: Value of the optimization objective (for MaxSAT problems)
+        objective: Optional objective value for optimization problems
         
     Returns:
-        Dictionary containing the solution details
+        Dictionary with solution data
     """
-    # Declare global variables first
     global _LAST_SOLUTION
     
-    # Initialize result dictionary
-    result = {
-        "satisfiable": False,
-        "values": {},
-        "objective": None,
-        "status": "unknown"
-    }
+    # Initialize solution data
+    solution_data = {}
     
-    # Log what we're exporting for debugging
-    logging.getLogger(__name__).debug(f"Exporting solution: solver={type(solver)}, variables={variables is not None}")
-    
-    # Case 1: Direct variable dictionary (no solver)
-    if variables is not None and solver is None:
-        result["satisfiable"] = True
-        result["status"] = "sat"
-        result["values"] = variables
-        if objective is not None:
-            result["objective"] = objective
+    # Case 1: Direct dictionary data
+    if isinstance(solver, dict):
+        solution_data = solver
         
-        # Store result and return
-        _LAST_SOLUTION = result
-        logging.getLogger(__name__).debug(f"Exported solution (case 1): {result}")
-        return result
-    
-    # Case 2: Solver instance (PySAT Solver or RC2)
-    if solver is not None:
-        # For standard SAT solvers
-        if isinstance(solver, Solver):
-            # Check if the problem was solved
-            if hasattr(solver, '_solved') and solver._solved:
-                # BUG FIX: Get the satisfiability result directly
-                is_sat = solver.get_model() is not None
-                
-                # Log the actual solver satisfiability result for debugging
-                logging.getLogger(__name__).debug(f"PySAT solver result - is_sat: {is_sat}, model: {solver.get_model() is not None}")
-                
-                model = solver.get_model()
-                result["satisfiable"] = is_sat
-                result["status"] = "sat" if is_sat else "unsat"
-                
-                # Extract variable values if we have a mapping
-                if variables is not None and model is not None:
-                    for var_name, var_id in variables.items():
-                        # Handle both positive and negative variable IDs
-                        var_id_abs = abs(var_id)
-                        # Find variable value in model (if within range)
-                        if var_id_abs <= len(model):
-                            # Model contains a list of literals, where:
-                            # Positive numbers mean variable is True
-                            # Negative numbers mean variable is False
-                            # We find the variable in the model by its absolute ID
-                            # and check its sign to determine True/False
-                            var_value = var_id_abs in model
-                            if var_id < 0:  # If variable ID is negative, negate the value
-                                var_value = not var_value
-                            result["values"][var_name] = var_value
-                
-                # Store objective value if provided
-                if objective is not None:
-                    result["objective"] = objective
+    # Case 2: PySAT Solver object
+    elif hasattr(solver, 'get_model') and callable(getattr(solver, 'get_model')):
+        # Get the model if solver reports satisfiable
+        is_sat = getattr(solver, 'solve', lambda: None)()
+        solution_data["satisfiable"] = bool(is_sat)
         
-        # For MaxSAT solvers (RC2)
-        elif isinstance(solver, RC2):
-            model = solver.model
-            cost = solver.cost if hasattr(solver, 'cost') else None
+        if is_sat:
+            model = solver.get_model()
+            solution_data["model"] = model
             
-            # BUG FIX: Get the satisfiability result directly
-            is_sat = model is not None
-            
-            # Log the actual solver satisfiability result for debugging
-            logging.getLogger(__name__).debug(f"RC2 solver result - is_sat: {is_sat}, model: {model is not None}")
-            
-            result["satisfiable"] = is_sat
-            result["status"] = "sat" if is_sat else "unsat"
-            
-            # Extract variable values if we have a mapping
-            if variables is not None and model is not None:
-                for var_name, var_id in variables.items():
-                    var_id_abs = abs(var_id)
-                    # Find variable value in model (if within range)
-                    if var_id_abs <= len(model):
-                        var_value = var_id_abs in model
-                        if var_id < 0:  # If variable ID is negative, negate the value
-                            var_value = not var_value
-                        result["values"][var_name] = var_value
-            
-            # Store objective/cost value
-            if cost is not None:
-                result["objective"] = cost
-            elif objective is not None:
-                result["objective"] = objective
+            # Extract variable assignments if variables dictionary is provided
+            if variables:
+                solution_data["assignment"] = {
+                    name: (var_id in model) if var_id > 0 else ((-var_id) not in model)
+                    for name, var_id in variables.items()
+                }
     
-    # Store result for retrieval by environment module
-    _LAST_SOLUTION = result
+    # Case 3: RC2 MaxSAT Solver - REMOVED
     
-    # Set solution in calling namespace to make it available to exec
-    import inspect
-    caller_globals = inspect.currentframe().f_back.f_globals
-    caller_locals = inspect.currentframe().f_back.f_locals
-    caller_locals["solution"] = result
+    # Ensure the satisfiable flag matches the actual model status
+    if "model" in solution_data and solution_data.get("model") is not None:
+        solution_data["satisfiable"] = True
+    elif "model" in solution_data and solution_data.get("model") is None:
+        solution_data["satisfiable"] = False
     
-    # Log the final exported solution for debugging
-    logging.getLogger(__name__).debug(f"Exported solution (final): {result}")
+    # Set the status field to match satisfiability
+    solution_data["status"] = "sat" if solution_data.get("satisfiable", False) else "unsat"
     
-    return result 
+    # Include objective value if provided
+    if objective is not None:
+        solution_data["objective"] = objective
+    
+    # Store the solution for debugging/inspection
+    _LAST_SOLUTION = solution_data
+    
+    return solution_data 
