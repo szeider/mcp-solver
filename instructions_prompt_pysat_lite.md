@@ -45,19 +45,18 @@ formula.append([-2, -3])     # Clause 3: NOT b OR NOT c
 solver = Glucose3()
 solver.append_formula(formula)
 
-# Solve the formula
-is_satisfiable = solver.solve()
-
-# Create a mapping of variable names to IDs
-variables = {
-    "a": 1,
-    "b": 2,
-    "c": 3
-}
-
-# Process the results based on the solver output
-if is_satisfiable:
+# Solve the formula - IMPORTANT: Use direct conditional check
+if solver.solve():
     model = solver.get_model()
+    
+    # Create a mapping of variable names to IDs
+    variables = {
+        "a": 1,
+        "b": 2,
+        "c": 3
+    }
+    
+    # Process the results
     result = {
         "satisfiable": True,
         "assignment": {}
@@ -144,9 +143,9 @@ for clause in implies(1, -2):
 
 # Solve the formula
 solver = Glucose3(bootstrap_with=formula)
-is_satisfiable = solver.solve()
 
-if is_satisfiable:
+# IMPORTANT: Use direct conditional check instead of assigning to a variable
+if solver.solve():
     model = solver.get_model()
     
     # Extract the schedule
@@ -209,16 +208,15 @@ For most use cases, you should prefer the templated versions (`at_most_k`, `at_l
 
 When working with PySAT solver results:
 
-1. Always store the solver's return value in a variable and use that variable consistently in conditional logic
+1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` rather than assigning the result to a variable
 2. Don't hardcode expected results in print statements
 3. The solver returns `True` if satisfiable and `False` if unsatisfiable
 4. Only process the model/solution when the solver returns `True`
 
-Example of the correct pattern for direct solver use:
+Example of the correct pattern:
 ```python
 # Correct pattern
-is_sat = solver.solve()
-if is_sat:  # Use the actual return value
+if solver.solve():  # Direct conditional check
     model = solver.get_model()
     # Process solution
     export_solution({
