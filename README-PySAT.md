@@ -52,16 +52,17 @@ if solver.solve():
         "c": 3
     }
     
-    # Process the results
-    result = {
-        "satisfiable": True,
-        "assignment": {}
-    }
+    # Process the results - create a custom dictionary
+    assignment = {}
     for var_name, var_id in variables.items():
-        result["assignment"][var_name] = var_id in model
+        assignment[var_name] = var_id in model
     
     # Export solution
-    export_solution(result)
+    export_solution({
+        "satisfiable": True,
+        "model": model,
+        "assignment": assignment
+    })
 else:
     # Export unsatisfiable result
     export_solution({
@@ -90,7 +91,8 @@ if solver.solve():  # Direct conditional check
     # Process solution
     export_solution({
         "satisfiable": True,
-        "model": model
+        "model": model,
+        "custom_dictionary": {...}
     })
 else:
     # Handle unsatisfiable case
@@ -99,21 +101,43 @@ else:
 
 ### Solution Structure
 
-When creating and exporting solutions, you should structure your data as follows:
+When creating and exporting solutions, structure your data using custom dictionaries that make sense for your problem domain:
 
 ```python
-# Standard solution format
+# Example with a custom dictionary for a graph coloring problem
 export_solution({
-    "satisfiable": True,  # Required field
-    "model": model,       # Raw SAT model (optional)
-    "values": {           # Variable assignments (recommended)
-        "var1": value1,
-        "var2": value2
-    },
-    # You can include additional domain-specific dictionaries
-    "custom_structure": {...}
+    "satisfiable": True,
+    "coloring": {"A": "red", "B": "green", "C": "blue"},
+    "model": model
 })
 ```
+
+All values in your custom dictionaries will be automatically extracted and made available in a flat "values" dictionary. This allows you to:
+
+1. Structure your solution data in a way that makes sense for your problem domain
+2. Access individual variables directly through the "values" dictionary
+
+#### Key Collision Handling
+
+If multiple custom dictionaries contain the same key, the system will preserve both values by prefixing the keys with their parent dictionary name:
+
+```python
+# Example with potential key collision
+export_solution({
+    "satisfiable": True,
+    "employees": {"manager": "Alice", "clerk": "Bob"},
+    "rooms": {"manager": "Office A", "meeting": "Room B"}
+})
+```
+
+This will result in:
+
+- `values["clerk"] = "Bob"`
+- `values["meeting"] = "Room B"`
+- `values["employees.manager"] = "Alice"`
+- `values["rooms.manager"] = "Office A"`
+
+Keys that appear in only one dictionary won't be prefixed.
 
 ## Available Solvers
 
@@ -151,6 +175,86 @@ for clause in at_most_k([1, 2, 3], 2):  # At most 2 courses on Monday
     formula.append(clause)
 ```
 
+## Example: Graph Coloring Problem
+
+Here's a complete example of solving a graph coloring problem:
+
+```python
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+
+# Define a simple graph
+nodes = ["A", "B", "C", "D"]
+edges = [("A", "B"), ("B", "C"), ("C", "D"), ("D", "A"), ("A", "C")]
+colors = ["Red", "Green", "Blue"]
+
+# Create a CNF formula
+formula = CNF()
+
+# Create variables for node-color assignments
+variables = {}
+var_id = 1
+for node in nodes:
+    for color in colors:
+        variables[f"{node}_{color}"] = var_id
+        var_id += 1
+
+# Each node must have at least one color
+for node in nodes:
+    clause = [variables[f"{node}_{color}"] for color in colors]
+    formula.append(clause)
+
+# Each node can have at most one color
+for node in nodes:
+    for i in range(len(colors)):
+        for j in range(i + 1, len(colors)):
+            color1 = colors[i]
+            color2 = colors[j]
+            formula.append([-variables[f"{node}_{color1}"], -variables[f"{node}_{color2}"]])
+
+# Adjacent nodes must have different colors
+for node1, node2 in edges:
+    for color in colors:
+        formula.append([-variables[f"{node1}_{color}"], -variables[f"{node2}_{color}"]])
+
+# Create solver and add the formula
+solver = Glucose3()
+solver.append_formula(formula)
+
+# Solve the formula
+if solver.solve():
+    model = solver.get_model()
+    
+    # Extract the coloring assignment
+    coloring = {}
+    for var_name, var_id in variables.items():
+        if var_id in model:  # If this assignment is true
+            node, color = var_name.split('_')
+            coloring[node] = color
+    
+    # Export solution with custom dictionary
+    export_solution({
+        "satisfiable": True,
+        "model": model,
+        "coloring": coloring  # Values will be automatically extracted
+    })
+    
+    # The exported solution will contain:
+    # {
+    #    "satisfiable": True,
+    #    "model": [...],
+    #    "coloring": {"A": "red", "B": "green", ...},
+    #    "values": {"A": "red", "B": "green", ...}
+    # }
+else:
+    export_solution({
+        "satisfiable": False
+    })
+
+# Free solver memory
+solver.delete()
+```
+
 ## Example: Schedule Problem
 
 ```python
@@ -182,13 +286,18 @@ if solver.solve():
     schedule = {}
     task_to_slot = {}
     
-    # ... (process results)
+    for var_name, var_id in variables.items():
+        if var_id in model:  # If this assignment is true
+            task, slot = var_name.split('_')
+            schedule[slot] = task
+            task_to_slot[task] = slot
     
-    # Export the solution
+    # Export the solution with custom dictionaries
     export_solution({
         "satisfiable": True,
         "model": model,
-        "values": task_to_slot
+        "schedule": schedule,
+        "assignment": task_to_slot
     })
 else:
     export_solution({
@@ -208,7 +317,8 @@ solver.delete()
   : Export data as a solution
 
   - Requires at minimum: `{"satisfiable": True/False}`
-  - Should include variable assignments in a `values` dictionary
+  - Structure data using custom dictionaries that reflect your problem domain
+  - Values will be automatically extracted into a flat "values" dictionary
   - Variable IDs must be positive integers
   - Clauses are lists of integers (negative for negated variables)
 
