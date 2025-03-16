@@ -27,7 +27,7 @@ PySAT models are written as Python code. Here's a basic workflow:
 4. Solve and get the model (solution)
 5. Export the solution
 
-### Example: Simple SAT Problem
+### Basic SAT Problem Example
 
 ```python
 from pysat.formula import CNF
@@ -76,6 +76,66 @@ else:
 solver.delete()
 ```
 
+## Important Guidelines
+
+### Handling Solver Results
+
+When working with PySAT solvers:
+
+1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` rather than assigning the result to a variable
+2. Don't hardcode expected results in print statements
+3. The solver returns `True` if satisfiable and `False` if unsatisfiable
+4. Only process the model/solution when the solver returns `True`
+5. Always call `solver.delete()` to free memory when using direct PySAT solvers
+
+```python
+# Correct pattern
+if solver.solve():  # Direct conditional check
+    model = solver.get_model()
+    # Process solution
+    export_solution({
+        "satisfiable": True,
+        "model": model
+    })
+else:
+    # Handle unsatisfiable case
+    export_solution({"satisfiable": False})
+```
+
+### Solution Structure and Accessibility
+
+When creating and exporting solutions, you can structure your data in several ways:
+
+1. **Custom Solution Dictionaries**: Create custom dictionaries to organize your solution in a meaningful way for your problem domain.
+
+```python
+# Example with a custom "coloring" dictionary for a graph coloring problem
+export_solution({
+    "satisfiable": True,
+    "coloring": {"A": "red", "B": "green", "C": "blue"},
+    "model": model
+})
+```
+
+2. **Values Dictionary**: For standardized variable access, you can also include a "values" dictionary:
+
+```python
+# Example with explicit values dictionary
+export_solution({
+    "satisfiable": True,
+    "coloring": {"A": "red", "B": "green", "C": "blue"},
+    "values": {"A": "red", "B": "green", "C": "blue"},
+    "model": model
+})
+```
+
+3. **Accessing Variables**: Both approaches are supported:
+   - Individual variables can be accessed from the "values" dictionary
+   - Custom dictionaries (like "coloring") can be accessed as a whole
+   - If you don't include a "values" dictionary, one will be created automatically, and values from your custom dictionaries will be copied into it
+
+This flexible approach allows you to structure your solution data in a way that makes sense for your problem domain while ensuring all values remain accessible.
+
 ## Available Solvers
 
 PySAT includes several SAT solvers with different performance characteristics:
@@ -87,31 +147,28 @@ PySAT includes several SAT solvers with different performance characteristics:
 - `Minicard`: Extension of MiniSat with cardinality constraints
 - `MapleCM`: Award-winning competitive solver
 
-## Advanced Features
+## Cardinality Constraints
 
-### Cardinality Constraints Helper Functions
+### Helper Functions
 
-PySAT mode includes several helper functions for easily creating common cardinality constraints. These functions are located in the `templates/cardinality_templates.py` module but are also available directly in the environment:
+PySAT mode provides helper functions for easily creating common cardinality constraints:
 
-| Function            | Description                                             | Return Type       |
-|---------------------|---------------------------------------------------------|-------------------|
-| `at_most_k`         | At most k variables are true                            | List[List[int]]   |
-| `at_least_k`        | At least k variables are true                           | List[List[int]]   |
-| `exactly_k`         | Exactly k variables are true                            | List[List[int]]   |
-| `at_most_one`       | At most one variable is true (optimized for k=1)        | List[List[int]]   |
-| `exactly_one`       | Exactly one variable is true (optimized for k=1)        | List[List[int]]   |
-| `implies`           | If a is true, then b must be true                       | List[List[int]]   |
-| `mutually_exclusive`| At most one variable is true (same as at_most_one)      | List[List[int]]   |
-| `if_then_else`      | If condition then x else y                              | List[List[int]]   |
-
-These functions return lists of clauses that need to be added to your formula. The implementation is robust and handles edge cases gracefully, with fallback mechanisms for compatibility with different environments.
+| Function            | Description                                             |
+|---------------------|---------------------------------------------------------|
+| `at_most_k`         | At most k variables are true                            |
+| `at_least_k`        | At least k variables are true                           |
+| `exactly_k`         | Exactly k variables are true                            |
+| `at_most_one`       | At most one variable is true (optimized for k=1)        |
+| `exactly_one`       | Exactly one variable is true (optimized for k=1)        |
+| `implies`           | If a is true, then b must be true                       |
+| `mutually_exclusive`| At most one variable is true (same as at_most_one)      |
+| `if_then_else`      | If condition then x else y                              |
 
 Here's how to use these helper functions:
 
 ```python
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
-from mcp_solver.pysat.templates.cardinality_templates import at_most_k, at_least_k, exactly_one, implies
 
 # Create a formula
 formula = CNF()
@@ -137,14 +194,9 @@ for clause in at_most_k([4, 5, 6], 2):  # At most 2 courses on Tuesday
 for clause in at_most_k([7, 8, 9], 2):  # At most 2 courses on Wednesday
     formula.append(clause)
 
-# Dependency: If Course A is on Monday, Course B cannot be on Monday
-for clause in implies(1, -2):
-    formula.append(clause)
-
 # Solve the formula
 solver = Glucose3(bootstrap_with=formula)
 
-# IMPORTANT: Use direct conditional check instead of assigning to a variable
 if solver.solve():
     model = solver.get_model()
     
@@ -156,7 +208,7 @@ if solver.solve():
     for day_idx, day_vars in enumerate([[1, 2, 3], [4, 5, 6], [7, 8, 9]]):
         day_courses = []
         for course_idx, var in enumerate(day_vars):
-            if var in model:  # If variable is true (positive in model)
+            if var in model:  # If variable is true
                 day_courses.append(courses[course_idx])
         
         schedule[days[day_idx]] = day_courses
@@ -178,7 +230,7 @@ solver.delete()
 
 ### Traditional Cardinality Constraints
 
-For low-level access, you can also use PySAT's built-in cardinality constraint encodings, but our template implementations are generally more robust and handle edge cases better:
+For low-level access, you can also use PySAT's built-in cardinality constraint encodings:
 
 ```python
 from pysat.formula import CNF
@@ -191,32 +243,10 @@ atmost2 = CardEnc.atmost(vars, 2, encoding=EncType.pairwise)
 
 formula = CNF()
 formula.extend(atmost2.clauses)
-```
 
-For most use cases, you should prefer the templated versions (`at_most_k`, `at_least_k`, etc.) as they provide more robust behavior and better error handling, especially in environments like Claude Desktop.
-
-### Important Tips
-
-1. Always call `solver.delete()` to free memory when using direct PySAT solvers
-2. Use appropriate variable IDs (positive integers)
-3. In clauses, positive numbers represent variables, negative ones represent negation
-4. For complex problems, use `export_solution()` to format and return results
-5. Use the right solver for your problem type
-6. When using cardinality constraints, leverage the template functions (`at_most_k`, etc.) for cleaner code
-
-### Handling Solver Results
-
-When working with PySAT solver results:
-
-1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` rather than assigning the result to a variable
-2. Don't hardcode expected results in print statements
-3. The solver returns `True` if satisfiable and `False` if unsatisfiable
-4. Only process the model/solution when the solver returns `True`
-
-Example of the correct pattern:
-```python
-# Correct pattern
-if solver.solve():  # Direct conditional check
+# Create solver and solve
+solver = Glucose3(bootstrap_with=formula)
+if solver.solve():
     model = solver.get_model()
     # Process solution
     export_solution({
@@ -224,23 +254,109 @@ if solver.solve():  # Direct conditional check
         "model": model
     })
 else:
-    # Handle unsatisfiable case
-    export_solution({"satisfiable": False})
+    export_solution({
+        "satisfiable": False
+    })
+
+# Free solver memory
+solver.delete()
 ```
 
-This ensures your code correctly handles both satisfiable and unsatisfiable results.
+For most use cases, prefer the templated versions (`at_most_k`, `at_least_k`, etc.) as they provide more robust behavior and better error handling.
 
-## Example Model
+## Advanced Example: Complete Solution Handling
+
+Here's a comprehensive example that demonstrates effective solution structuring:
 
 ```python
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
-from mcp_solver.pysat import exactly_one
+
+# Create a simple scheduling problem
+formula = CNF()
+
+# Variables: Tasks 1-3 assigned to slots A-C
+variables = {
+    "Task1_SlotA": 1, "Task1_SlotB": 2, "Task1_SlotC": 3,
+    "Task2_SlotA": 4, "Task2_SlotB": 5, "Task2_SlotC": 6,
+    "Task3_SlotA": 7, "Task3_SlotB": 8, "Task3_SlotC": 9
+}
+
+# Add constraints (simplified for example)
+# Each task must be assigned to exactly one slot
+for task in range(1, 4):
+    base = (task - 1) * 3 + 1
+    # At least one slot per task
+    formula.append([base, base+1, base+2])
+    # No more than one slot per task
+    formula.append([-base, -(base+1)])
+    formula.append([-base, -(base+2)])
+    formula.append([-(base+1), -(base+2)])
+
+# Only one task per slot
+for slot in range(3):  # Slots A, B, C
+    # No two tasks in the same slot
+    formula.append([-1-slot, -4-slot])
+    formula.append([-1-slot, -7-slot])
+    formula.append([-4-slot, -7-slot])
+
+# Solve
+solver = Glucose3()
+solver.append_formula(formula)
+
+if solver.solve():
+    model = solver.get_model()
+    
+    # Extract the assignment
+    schedule = {}
+    task_to_slot = {}
+    
+    for var_name, var_id in variables.items():
+        if var_id in model:  # If this assignment is true
+            parts = var_name.split("_")
+            task = parts[0]
+            slot = parts[1]
+            
+            # Store in a structured way
+            if slot not in schedule:
+                schedule[slot] = []
+            schedule[slot].append(task)
+            task_to_slot[task] = slot
+    
+    # Create solution with both custom dictionaries and values dictionary
+    result = {
+        "satisfiable": True,
+        "schedule": schedule,        # Custom dictionary showing tasks by slot
+        "assignment": task_to_slot,  # Custom dictionary showing slot by task
+        "model": model,              # Original model
+        "values": {}                 # Initialize values dictionary
+    }
+    
+    # Add individual mappings to the values dictionary
+    for task, slot in task_to_slot.items():
+        result["values"][task] = slot
+    
+    # Export the solution - makes all dictionaries and values accessible
+    export_solution(result)
+else:
+    export_solution({"satisfiable": False})
+
+# Free solver memory
+solver.delete()
 ```
+
+In this example:
+- `schedule` is accessible as a dictionary showing which tasks are in each slot
+- `assignment` is accessible as a dictionary showing which slot each task is in
+- Individual task assignments (Task1, Task2, Task3) are accessible as variables
 
 ## Special Functions
 
 - `export_solution(data)`: Export data as a solution
+  - Can be called with a PySAT solver: `export_solution(solver)`
+  - Can be called with a dictionary: `export_solution({"satisfiable": True, "coloring": {...}})`
+  - Can include both custom dictionaries and a values dictionary
+  - Will automatically extract values from custom dictionaries for standardized access
 - Variable IDs must be positive integers
 - Clauses are lists of integers (negative for negated variables)
 
