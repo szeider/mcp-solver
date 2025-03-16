@@ -4,10 +4,16 @@ This document provides information about using MCP Solver with the PySAT backend
 
 ## Installation
 
-To install MCP Solver with PySAT support:
+Install the *MCP Solver* with PySAT support:
 
 ```bash
 uv pip install -e ".[pysat]"
+```
+
+The setup can be tested with:
+
+```bash
+uv run test-setup-pysat
 ```
 
 ## Configuration

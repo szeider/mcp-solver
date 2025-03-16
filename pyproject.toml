@@ -30,10 +30,12 @@ dev = [
 ]
 
 [project.scripts]
+test-setup = "mcp_solver.test_setup:main"
+test-setup-z3 = "mcp_solver.z3.test_setup:main"
+test-setup-pysat = "mcp_solver.pysat.test_setup:main"
 mcp-solver = "mcp_solver.__main__:main"
 mcp-solver-z3 = "mcp_solver.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.__main__:main_pysat"
-test-setup = "mcp_solver.test_setup:main"
 
 [tool.black]
 line-length = 88

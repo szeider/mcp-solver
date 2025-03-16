@@ -4,10 +4,16 @@ This document provides information about using MCP Solver with the Z3 SMT Solver
 
 ## Installation
 
-To install MCP Solver with Z3 support:
+Install the *MCP Solver* with Z3 support:
 
 ```bash
 uv pip install -e ".[z3]"
+```
+
+The setup can be tested with:
+
+```bash
+uv run test-setup-z3
 ```
 
 ## Configuration
