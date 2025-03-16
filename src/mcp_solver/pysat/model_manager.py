@@ -155,7 +155,7 @@ class PySATModelManager(SolverManager):
         
         # Modify the code to ensure it prints the satisfiability result
         # We'll add a simple print statement that we can parse later
-        # Look for solver.solve() patterns and add appropriate debug prints
+        # Look for direct conditional pattern (if solver.solve():) and add appropriate debug print
         modified_code = ""
         import re
         
@@ -165,19 +165,10 @@ class PySATModelManager(SolverManager):
         for line in code_string.split("\n"):
             modified_code += line + "\n"
             
-            # Case 1: Direct conditional - if solver.solve():
+            # Direct conditional pattern - if solver.solve():
             if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
-                # Extract solver name
-                solver_name = re.search(r'if\s+(\w+)\.solve\(\)', line).group(1)
                 # Add debug print inside the conditional branch
                 modified_code += f"    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
-                found_solve_call = True
-            
-            # Case 2: Variable assignment - is_sat = solver.solve() or any variable name
-            elif re.search(r'(\w+)\s*=\s*\w+\.solve\(\)', line) and not found_solve_call:
-                # Extract variable name and add debug print
-                var_name = re.search(r'(\w+)\s*=\s*\w+\.solve\(\)', line).group(1)
-                modified_code += f"print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={{{var_name}}}\")\n"
                 found_solve_call = True
         
         # Set timeout
