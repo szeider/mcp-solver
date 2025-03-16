@@ -45,6 +45,28 @@ mutually_exclusive([1, 2, 3]) # At most one variable can be true
 if_then_else(condition, x, y) # If condition then x else y
 ```
 
+## Improved MaxSAT Support
+
+PySAT mode now includes enhanced support for MaxSAT problems with a simpler API:
+
+```python
+# Initialize a MaxSAT problem
+initialize_maxsat()
+
+# Add hard and soft constraints
+add_hard_clause([1, 2])          # Hard constraint (must be satisfied)
+add_soft_clause([-1], weight=2)  # Soft constraint with weight
+
+# Soft cardinality constraints
+add_at_most_k_soft([1, 2, 3], 1, weight=2)  # Try to have at most 1 true
+add_at_least_k_soft([4, 5, 6], 2, weight=3) # Try to have at least 2 true
+
+# Solve the MaxSAT problem
+model, cost = solve_maxsat(timeout=5.0)  # Returns solution and penalty
+```
+
+These helper functions make it easier to model complex optimization problems where some constraints can be violated at a cost.
+
 ## Example Model
 
 ```python
@@ -84,10 +106,6 @@ solver.delete()
 1. Always call `solver.delete()` after using a solver to prevent memory leaks
 2. Always call `export_solution()` at the end of your model to extract the solution
 3. PySAT uses integer IDs for variables (positive for variables, negative for negated variables)
-4. For complex problems, use the template library:
-   ```python
-   from mcp_solver.pysat.templates import weighted_maxsat_template
-   ```
 
 ## Handling Solver Results
 

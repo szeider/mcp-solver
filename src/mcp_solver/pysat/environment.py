@@ -53,14 +53,6 @@ from .constraints import (
     implies, mutually_exclusive, if_then_else
 )
 
-# Import the global MaxSAT functionality
-from .global_maxsat import (
-    initialize_maxsat, add_hard_clause, add_soft_clause, 
-    solve_maxsat, get_current_wcnf,
-    add_at_most_k_soft, add_at_least_k_soft, add_exactly_k_soft,
-    university_course_scheduling_example
-)
-
 # Exception for timeouts
 class TimeoutException(Exception):
     """Exception raised when code execution times out."""
@@ -173,16 +165,6 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
         "implies": implies,
         "mutually_exclusive": mutually_exclusive,
         "if_then_else": if_then_else,
-        # Global MaxSAT functionality
-        "initialize_maxsat": initialize_maxsat,
-        "add_hard_clause": add_hard_clause,
-        "add_soft_clause": add_soft_clause,
-        "solve_maxsat": solve_maxsat,
-        "get_current_wcnf": get_current_wcnf,
-        "add_at_most_k_soft": add_at_most_k_soft,
-        "add_at_least_k_soft": add_at_least_k_soft,
-        "add_exactly_k_soft": add_exactly_k_soft,
-        "university_course_scheduling_example": university_course_scheduling_example,
         # Random module
         "random": random,
     }

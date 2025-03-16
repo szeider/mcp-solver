@@ -194,53 +194,6 @@ formula.extend(atmost2.clauses)
 
 For most use cases, you should prefer the templated versions (`at_most_k`, `at_least_k`, etc.) as they provide more robust behavior and better error handling, especially in environments like Claude Desktop.
 
-### Improved MaxSAT Solving
-
-This mode includes an enhanced API for MaxSAT solving, making it easier to work with weighted constraints. 
-
-```python
-# Initialize a new MaxSAT problem
-initialize_maxsat()
-
-# Add hard constraints (must be satisfied)
-add_hard_clause([1, 2, 3])  # At least one of variables 1, 2, 3 must be true
-add_hard_clause([-1, -2])   # Variables 1 and 2 cannot both be true
-
-# Add soft constraints (with weights)
-add_soft_clause([4], weight=3)      # Prefer variable 4 to be true (weight 3)
-add_soft_clause([-5], weight=2)     # Prefer variable 5 to be false (weight 2)
-
-# Solve the problem
-model, cost = solve_maxsat(timeout=5.0)
-
-# Check the result
-if model is not None:
-    print(f"Solution found with cost {cost}")
-    # Variables that are true in the solution
-    true_vars = [v for v in range(1, 6) if v in model]
-    print(f"True variables: {true_vars}")
-else:
-    print("No solution found")
-```
-
-The API also includes convenience functions for common MaxSAT constraints:
-
-```python
-# Add soft cardinality constraints
-variables = [1, 2, 3, 4, 5]
-
-# At most 2 variables can be true (soft constraint with weight 3)
-add_at_most_k_soft(variables, 2, weight=3)
-
-# At least 3 variables must be true (soft constraint with weight 2)
-add_at_least_k_soft(variables, 3, weight=2)
-
-# Exactly 2 variables must be true (soft constraint with weight 4)
-add_exactly_k_soft(variables, 2, weight=4)
-```
-
-These API functions are available globally in the PySAT environment.
-
 ### Important Tips
 
 1. Always call `solver.delete()` to free memory when using direct PySAT solvers
@@ -248,8 +201,7 @@ These API functions are available globally in the PySAT environment.
 3. In clauses, positive numbers represent variables, negative ones represent negation
 4. For complex problems, use `export_solution()` to format and return results
 5. Use the right solver for your problem type
-6. For MaxSAT problems, prefer using the improved API functions (`initialize_maxsat()`, `add_hard_clause()`, etc.)
-7. Always call `solve_maxsat()` to solve MaxSAT problems created with the improved API
+6. When using cardinality constraints, leverage the template functions (`at_most_k`, etc.) for cleaner code
 
 ### Handling Solver Results
 
@@ -260,7 +212,7 @@ When working with PySAT solver results:
 3. The solver returns `True` if satisfiable and `False` if unsatisfiable
 4. Only process the model/solution when the solver returns `True`
 
-Example of the correct pattern:
+Example of the correct pattern for direct solver use:
 ```python
 # Correct pattern
 is_sat = solver.solve()
@@ -276,7 +228,15 @@ else:
     export_solution({"satisfiable": False})
 ```
 
-This ensures your code correctly handles both satisfiable and unsatisfiable results, and that the JSON output matches any printed output.
+This ensures your code correctly handles both satisfiable and unsatisfiable results.
+
+## Example Model
+
+```python
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+from mcp_solver.pysat import exactly_one
+```
 
 ## Special Functions
 
