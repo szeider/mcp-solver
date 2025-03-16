@@ -90,24 +90,27 @@ PySAT includes several SAT solvers with different performance characteristics:
 
 ### Cardinality Constraints Helper Functions
 
-PySAT mode includes several helper functions for easily creating common cardinality constraints:
+PySAT mode includes several helper functions for easily creating common cardinality constraints. These functions are located in the `templates/cardinality_templates.py` module but are also available directly in the environment:
 
-| Function            | Description                                             |
-|---------------------|---------------------------------------------------------|
-| `at_most_k`         | At most k variables are true                            |
-| `at_least_k`        | At least k variables are true                           |
-| `exactly_k`         | Exactly k variables are true                            |
-| `at_most_one`       | At most one variable is true (optimized for k=1)        |
-| `exactly_one`       | Exactly one variable is true (optimized for k=1)        |
-| `implies`           | If a is true, then b must be true                       |
-| `mutually_exclusive`| At most one variable is true (same as at_most_one)      |
-| `if_then_else`      | If condition then x else y                              |
+| Function            | Description                                             | Return Type       |
+|---------------------|---------------------------------------------------------|-------------------|
+| `at_most_k`         | At most k variables are true                            | List[List[int]]   |
+| `at_least_k`        | At least k variables are true                           | List[List[int]]   |
+| `exactly_k`         | Exactly k variables are true                            | List[List[int]]   |
+| `at_most_one`       | At most one variable is true (optimized for k=1)        | List[List[int]]   |
+| `exactly_one`       | Exactly one variable is true (optimized for k=1)        | List[List[int]]   |
+| `implies`           | If a is true, then b must be true                       | List[List[int]]   |
+| `mutually_exclusive`| At most one variable is true (same as at_most_one)      | List[List[int]]   |
+| `if_then_else`      | If condition then x else y                              | List[List[int]]   |
 
-These helper functions are reliable and work for any valid k values. Here's how to use them:
+These functions return lists of clauses that need to be added to your formula. The implementation is robust and handles edge cases gracefully, with fallback mechanisms for compatibility with different environments.
+
+Here's how to use these helper functions:
 
 ```python
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
+from mcp_solver.pysat.templates.cardinality_templates import at_most_k, at_least_k, exactly_one, implies
 
 # Create a formula
 formula = CNF()
@@ -118,17 +121,24 @@ formula = CNF()
 # 7, 8, 9 = Courses A, B, C on Wednesday
 
 # Each course must be scheduled exactly once
-formula.extend(exactly_one([1, 4, 7]))  # Course A on exactly one day
-formula.extend(exactly_one([2, 5, 8]))  # Course B on exactly one day
-formula.extend(exactly_one([3, 6, 9]))  # Course C on exactly one day
+for clause in exactly_one([1, 4, 7]):  # Course A on exactly one day
+    formula.append(clause)
+for clause in exactly_one([2, 5, 8]):  # Course B on exactly one day
+    formula.append(clause)
+for clause in exactly_one([3, 6, 9]):  # Course C on exactly one day
+    formula.append(clause)
 
 # At most 2 courses per day
-formula.extend(at_most_k([1, 2, 3], 2))  # At most 2 courses on Monday
-formula.extend(at_most_k([4, 5, 6], 2))  # At most 2 courses on Tuesday
-formula.extend(at_most_k([7, 8, 9], 2))  # At most 2 courses on Wednesday
+for clause in at_most_k([1, 2, 3], 2):  # At most 2 courses on Monday
+    formula.append(clause)
+for clause in at_most_k([4, 5, 6], 2):  # At most 2 courses on Tuesday
+    formula.append(clause)
+for clause in at_most_k([7, 8, 9], 2):  # At most 2 courses on Wednesday
+    formula.append(clause)
 
 # Dependency: If Course A is on Monday, Course B cannot be on Monday
-formula.extend(implies(1, -2))
+for clause in implies(1, -2):
+    formula.append(clause)
 
 # Solve the formula
 solver = Glucose3(bootstrap_with=formula)
@@ -167,6 +177,8 @@ solver.delete()
 
 ### Traditional Cardinality Constraints
 
+For low-level access, you can also use PySAT's built-in cardinality constraint encodings, but our template implementations are generally more robust and handle edge cases better:
+
 ```python
 from pysat.formula import CNF
 from pysat.card import CardEnc, EncType
@@ -178,72 +190,66 @@ atmost2 = CardEnc.atmost(vars, 2, encoding=EncType.pairwise)
 
 formula = CNF()
 formula.extend(atmost2.clauses)
-
-# Create solver and add the formula
-solver = Glucose3()
-solver.append_formula(formula)
-
-# Solve the formula
-is_satisfiable = solver.solve()
-
-if is_satisfiable:
-    model = solver.get_model()
-    export_solution({
-        "satisfiable": True,
-        "model": model,
-        "variables": vars
-    })
-else:
-    export_solution({
-        "satisfiable": False
-    })
-
-# Free solver memory
-solver.delete()
 ```
 
-### MaxSAT Solving
+For most use cases, you should prefer the templated versions (`at_most_k`, `at_least_k`, etc.) as they provide more robust behavior and better error handling, especially in environments like Claude Desktop.
+
+### Improved MaxSAT Solving
+
+This mode includes an enhanced API for MaxSAT solving, making it easier to work with weighted constraints. 
 
 ```python
-from pysat.formula import WCNF
-from pysat.examples.rc2 import RC2
+# Initialize a new MaxSAT problem
+initialize_maxsat()
 
-# Create weighted MaxSAT problem
-wcnf = WCNF()
+# Add hard constraints (must be satisfied)
+add_hard_clause([1, 2, 3])  # At least one of variables 1, 2, 3 must be true
+add_hard_clause([-1, -2])   # Variables 1 and 2 cannot both be true
 
-# Hard clauses (must be satisfied)
-wcnf.append([1, 2])  # a OR b
+# Add soft constraints (with weights)
+add_soft_clause([4], weight=3)      # Prefer variable 4 to be true (weight 3)
+add_soft_clause([-5], weight=2)     # Prefer variable 5 to be false (weight 2)
 
-# Soft clauses with weights
-wcnf.append([1], weight=5)  # a (weight 5)
-wcnf.append([2], weight=3)  # b (weight 3)
+# Solve the problem
+model, cost = solve_maxsat(timeout=5.0)
 
-# Solve with RC2
-with RC2(wcnf) as rc2:
-    model = rc2.compute()
-    
-    if model is not None:
-        cost = rc2.cost
-        # Export the successful solution
-        export_solution({
-            "satisfiable": True,
-            "model": model,
-            "cost": cost
-        })
-    else:
-        # Export unsatisfiable result
-        export_solution({
-            "satisfiable": False
-        })
+# Check the result
+if model is not None:
+    print(f"Solution found with cost {cost}")
+    # Variables that are true in the solution
+    true_vars = [v for v in range(1, 6) if v in model]
+    print(f"True variables: {true_vars}")
+else:
+    print("No solution found")
 ```
+
+The API also includes convenience functions for common MaxSAT constraints:
+
+```python
+# Add soft cardinality constraints
+variables = [1, 2, 3, 4, 5]
+
+# At most 2 variables can be true (soft constraint with weight 3)
+add_at_most_k_soft(variables, 2, weight=3)
+
+# At least 3 variables must be true (soft constraint with weight 2)
+add_at_least_k_soft(variables, 3, weight=2)
+
+# Exactly 2 variables must be true (soft constraint with weight 4)
+add_exactly_k_soft(variables, 2, weight=4)
+```
+
+These API functions are available globally in the PySAT environment.
 
 ### Important Tips
 
-1. Always call `solver.delete()` to free memory
+1. Always call `solver.delete()` to free memory when using direct PySAT solvers
 2. Use appropriate variable IDs (positive integers)
 3. In clauses, positive numbers represent variables, negative ones represent negation
 4. For complex problems, use `export_solution()` to format and return results
 5. Use the right solver for your problem type
+6. For MaxSAT problems, prefer using the improved API functions (`initialize_maxsat()`, `add_hard_clause()`, etc.)
+7. Always call `solve_maxsat()` to solve MaxSAT problems created with the improved API
 
 ### Handling Solver Results
 

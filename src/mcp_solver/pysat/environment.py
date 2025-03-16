@@ -15,6 +15,7 @@ import contextlib
 from typing import Dict, Any, Optional, List, Callable
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import re
+import random
 
 # Import path management to ensure we get the correct PySAT
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -44,10 +45,20 @@ except ImportError:
 
 # Local imports - must be after path adjustment
 from .solution import export_solution, _LAST_SOLUTION
+from .templates.cardinality_templates import (
+    at_most_k, at_least_k, exactly_k
+)
 from .constraints import (
-    at_most_k, at_least_k, exactly_k,
     at_most_one, exactly_one, 
     implies, mutually_exclusive, if_then_else
+)
+
+# Import the global MaxSAT functionality
+from .global_maxsat import (
+    initialize_maxsat, add_hard_clause, add_soft_clause, 
+    solve_maxsat, get_current_wcnf,
+    add_at_most_k_soft, add_at_least_k_soft, add_exactly_k_soft,
+    university_course_scheduling_example
 )
 
 # Exception for timeouts
@@ -79,7 +90,7 @@ def time_limit(seconds: float):
         # Reset signal handler
         signal.setitimer(signal.ITIMER_REAL, 0)
 
-def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]:
+def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]:
     """
     Execute PySAT Python code in a secure environment with timeout handling.
     
@@ -162,6 +173,18 @@ def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]
         "implies": implies,
         "mutually_exclusive": mutually_exclusive,
         "if_then_else": if_then_else,
+        # Global MaxSAT functionality
+        "initialize_maxsat": initialize_maxsat,
+        "add_hard_clause": add_hard_clause,
+        "add_soft_clause": add_soft_clause,
+        "solve_maxsat": solve_maxsat,
+        "get_current_wcnf": get_current_wcnf,
+        "add_at_most_k_soft": add_at_most_k_soft,
+        "add_at_least_k_soft": add_at_least_k_soft,
+        "add_exactly_k_soft": add_exactly_k_soft,
+        "university_course_scheduling_example": university_course_scheduling_example,
+        # Random module
+        "random": random,
     }
     
     # Process imports and add to globals
