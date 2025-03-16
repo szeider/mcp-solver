@@ -129,12 +129,12 @@ class PySATModelManager(SolverManager):
         logging.getLogger(__name__).warning(f"Item at index {index} not found, adding new item")
         return await self.add_item(index, content)
     
-    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
         """
         Solve the current model.
         
         Args:
-            timeout: Timeout for the solve operation
+            timeout: Timeout for the solve operation. Defaults to 5 seconds if None.
             
         Returns:
             A dictionary with the result of the solve operation
@@ -142,6 +142,10 @@ class PySATModelManager(SolverManager):
         if not self.code_items:
             logging.getLogger(__name__).warning("Attempted to solve empty model")
             return {"message": "Model is empty, nothing to solve", "success": False}
+        
+        # Set default timeout if not provided
+        if timeout is None:
+            timeout = timedelta(seconds=5.0)
         
         # Sort code items by index
         sorted_items = sorted(self.code_items, key=lambda x: x[0])
@@ -151,12 +155,30 @@ class PySATModelManager(SolverManager):
         
         # Modify the code to ensure it prints the satisfiability result
         # We'll add a simple print statement that we can parse later
-        # Look for 'is_sat = solver.solve()' pattern and add a print after it
+        # Look for solver.solve() patterns and add appropriate debug prints
         modified_code = ""
+        import re
+        
+        # Track if we've already found and handled a solve() call
+        found_solve_call = False
+        
         for line in code_string.split("\n"):
             modified_code += line + "\n"
-            if "is_sat" in line and "solver.solve()" in line:
-                modified_code += "print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={is_sat}\")\n"
+            
+            # Case 1: Direct conditional - if solver.solve():
+            if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
+                # Extract solver name
+                solver_name = re.search(r'if\s+(\w+)\.solve\(\)', line).group(1)
+                # Add debug print inside the conditional branch
+                modified_code += f"    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
+                found_solve_call = True
+            
+            # Case 2: Variable assignment - is_sat = solver.solve() or any variable name
+            elif re.search(r'(\w+)\s*=\s*\w+\.solve\(\)', line) and not found_solve_call:
+                # Extract variable name and add debug print
+                var_name = re.search(r'(\w+)\s*=\s*\w+\.solve\(\)', line).group(1)
+                modified_code += f"print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={{{var_name}}}\")\n"
+                found_solve_call = True
         
         # Set timeout
         timeout_seconds = timeout.total_seconds()

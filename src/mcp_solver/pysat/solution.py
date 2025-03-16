@@ -64,20 +64,35 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
         
     # Case 2: PySAT Solver object
     elif hasattr(solver, 'get_model') and callable(getattr(solver, 'get_model')):
-        # Get the model if solver reports satisfiable
-        is_sat = getattr(solver, 'solve', lambda: None)()
-        solution_data["satisfiable"] = bool(is_sat)
-        
-        if is_sat:
+        # Check if the solver has already been solved
+        # If not, call solve() to determine satisfiability
+        if hasattr(solver, 'solved') and solver.solved:
+            # Already solved, just get the satisfiability status
+            solution_data["satisfiable"] = solver.satisfiable
+        else:
+            # Try to solve if not already done
+            # Don't call solve() if get_model() returns a non-None result
+            # (which indicates the solver has already been run)
             model = solver.get_model()
-            solution_data["model"] = model
-            
-            # Extract variable assignments if variables dictionary is provided
-            if variables:
-                solution_data["assignment"] = {
-                    name: (var_id in model) if var_id > 0 else ((-var_id) not in model)
-                    for name, var_id in variables.items()
-                }
+            if model is not None:
+                # Solver has already been run and is satisfiable
+                solution_data["satisfiable"] = True
+                solution_data["model"] = model
+            else:
+                # Need to run the solver to determine satisfiability
+                is_sat = getattr(solver, 'solve', lambda: None)()
+                solution_data["satisfiable"] = bool(is_sat)
+                
+                if is_sat:
+                    model = solver.get_model()
+                    solution_data["model"] = model
+        
+        # Extract variable assignments if variables dictionary is provided
+        if solution_data.get("satisfiable", False) and variables and "model" in solution_data:
+            solution_data["assignment"] = {
+                name: (var_id in solution_data["model"]) if var_id > 0 else ((-var_id) not in solution_data["model"])
+                for name, var_id in variables.items()
+            }
     
     # Case 3: RC2 MaxSAT Solver - REMOVED
     
