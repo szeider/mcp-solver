@@ -1,4 +1,5 @@
 # MCP Solver
+
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org)
 
 A Model Context Protocol (MCP) server that exposes SAT and constraint solving capabilities to Large Language Models.
@@ -7,18 +8,13 @@ A Model Context Protocol (MCP) server that exposes SAT and constraint solving ca
 
 ## Overview
 
-The MCP Solver integrates SAT, SMT and Constraint solving with LLMs through the Model Context Protocol, enabling AI models to:
+The *MCP Solver* integrates SAT, SMT and Constraint Solving with LLMs through the Model Context Protocol, enabling AI models to interatively create, edit, and solve 
 
-* Create, edit, and validate 
-  * constraint models in [MiniZinc](https://www.minizinc.org), 
-  * SAT models in [PySAT](https://pysathq.github.io), and 
-  * SMT formulas in [Z3 Python](https://ericpony.github.io/z3py-tutorial/guide-examples.htm)
+* constraint models in [MiniZinc](https://www.minizinc.org), 
+* SAT models in [PySAT](https://pysathq.github.io), and 
+* SMT formulas in [Z3 Python](https://ericpony.github.io/z3py-tutorial/guide-examples.htm)
 
-* Execute constraint solving operations
-* Access and update solution knowledge
-* Manage solver insights through a memo system
-
-For a detailed description of the system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
+For a detailed description of the *MCP Solver's* system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
 
 ## Feedback
 
@@ -26,78 +22,14 @@ You can provide feedback to the author via this [form](https://form.jotform.com/
 
 ## PySAT and Z3 Python Modes
 
-Originally the MCP server was implemented as an interface to the MiniZinc constraint solving platform. Recently we added support for PySAT and Z3 Python. These additions are still experimental and we cover them in separate READMEs: 
+Originally the *MCP Solver* was implemented as an interface to the MiniZinc constraint solving platform. Recently we added support for PySAT and Z3 Python. These additions are still experimental and we cover them in separate READMEs: 
 
 - [PySAT Mode](README-PySAT.md)
 - [Z3 Mode](README-Z3.md)
 
-### Using Different Solver Backends
-
-MCP Solver now provides dedicated commands for each solver backend:
-
-1. **MiniZinc** (default): `mcp-solver`
-2. **Z3 Mode**: `mcp-solver-z3` (requires installing Z3 dependencies)
-3. **PySAT Mode**: `mcp-solver-pysat` (requires installing PySAT dependencies)
-
-#### Installation for Specific Backends
-
-Install only the dependencies you need:
-
-```bash
-# Default MiniZinc mode
-uv pip install -e .
-
-# Z3 mode
-uv pip install -e ".[z3]"
-
-# PySAT mode
-uv pip install -e ".[pysat]"
-
-# All modes
-uv pip install -e ".[all]"
-```
-
-#### Claude Desktop Configuration
-
-To use different solver backends in Claude Desktop, update your configuration:
-
-```json
-{
-  "mcpServers": {
-    "MCP Solver": { 
-      "command": "uv", 
-      "args": [
-        "--directory", 
-        "/path/to/mcp-solver", 
-        "run", 
-        "mcp-solver"
-      ] 
-    },
-    "MCP Solver Z3": { 
-      "command": "uv", 
-      "args": [
-        "--directory", 
-        "/path/to/mcp-solver", 
-        "run", 
-        "mcp-solver-z3"
-      ] 
-    },
-    "MCP Solver PySAT": { 
-      "command": "uv", 
-      "args": [
-        "--directory", 
-        "/path/to/mcp-solver", 
-        "run", 
-        "mcp-solver-pysat"
-      ] 
-    }
-  }
-}
-```
+------
 
 ## Available Tools
-
-Model modification has transitioned in this version from a line-based to an item-based editing approach, which improves robustness by validating each item independently. Each model modification operation returns the current model with numbered items in truncated form, ensuring consistent tracking of items and their indices. Line-based editing remains for handling the memo.
 
 | Tool Name        | Description                                                  |
 | ---------------- | ------------------------------------------------------------ |
@@ -126,78 +58,73 @@ Model modification has transitioned in this version from a line-based to an item
 
 ---
 
-
-
 ## Installation
 
-1. Install an MCP-compatible client (e.g., Claude web interface or desktop app)
+1. Install an MCP-compatible client (e.g., [Claude Desktop app](https://claude.ai/download))
 
 2. Install the MCP Solver:
 
    ```bash
    git clone https://github.com/szeider/mcp-solver.git
    cd mcp-solver
-   uv pip install -e .
+   uv venv
+   source .venv/bin/activate 
+   uv pip install -e .  
    ```
-
-3. Create the configuration file:
-
-   ### For macOS/Linux:
-
-   Create the configuration file at:
-
+3. The setup can be tested with:
    ```bash
-   ~/Library/Application/Support/Claude/claude_desktop_config.json
+   uv run test-setup
    ```
+4. Create the configuration file:
+
+   For macOS/Linux:
+
+```
+   ~/Library/Application/Support/Claude/claude_desktop_config.json
+```
+
+   For Windows:
+
+```
+   %APPDATA%\Claude\claude_desktop_config.json
+```
 
    Add the following content:
 
-   ```json
+```
    {
      "mcpServers": {
        "MCP Solver": {
          "command": "uv",
          "args": [
-           "--directory", 
-           "/absolute/path/to/mcp-solver",  // Use full path to mcp-solver directory
-           "run", 
+           "--directory",
+           "/absolute/path/to/mcp-solver/",
+           "run",
            "mcp-solver"
          ]
        }
      }
    }
-   ```
+```
 
-   ### For Windows:
+for Windows:
 
-   Create the configuration file at:
-
-   ```
-   %APPDATA%\Claude\claude_desktop_config.json
-   ```
-
-   Add the following content:
-
-   ```json
-   {
-     "mcpServers": {
-       "MCP Solver": {
-         "command": "cmd.exe",
-         "args": [
-           "/C",
-           "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver"
-         ]
-       }
-     }
-   }
-   ```
-
-4. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
-
-5. The setup can be tested with:
-   ```bash
-   uv run test-setup
-   ```
+```
+    {
+      "mcpServers": {
+        "MCP Solver": {
+          "command": "cmd.exe",
+          "args": [
+            "/C",
+            "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver"
+          ]
+        }
+      }
+    }
+```
+5. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
+6. Included is an [instructions prompt](./instructions_prompt.md) which should be used together with the text containing citations. On Claude Desktop, the instructions prompt is available via the electrical plug icon.
+7. For Linux there is no Claude Desktop but other alternatives, for instance the [Cursor](https://www.cursor.com) client.
 
 ---
 
@@ -212,13 +139,10 @@ The MCP Solver also supports a **Lite Mode**, which provides a streamlined inter
 - **solve_model**
 - **get_model**
 
-In this mode:
-- **solve_model** returns the status of the solution—if the model is satisfiable (`SAT`), it also returns the solution; otherwise, only the status (`UNSAT` or `TIMEOUT`) is provided.
-- The instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`.
-
+In Lite mode, the instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`. If you provide the instructions prompt manually to your client, make sure to provide the correct prompt.
 To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows (similar for Windows):
 
-```json
+```
 {
   "mcpServers": {
     "MCP Solver": {

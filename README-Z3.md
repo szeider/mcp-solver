@@ -12,39 +12,7 @@ uv pip install -e ".[z3]"
 
 ## Configuration
 
-There are two ways to use the Z3 mode:
-
-### Option 1: Dedicated Command (Recommended)
-
-Use the dedicated Z3 entry point in your client (e.g., Claude Desktop):
-
-```json
-{
-  "mcpServers": {
-    "MCP Solver Z3": { 
-      "command": "uv", 
-      "args": [
-        "--directory", 
-        "/path/to/mcp-solver", 
-        "run", 
-        "mcp-solver-z3"
-      ] 
-    }
-  }
-}
-```
-
-### Option 2: Command Line Flags
-
-Alternatively, you can use command line flags with the main entry point:
-
-```json
-{
-  "server_args": "--z3 --lite"
-}
-```
-
-The Z3 mode is enabled by the `--z3` flag. Currently, Z3 mode works best in lite mode.
+To run the MCP Solver in Z3 mode, use the command `mcp-solver-z3` instead of `mcp-solver` in your client configuration. Currently, PySAT mode only supports the lite mode, so also include the `--lite` flag.
 
 ## Core Features
 

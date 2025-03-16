@@ -12,39 +12,7 @@ uv pip install -e ".[pysat]"
 
 ## Configuration
 
-There are two ways to use the PySAT mode:
-
-### Option 1: Dedicated Command (Recommended)
-
-Use the dedicated PySAT entry point in your client (e.g., Claude Desktop):
-
-```json
-{
-  "mcpServers": {
-    "MCP Solver PySAT": { 
-      "command": "uv", 
-      "args": [
-        "--directory", 
-        "/path/to/mcp-solver", 
-        "run", 
-        "mcp-solver-pysat"
-      ] 
-    }
-  }
-}
-```
-
-### Option 2: Command Line Flags
-
-Alternatively, you can use command line flags with the main entry point:
-
-```json
-{
-  "server_args": "--pysat --lite"
-}
-```
-
-The PySAT mode is enabled by the `--pysat` flag. Currently, PySAT mode only supports the lite mode.
+To run the MCP Solver in PySAT mode, use the command `mcp-solver-pysat` instead of `mcp-solver` in your client configuration. Currently, PySAT mode only supports the lite mode, so also include the `--lite` flag.
 
 ## Core Features
 
