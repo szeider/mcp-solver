@@ -1,103 +1,91 @@
-# MCP Solver - PySAT Mode
+# PySAT Solver (Lite Mode)
 
-This document provides information about using MCP Solver with the PySAT backend. For general information about the MCP Solver, see the [main README](README.md).
+This service provides access to PySAT (Python SAT Solver) with a simplified interface. PySAT allows for propositional constraint modeling using CNF (Conjunctive Normal Form).
 
-## Installation
+## Available Tools
 
-Install the *MCP Solver* with PySAT support:
+| Tool           | Description                                                  |
+| -------------- | ------------------------------------------------------------ |
+| `clear_model`  | Reset the PySAT model                                        |
+| `add_item`     | Add Python code to the model                                 |
+| `replace_item` | Replace code in the model                                    |
+| `delete_item`  | Delete code from the model                                   |
+| `solve_model`  | Solve the current model (requires timeout parameter between 1-10 seconds) |
+| `get_model`    | Fetch the current content of the PySAT model                 |
 
-```bash
-uv pip install -e ".[pysat]"
-```
+> **Note:** MaxSAT optimization functionality is not supported. Only standard SAT solving capabilities are available.
 
-The setup can be tested with:
+## Using PySAT - Basic Workflow
 
-```bash
-uv run test-setup-pysat
-```
+1. Create a CNF formula
+2. Add clauses (logical constraints)
+3. Create a SAT solver and add the formula
+4. Solve and get the model (solution)
+5. Export the solution
 
-## Configuration
-
-To run the MCP Solver in PySAT mode, use the command `mcp-solver-pysat` instead of `mcp-solver` in your client configuration. Currently, PySAT mode only supports the lite mode, so also include the `--lite` flag.
-
-## Core Features
-
-PySAT mode provides access to SAT solving capabilities using Python syntax:
-
-- **Standard SAT solving**: Create and solve boolean satisfiability problems
-- **Cardinality constraints**: Efficiently express constraints on the number of true variables
-- **Secure execution**: Models run in a restricted environment with proper memory management
-
-## Helper Functions
-
-PySAT mode comes with built-in helper functions for common constraints:
-
-```python
-# Cardinality constraints
-at_most_k([1, 2, 3, 4], 2)  # At most 2 variables can be true
-at_least_k([1, 2, 3, 4], 1)  # At least 1 variable must be true
-exactly_k([1, 2, 3, 4], 1)   # Exactly 1 variable must be true
-
-# Logical relationships
-implies(1, 2)               # If variable 1 is true, variable 2 must be true
-mutually_exclusive([1, 2, 3]) # At most one variable can be true
-if_then_else(condition, x, y) # If condition then x else y
-```
-
-## Example Model
+### Basic SAT Problem Example
 
 ```python
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
-from mcp_solver.pysat import exactly_one
 
-# Create a CNF formula for a simple scheduling problem
+# Create a CNF formula
 formula = CNF()
 
-# Task 1-3 must be assigned to exactly one day (Mon, Tue, Wed)
-formula.extend(exactly_one([1, 2, 3]))  # Task 1 assignment
-formula.extend(exactly_one([4, 5, 6]))  # Task 2 assignment
-formula.extend(exactly_one([7, 8, 9]))  # Task 3 assignment
+# Add clauses: (a OR b) AND (NOT a OR c) AND (NOT b OR NOT c)
+formula.append([1, 2])       # Clause 1: a OR b
+formula.append([-1, 3])      # Clause 2: NOT a OR c
+formula.append([-2, -3])     # Clause 3: NOT b OR NOT c
 
-# Create solver and solve
+# Create solver and add the formula
 solver = Glucose3()
 solver.append_formula(formula)
-satisfiable = solver.solve()
 
-# Extract and export the solution
-if satisfiable:
+# Solve the formula - IMPORTANT: Use direct conditional check
+if solver.solve():
     model = solver.get_model()
-    export_solution({
+    
+    # Create a mapping of variable names to IDs
+    variables = {
+        "a": 1,
+        "b": 2,
+        "c": 3
+    }
+    
+    # Process the results
+    result = {
         "satisfiable": True,
-        "model": model
-    })
+        "assignment": {}
+    }
+    for var_name, var_id in variables.items():
+        result["assignment"][var_name] = var_id in model
+    
+    # Export solution
+    export_solution(result)
 else:
-    export_solution({"satisfiable": False})
+    # Export unsatisfiable result
+    export_solution({
+        "satisfiable": False
+    })
 
-# Always free memory
+# Free solver memory
 solver.delete()
 ```
 
-## Important Notes
+## Important Guidelines
 
-1. Always call `solver.delete()` after using a solver to prevent memory leaks
-2. Always call `export_solution()` at the end of your model to extract the solution
-3. PySAT uses integer IDs for variables (positive for variables, negative for negated variables)
+### Handling Solver Results
 
-## Handling Solver Results
+When working with PySAT solvers:
 
-When using PySAT to solve boolean satisfaction problems:
+1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` rather than assigning the result to a variable
+2. The solver returns `True` if satisfiable and `False` if unsatisfiable
+3. Only process the model/solution when the solver returns `True`
+4. Always call `solver.delete()` to free memory when using direct PySAT solvers
 
-1. Always store the solver's return value in a variable and use that variable consistently in conditional logic
-2. Don't hardcode expected results in print statements
-3. The solver returns `True` if satisfiable and `False` if unsatisfiable
-4. Only process the model/solution when the solver returns `True`
-
-Example of the correct pattern:
 ```python
 # Correct pattern
-is_sat = solver.solve()
-if is_sat:  # Use the actual return value
+if solver.solve():  # Direct conditional check
     model = solver.get_model()
     # Process solution
     export_solution({
@@ -109,4 +97,119 @@ else:
     export_solution({"satisfiable": False})
 ```
 
-This pattern ensures that your code correctly handles both satisfiable and unsatisfiable results, and that the JSON output matches your printed output. 
+### Solution Structure
+
+When creating and exporting solutions, you should structure your data as follows:
+
+```python
+# Standard solution format
+export_solution({
+    "satisfiable": True,  # Required field
+    "model": model,       # Raw SAT model (optional)
+    "values": {           # Variable assignments (recommended)
+        "var1": value1,
+        "var2": value2
+    },
+    # You can include additional domain-specific dictionaries
+    "custom_structure": {...}
+})
+```
+
+## Available Solvers
+
+PySAT includes several SAT solvers:
+
+- `Glucose3`: Good general-purpose solver (recommended default)
+- `Glucose4`: Updated version of Glucose3
+- `Lingeling`: Efficient for large problems
+- `MiniSat22`: Classic solver with good stability
+- `Minicard`: Extension of MiniSat with cardinality constraints
+- `MapleCM`: Award-winning competitive solver
+
+## Cardinality Constraints
+
+For convenience, PySAT provides helper functions for common constraints:
+
+| Function      | Description                              |
+| ------------- | ---------------------------------------- |
+| `at_most_k`   | At most k variables are true             |
+| `at_least_k`  | At least k variables are true            |
+| `exactly_k`   | Exactly k variables are true             |
+| `exactly_one` | Exactly one variable is true (optimized) |
+| `implies`     | If a is true, then b must be true        |
+
+Example usage:
+
+```python
+# Variables representing courses on different days
+# Each course must be scheduled exactly once
+for clause in exactly_one([1, 4, 7]):  # Course A on exactly one day
+    formula.append(clause)
+
+# At most 2 courses per day
+for clause in at_most_k([1, 2, 3], 2):  # At most 2 courses on Monday
+    formula.append(clause)
+```
+
+## Example: Schedule Problem
+
+```python
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+
+# Create a simple scheduling problem
+formula = CNF()
+
+# Variables: Tasks 1-3 assigned to slots A-C
+variables = {
+    "Task1_SlotA": 1, "Task1_SlotB": 2, "Task1_SlotC": 3,
+    "Task2_SlotA": 4, "Task2_SlotB": 5, "Task2_SlotC": 6,
+    "Task3_SlotA": 7, "Task3_SlotB": 8, "Task3_SlotC": 9
+}
+
+# Add constraints (simplified)
+# Each task must be in exactly one slot and only one task per slot
+# ... (constraint code)
+
+# Solve
+solver = Glucose3()
+solver.append_formula(formula)
+
+if solver.solve():
+    model = solver.get_model()
+    
+    # Extract the assignment
+    schedule = {}
+    task_to_slot = {}
+    
+    # ... (process results)
+    
+    # Export the solution
+    export_solution({
+        "satisfiable": True,
+        "model": model,
+        "values": task_to_slot
+    })
+else:
+    export_solution({
+        "satisfiable": False
+    })
+
+# Free solver memory
+solver.delete()
+```
+
+## Solution Export
+
+- ```
+  export_solution(data)
+  ```
+
+  : Export data as a solution
+
+  - Requires at minimum: `{"satisfiable": True/False}`
+  - Should include variable assignments in a `values` dictionary
+  - Variable IDs must be positive integers
+  - Clauses are lists of integers (negative for negated variables)
+
+For more information on PySAT, visit the [PySAT documentation](https://pysathq.github.io/).

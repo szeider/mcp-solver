@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import timedelta
 import time
+import re
 
 from ..base_manager import SolverManager
 from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
@@ -129,23 +130,33 @@ class PySATModelManager(SolverManager):
         logging.getLogger(__name__).warning(f"Item at index {index} not found, adding new item")
         return await self.add_item(index, content)
     
-    async def solve_model(self, timeout: Optional[timedelta] = None) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
-        Solve the current model.
+        Solve the current model with a timeout.
         
         Args:
-            timeout: Timeout for the solve operation. Defaults to 5 seconds if None.
+            timeout: Maximum time to spend on solving
             
         Returns:
-            A dictionary with the result of the solve operation
+            A dictionary with the solving result
         """
-        if not self.code_items:
-            logging.getLogger(__name__).warning("Attempted to solve empty model")
-            return {"message": "Model is empty, nothing to solve", "success": False}
+        if not self.initialized:
+            return {"message": "Model manager not initialized", "success": False}
         
-        # Set default timeout if not provided
-        if timeout is None:
-            timeout = timedelta(seconds=5.0)
+        if not self.code_items:
+            return {"message": "No model items to solve", "success": False}
+        
+        # Check timeout bounds
+        if timeout < MIN_SOLVE_TIMEOUT:
+            return {
+                "message": f"Timeout must be at least {MIN_SOLVE_TIMEOUT.total_seconds()} seconds",
+                "success": False
+            }
+        elif timeout > MAX_SOLVE_TIMEOUT:
+            return {
+                "message": f"Timeout must be at most {MAX_SOLVE_TIMEOUT.total_seconds()} seconds",
+                "success": False
+            }
         
         # Sort code items by index
         sorted_items = sorted(self.code_items, key=lambda x: x[0])
@@ -157,7 +168,6 @@ class PySATModelManager(SolverManager):
         # We'll add a simple print statement that we can parse later
         # Look for direct conditional pattern (if solver.solve():) and add appropriate debug print
         modified_code = ""
-        import re
         
         # Track if we've already found and handled a solve() call
         found_solve_call = False
@@ -184,7 +194,6 @@ class PySATModelManager(SolverManager):
         satisfiable = False
         
         # Parse output for explicit satisfiability result
-        import re
         sat_match = re.search(r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output)
         if sat_match:
             satisfiable = sat_match.group(1).lower() == "true"
@@ -211,6 +220,56 @@ class PySATModelManager(SolverManager):
                 "status": "sat" if satisfiable else "unsat",
                 "values": {}
             }
+        
+        # Ensure there's a 'values' dictionary for standardized access
+        if "values" not in self.last_solution:
+            self.last_solution["values"] = {}
+            
+        # Extract solution data from the debug output if available
+        # Look for the _LAST_SOLUTION debug output which contains the complete solution data
+        last_solution_pattern = re.compile(r"DEBUG - _LAST_SOLUTION set to: (.*)")
+        last_solution_match = last_solution_pattern.search(output)
+        if last_solution_match:
+            try:
+                last_solution_str = last_solution_match.group(1)
+                # Clean up the string to make it valid Python syntax
+                last_solution_str = last_solution_str.replace("'", '"').replace("True", "true").replace("False", "false")
+                # Try to parse as JSON
+                import json
+                try:
+                    last_solution_data = json.loads(last_solution_str)
+                    if isinstance(last_solution_data, dict):
+                        # Copy all dictionaries from last_solution_data to self.last_solution
+                        # to preserve custom dictionaries like 'casting', 'schedule', etc.
+                        for key, value in last_solution_data.items():
+                            if isinstance(value, dict):
+                                # Copy custom dictionaries directly to last_solution
+                                self.last_solution[key] = value
+                                logging.getLogger(__name__).debug(f"Copied custom dictionary '{key}' to solution")
+                                
+                        # Also populate values dictionary from individual value fields
+                        if "values" in last_solution_data:
+                            logging.getLogger(__name__).debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
+                            # Convert JSON booleans back to Python booleans
+                            for key, value in last_solution_data["values"].items():
+                                if value is True or value == "true":
+                                    self.last_solution["values"][key] = True
+                                elif value is False or value == "false":
+                                    self.last_solution["values"][key] = False
+                                else:
+                                    self.last_solution["values"][key] = value
+                except json.JSONDecodeError:
+                    logging.getLogger(__name__).warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Error extracting solution data: {e}")
+        
+        # Extract values from custom dictionaries if they exist
+        # (this applies to any custom dictionary, not just actor-specific ones)
+        potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
+        for key in potential_value_keys:
+            if key in self.last_solution and isinstance(self.last_solution[key], dict):
+                for var_name, var_value in self.last_solution[key].items():
+                    self.last_solution["values"][var_name] = var_value
         
         # Determine success/failure message
         if self.last_result.get("success", False):
@@ -242,11 +301,15 @@ class PySATModelManager(SolverManager):
         
         # Add solution information if available
         if self.last_solution:
-            # Include status and values from solution
+            # Include status from solution
             if "status" in self.last_solution:
                 result["status"] = self.last_solution["status"]
+            
+            # Include values from solution - direct copy from last_solution to result
             if "values" in self.last_solution:
+                # Add to result directly
                 result["values"] = self.last_solution["values"]
+                logging.getLogger(__name__).debug(f"Copied values to result: {result['values']}")
         
         logging.getLogger(__name__).info(f"Model solved: {result['success']}, satisfiable: {satisfiable}")
         
@@ -281,6 +344,16 @@ class PySATModelManager(SolverManager):
         if not self.last_solution:
             return {"message": "No solution available", "success": False}
         
+        # First, check if the variable is directly available in the solution
+        # This handles custom dictionaries like 'casting'
+        if variable_name in self.last_solution:
+            return {
+                "message": f"Value of dictionary '{variable_name}'",
+                "success": True,
+                "value": self.last_solution[variable_name]
+            }
+        
+        # Then check in the values dictionary for individual variables
         if "values" not in self.last_solution:
             return {"message": "Solution does not contain variable values", "success": False}
         

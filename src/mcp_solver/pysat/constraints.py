@@ -8,6 +8,10 @@ with PySAT in a way that's reliable and always works, regardless of the constrai
 import itertools
 from typing import List, Union, Iterable
 
+# Import the robust implementations from templates
+from .templates.cardinality_templates import at_most_k as _at_most_k_robust
+from .templates.cardinality_templates import at_least_k as _at_least_k_robust
+
 
 def at_most_k(variables: List[int], k: int) -> List[List[int]]:
     """
@@ -21,34 +25,14 @@ def at_most_k(variables: List[int], k: int) -> List[List[int]]:
     Returns:
         List of clauses representing the constraint
     """
-    if k >= len(variables):
-        return []  # No constraint needed
-    
-    if k == 0:
-        # All variables must be false
-        return [[-v] for v in variables]
-    
-    if k == 1:
-        # Optimization for the common at-most-one case
-        # This is the pairwise encoding which is most efficient for k=1
-        clauses = []
-        for i in range(len(variables)):
-            for j in range(i+1, len(variables)):
-                clauses.append([-variables[i], -variables[j]])
-        return clauses
-    
-    # General case for k > 1
-    clauses = []
-    for combo in itertools.combinations(variables, k+1):
-        clauses.append([-v for v in combo])
-    
-    return clauses
+    # Delegate to the robust implementation in templates
+    return _at_most_k_robust(variables, k)
 
 
 def at_least_k(variables: List[int], k: int) -> List[List[int]]:
     """
     Create clauses for at least k of variables being true.
-    Works for any k value, with optimization for k=1 case.
+    Uses De Morgan's law for efficiency.
     
     Args:
         variables: List of variable IDs
@@ -57,21 +41,8 @@ def at_least_k(variables: List[int], k: int) -> List[List[int]]:
     Returns:
         List of clauses representing the constraint
     """
-    if k <= 0:
-        return []  # No constraint needed
-    
-    if k == len(variables):
-        # All variables must be true
-        return [[v] for v in variables]
-    
-    if k == 1:
-        # At least one variable must be true
-        # This is a single clause with all variables
-        return [variables.copy()]
-    
-    # Use De Morgan's law for general case
-    neg_vars = [-v for v in variables]
-    return at_most_k(neg_vars, len(variables) - k)
+    # Delegate to the robust implementation in templates
+    return _at_least_k_robust(variables, k)
 
 
 def exactly_k(variables: List[int], k: int) -> List[List[int]]:

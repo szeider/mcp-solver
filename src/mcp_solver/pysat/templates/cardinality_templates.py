@@ -17,33 +17,72 @@ except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
-def at_most_k(variables: List[int], k: int, encoding: EncType = EncType.seqcounter) -> CNF:
+def at_most_k(variables: List[int], k: int, encoding: EncType = EncType.seqcounter) -> List[List[int]]:
     """
-    Create CNF formula enforcing at most k variables are true.
+    Create clauses ensuring at most k variables can be true.
+    
+    This is a robust implementation that handles edge cases better
+    and falls back to direct encoding when needed.
     
     Args:
         variables: List of variable IDs
         k: Maximum number of variables that can be true
-        encoding: Encoding type (default: sequential counter)
+        encoding: Encoding type to try (will fall back to direct encoding if needed)
         
     Returns:
-        CNF formula with the constraint
+        List of clauses representing the constraint
     """
-    return CardEnc.atmost(variables, k, encoding=encoding)
+    # Handle edge cases
+    if k >= len(variables):
+        return []  # No constraint needed
+    
+    # Use direct encoding for small sets (more reliable across versions)
+    if len(variables) <= 20:
+        clauses = []
+        import itertools
+        for combo in itertools.combinations(variables, k+1):
+            clauses.append([-v for v in combo])
+        return clauses
+    
+    # For larger sets, try PySAT's encoding but handle failures
+    try:
+        return CardEnc.atmost(variables, k, encoding=encoding).clauses
+    except Exception:
+        # Fall back to direct encoding if PySAT's fails
+        # This will be slower but more reliable
+        clauses = []
+        import itertools
+        for combo in itertools.combinations(variables, k+1):
+            clauses.append([-v for v in combo])
+        return clauses
 
-def at_least_k(variables: List[int], k: int, encoding: EncType = EncType.seqcounter) -> CNF:
+def at_least_k(variables: List[int], k: int, encoding: EncType = EncType.seqcounter) -> List[List[int]]:
     """
-    Create CNF formula enforcing at least k variables are true.
+    Create clauses ensuring at least k variables must be true.
+    
+    Uses De Morgan's law with the robust at_most_k implementation.
     
     Args:
         variables: List of variable IDs
-        k: Minimum number of variables that can be true
-        encoding: Encoding type (default: sequential counter)
+        k: Minimum number of variables that must be true
+        encoding: Encoding type to try (will fall back to direct encoding if needed)
         
     Returns:
-        CNF formula with the constraint
+        List of clauses representing the constraint
     """
-    return CardEnc.atleast(variables, k, encoding=encoding)
+    # We use De Morgan's law: at least k of variables = at most (n-k) of negated variables
+    # For small instances, we can directly call at_most_k with negated vars
+    if len(variables) <= 100:  # Arbitrary threshold to avoid excessive computation
+        neg_vars = [-v for v in variables]
+        return at_most_k(neg_vars, len(variables) - k, encoding=encoding)
+    
+    # For larger instances, try PySAT's direct implementation
+    try:
+        return CardEnc.atleast(variables, k, encoding=encoding).clauses
+    except Exception:
+        # Fall back to at_most_k with De Morgan's law
+        neg_vars = [-v for v in variables]
+        return at_most_k(neg_vars, len(variables) - k, encoding=encoding)
 
 def exactly_k(variables: List[int], k: int, encoding: EncType = EncType.seqcounter) -> CNF:
     """

@@ -235,11 +235,38 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
             # Execute the code in the restricted environment
             exec(cleaned_code, restricted_globals, restricted_globals)
             
-            # Check if a solution was exported
-            if 'solution' in restricted_globals:
-                result["solution"] = restricted_globals['solution']
-            elif _LAST_SOLUTION is not None:
+            # Check if a solution was exported - prioritize _LAST_SOLUTION over restricted_globals
+            if _LAST_SOLUTION is not None:
                 result["solution"] = _LAST_SOLUTION
+            elif 'solution' in restricted_globals:
+                result["solution"] = restricted_globals['solution']
+            
+            # Process the solution to extract variable values from custom dictionaries
+            if "solution" in result and result["solution"]:
+                solution = result["solution"]
+                
+                # Ensure the solution has a 'values' dictionary
+                if "values" not in solution:
+                    solution["values"] = {}
+                
+                # Look for custom dictionaries that might contain variable assignments
+                # Common keys include 'assignment', 'casting', 'schedule', etc.
+                potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
+                
+                for key in potential_value_keys:
+                    if key in solution and isinstance(solution[key], dict):
+                        # Copy values from custom dictionary to the 'values' dictionary
+                        for var_name, var_value in solution[key].items():
+                            solution["values"][var_name] = var_value
+                
+                # Also check for a 'model' field, which is a list of true variable IDs
+                if "model" in solution and "variables" in solution:
+                    # variables is typically a mapping from names to IDs
+                    if isinstance(solution["variables"], dict) and isinstance(solution["model"], list):
+                        for var_name, var_id in solution["variables"].items():
+                            # A positive ID in the model means the variable is true
+                            if isinstance(var_id, int):
+                                solution["values"][var_name] = (var_id in solution["model"])
             
             result["success"] = True
     except TimeoutException as e:

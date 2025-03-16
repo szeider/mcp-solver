@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.2.0",
     "minizinc",
-    "tomli;python_version<'3.11'",
+    "tomli",
     "six"
 ]
 
