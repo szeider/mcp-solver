@@ -252,25 +252,95 @@ class PySATModelManager(SolverManager):
             # Join code items into a single string
             code_string = "\n".join(content for _, content in sorted_items)
             
-            # Modify the code to ensure it prints the satisfiability result
-            # We'll add a simple print statement that we can parse later
-            modified_code = ""
+            # Perform static analysis on the code before executing it
+            try:
+                import ast
+                ast_tree = ast.parse(code_string)
+                
+                # Check for solver.solve() patterns
+                solve_calls = 0
+                for node in ast.walk(ast_tree):
+                    if isinstance(node, ast.Call):
+                        if (isinstance(node.func, ast.Attribute) and 
+                            node.func.attr == 'solve' and
+                            isinstance(node.func.value, ast.Name)):
+                            solve_calls += 1
+                
+                if solve_calls == 0:
+                    self.logger.warning("No solver.solve() call found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No solver.solve() call found in the code. Make sure to create a solver and call its solve() method.",
+                        error="Missing solve call",
+                        code_analysis="Missing solver.solve() call"
+                    )
+                
+                # Check for export_solution calls
+                export_calls = 0
+                for node in ast.walk(ast_tree):
+                    if isinstance(node, ast.Call):
+                        if (isinstance(node.func, ast.Name) and 
+                            node.func.id == 'export_solution'):
+                            export_calls += 1
+                
+                if export_calls == 0:
+                    self.logger.warning("No export_solution() call found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No export_solution() call found in the code. Make sure to call export_solution() with your result.",
+                        error="Missing export_solution call",
+                        code_analysis="Missing export_solution() call"
+                    )
+                
+                # Look for common mistake patterns
+                code_lines = code_string.split('\n')
+                line_issues = []
+                
+                for i, line in enumerate(code_lines):
+                    # Check for variables = var_id pattern (common mistake)
+                    if re.search(r'variables\s*=\s*var_id', line):
+                        line_issues.append({
+                            "line": i + 1,
+                            "code": line.strip(),
+                            "issue": "Incorrect assignment to variables dictionary. Use variables[key] = var_id instead of variables = var_id"
+                        })
+                    
+                    # Check for variables in list comprehension without indexing
+                    if re.search(r'\[\s*variables\s+for', line):
+                        line_issues.append({
+                            "line": i + 1,
+                            "code": line.strip(),
+                            "issue": "Incorrect use of variables in list comprehension. Use variables[key] instead of just variables"
+                        })
+                
+                if line_issues:
+                    issues_text = "\n".join([f"Line {issue['line']}: {issue['code']} - {issue['issue']}" for issue in line_issues])
+                    self.logger.warning(f"Found potential code issues:\n{issues_text}")
+                    # We don't return here, just warn - give the code a chance to run
             
-            # Track if we've already found and handled a solve() call
-            found_solve_call = False
+            except SyntaxError as e:
+                line_num = e.lineno if hasattr(e, 'lineno') else '?'
+                col_num = e.offset if hasattr(e, 'offset') else '?'
+                error_text = e.text.strip() if hasattr(e, 'text') and e.text else 'unknown'
+                
+                self.logger.error(f"Syntax error in code at line {line_num}, column {col_num}: {str(e)}")
+                return get_standardized_response(
+                    success=False,
+                    message=f"Syntax error at line {line_num}, column {col_num}: {str(e)}",
+                    error="Syntax error",
+                    error_details={
+                        "line": line_num,
+                        "column": col_num,
+                        "code": error_text,
+                        "message": str(e)
+                    }
+                )
+            except Exception as e:
+                self.logger.error(f"Error analyzing code: {str(e)}")
+                # Continue despite analysis error
             
-            for line in code_string.split("\n"):
-                # Direct conditional pattern - if solver.solve():
-                if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
-                    # Add the line as is
-                    modified_code += line + "\n"
-                    # Add debug print with proper indentation
-                    indent = re.match(r'^(\s*)', line).group(1)
-                    modified_code += f"{indent}    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
-                    found_solve_call = True
-                else:
-                    # Just copy the line as is
-                    modified_code += line + "\n"
+            # Modify the code to enhance debugging
+            modified_code = self._enhance_code_for_debugging(code_string)
             
             # Set timeout
             timeout_seconds = timeout.total_seconds()
@@ -279,6 +349,29 @@ class PySATModelManager(SolverManager):
             start_time = time.time()
             self.last_result = execute_pysat_code(modified_code, timeout=timeout_seconds)
             self.last_solve_time = time.time() - start_time
+            
+            # Check if there were execution errors
+            if self.last_result.get("error"):
+                error_msg = self.last_result["error"]
+                self.logger.error(f"Error executing code: {error_msg}")
+                
+                # If we captured line issues during analysis, include them in error details
+                if line_issues:
+                    return get_standardized_response(
+                        success=False,
+                        message=f"Error executing code: {error_msg}",
+                        error="Execution error",
+                        error_details={
+                            "execution_error": error_msg,
+                            "code_issues": line_issues
+                        }
+                    )
+                
+                return get_standardized_response(
+                    success=False,
+                    message=f"Error executing code: {error_msg}",
+                    error="Execution error"
+                )
             
             # Extract solver output to check for satisfiability
             output = self.last_result.get("output", "")
@@ -348,79 +441,123 @@ class PySATModelManager(SolverManager):
                                         self.last_solution["values"][key] = False
                                     else:
                                         self.last_solution["values"][key] = value
-                    except json.JSONDecodeError:
-                        self.logger.warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"Error parsing solution JSON: {str(e)}")
+                        self.last_solution["warning"] = f"Solution parsing error: {str(e)}"
                 except Exception as e:
-                    self.logger.warning(f"Error extracting solution data: {e}")
+                    self.logger.error(f"Error extracting solution: {str(e)}")
+                    self.last_solution["warning"] = f"Solution extraction error: {str(e)}"
             
-            # Extract values from custom dictionaries if they exist
-            # (this applies to any custom dictionary, not just actor-specific ones)
-            potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
-            for key in potential_value_keys:
-                if key in self.last_solution and isinstance(self.last_solution[key], dict):
-                    for var_name, var_value in self.last_solution[key].items():
-                        self.last_solution["values"][var_name] = var_value
+            # Add solve time to solution
+            self.last_solution["solve_time"] = f"{self.last_solve_time:.6f} seconds"
             
-            # Determine success/failure message
-            if self.last_result.get("success", False):
-                message = "Model solved successfully"
-                # Ensure consistency between satisfiable flag and status
-                if satisfiable:
-                    message += " (satisfiable)"
-                    # Ensure status is consistent with satisfiability
-                    self.last_solution["status"] = "sat"
-                    self.last_solution["satisfiable"] = True
-                elif satisfiable is False:  # Explicitly False, not just falsy
-                    message += " (unsatisfiable)"
-                    # Ensure status is consistent with satisfiability
-                    self.last_solution["status"] = "unsat"
-                    self.last_solution["satisfiable"] = False
-                else:
-                    status = self.last_solution.get("status", "unknown")
-                    message += f" (status: {status})"
-                    # Make sure satisfiable matches status
-                    if status == "sat":
-                        self.last_solution["satisfiable"] = True
-                    elif status == "unsat":
-                        self.last_solution["satisfiable"] = False
-            else:
-                message = "Failed to solve model"
-                if self.last_result.get("error"):
-                    message += f": {self.last_result['error']}"
+            # Add any warnings from static analysis
+            if line_issues:
+                self.last_solution["warnings"] = [
+                    f"Line {issue['line']}: {issue['issue']}" for issue in line_issues
+                ]
             
-            # Build result dictionary
-            result = {
-                "message": message,
-                "success": self.last_result.get("success", False),
+            # Log the successful solve
+            self.logger.info(f"Model solved: {bool(self.last_result.get('success'))}, satisfiable: {satisfiable}")
+            
+            # Prepare final response
+            response = {
+                "message": "Model solved successfully" + (" (satisfiable)" if satisfiable else " (unsatisfiable)"),
+                "success": True,
                 "solve_time": f"{self.last_solve_time:.6f} seconds",
                 "output": output,
-                "satisfiable": satisfiable  # Always include the satisfiability flag
+                "satisfiable": satisfiable
             }
             
-            # Add solution information if available
-            if self.last_solution:
-                # Include status from solution
-                if "status" in self.last_solution:
-                    result["status"] = self.last_solution["status"]
-                
-                # Include values from solution - direct copy from last_solution to result
-                if "values" in self.last_solution:
-                    # Add to result directly
-                    result["values"] = self.last_solution["values"]
-                    logging.getLogger(__name__).debug(f"Copied values to result: {result['values']}")
+            # Include status and values
+            if self.last_solution.get("status"):
+                response["status"] = self.last_solution["status"]
+            if self.last_solution.get("values"):
+                response["values"] = self.last_solution["values"]
             
-            logging.getLogger(__name__).info(f"Model solved: {result['success']}, satisfiable: {satisfiable}")
+            # Include warnings if any
+            if self.last_solution.get("warnings"):
+                response["warnings"] = self.last_solution["warnings"]
             
-            return result
-        
+            return response
+            
         except Exception as e:
-            error_msg = f"Unexpected error in solve_model: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
+            # Log the error
+            self.logger.error(f"Error in solve_model: {str(e)}", exc_info=True)
+            
+            # Return a structured error response
             return get_standardized_response(
                 success=False,
-                message="Failed to solve model due to an internal error",
-                error=error_msg
+                message=f"Error solving model: {str(e)}",
+                error="Internal error"
             )
+            
+    def _enhance_code_for_debugging(self, code_string: str) -> str:
+        """
+        Enhances the code with debug statements to aid in debugging.
+        
+        Args:
+            code_string: The original code string
+            
+        Returns:
+            Enhanced code string with debug information
+        """
+        # Add debug headers and imports if not present
+        debug_header = (
+            "# === DEBUG INSTRUMENTATION ===\n"
+            "import traceback\n"
+            "# === END DEBUG HEADER ===\n\n"
+        )
+        
+        modified_code = debug_header + code_string
+        
+        # Modify the code to add debug info around solver.solve() calls
+        modified_lines = []
+        lines = modified_code.split('\n')
+        
+        for i, line in enumerate(lines):
+            modified_lines.append(line)
+            
+            # Add debugging for if solver.solve():
+            if re.search(r'if\s+\w+\.solve\(\)', line):
+                # Capture the solver variable name
+                solver_var = re.search(r'if\s+(\w+)\.solve\(\)', line)
+                if solver_var:
+                    solver_name = solver_var.group(1)
+                    # Indent level of the original line
+                    indent = re.match(r'^(\s*)', line).group(1)
+                    next_indent = indent + "    "  # Assume 4-space indentation
+                    
+                    # Add debug prints after the conditional
+                    modified_lines.append(f"{next_indent}print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")")
+                    modified_lines.append(f"{next_indent}print(f\"PYSAT_DEBUG_OUTPUT: solver={solver_name!r}\")")
+            
+            # Add exception handling around export_solution calls
+            if 'export_solution(' in line:
+                # Find indentation
+                indent = re.match(r'^(\s*)', line).group(1)
+                
+                # Find the start of the function call
+                call_start = line.find('export_solution(')
+                
+                # If the call is not at the beginning of the line, we need to preserve what comes before it
+                prefix = line[:call_start]
+                
+                # Extract the call and arguments
+                call_match = re.search(r'export_solution\((.*)\)', line)
+                if call_match:
+                    args = call_match.group(1)
+                    
+                    # Replace the line with a try-except block
+                    modified_lines[-1] = f"{indent}try:"
+                    modified_lines.append(f"{indent}    {prefix}export_solution({args})")
+                    modified_lines.append(f"{indent}except Exception as e:")
+                    modified_lines.append(f"{indent}    print(f\"PYSAT_DEBUG_OUTPUT: export_solution_error={{str(e)}}\")")
+                    modified_lines.append(f"{indent}    print(f\"PYSAT_DEBUG_OUTPUT: traceback={{traceback.format_exc()}}\")")
+                    modified_lines.append(f"{indent}    # Re-raise to ensure proper error handling")
+                    modified_lines.append(f"{indent}    raise")
+        
+        return '\n'.join(modified_lines)
     
     def get_solution(self) -> Dict[str, Any]:
         """

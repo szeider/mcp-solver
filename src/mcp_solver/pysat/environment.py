@@ -12,10 +12,15 @@ import signal
 import traceback
 import time
 import contextlib
+import collections
+import itertools
+import math
+import json
 from typing import Dict, Any, Optional, List, Callable
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import re
 import random
+import logging
 
 # Import path management to ensure we get the correct PySAT
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -39,7 +44,10 @@ try:
     from pysat.card import CardEnc, EncType
     from pysat.examples.rc2 import RC2
     import pysat
-except ImportError:
+    # Import our local solution module
+    from . import solution
+    from .solution import export_solution
+except ImportError as e:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
@@ -82,218 +90,337 @@ def time_limit(seconds: float):
         # Reset signal handler
         signal.setitimer(signal.ITIMER_REAL, 0)
 
-def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]:
+def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
     """
-    Execute PySAT Python code in a secure environment with timeout handling.
+    Executes PySAT Python code in a secure environment.
     
     Args:
-        code_string: The PySAT Python code to execute
+        code: The PySAT Python code to execute
         timeout: Maximum execution time in seconds
         
     Returns:
-        Dictionary with execution results
+        A dictionary containing the execution results:
+        {
+            'success': bool,
+            'output': str,
+            'error': Optional[str],
+            'solution': Optional[Dict]
+        }
     """
-    # Import here to avoid circular imports
-    from .solution import _LAST_SOLUTION, export_solution
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Executing PySAT code with timeout {timeout} seconds")
     
+    # Initialize result dictionary
     result = {
-        "success": False,
-        "output": "",
-        "error": None,
-        "solution": None,
-        "execution_time": 0,
+        'success': False,
+        'output': '',
+        'error': None,
+        'solution': None
     }
     
-    # Reset _LAST_SOLUTION before execution
-    global _LAST_SOLUTION
-    _LAST_SOLUTION = None
+    # Capture standard output and error
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
     
-    # Capture stdout and stderr
-    stdout_buffer = io.StringIO()
-    stderr_buffer = io.StringIO()
-    
-    # Start timer
-    start_time = time.time()
-    
-    # Set up restricted globals for execution
-    restricted_globals = {
-        "__builtins__": {
-            # Allow a subset of builtins
-            "abs": abs,
-            "all": all,
-            "any": any,
-            "bool": bool,
-            "dict": dict,
-            "enumerate": enumerate,
-            "filter": filter,
-            "float": float,
-            "int": int,
-            "isinstance": isinstance,
-            "len": len,
-            "list": list,
-            "map": map,
-            "max": max,
-            "min": min,
-            "print": print,
-            "range": range,
-            "reversed": reversed,
-            "round": round,
-            "set": set,
-            "sorted": sorted,
-            "str": str,
-            "sum": sum,
-            "tuple": tuple,
-            "zip": zip,
-        },
-        # Add PySAT core classes
-        "CNF": CNF,
-        "WCNF": WCNF,
-        "Solver": Solver,
-        # Popular SAT solvers
-        "Glucose3": Glucose3,
-        "Glucose4": Glucose4,
-        "Lingeling": Lingeling,
-        "Cadical153": Cadical153,  # Recommended solver
-        # Cardinality constraints
-        "CardEnc": CardEnc,
-        "EncType": EncType,
-        # PySAT solver
-        "RC2": RC2,
-        # Solution export
-        "export_solution": export_solution,
-        # Python standard libraries
-        "time": time,
-        # Our helper functions for cardinality constraints
-        "at_most_k": at_most_k,
-        "at_least_k": at_least_k,
-        "exactly_k": exactly_k,
-        "at_most_one": at_most_one,
-        "exactly_one": exactly_one,
-        "implies": implies,
-        "mutually_exclusive": mutually_exclusive,
-        "if_then_else": if_then_else,
-        # Random module
-        "random": random,
-    }
-    
-    # Process imports and add to globals
-    import_pattern = r'^from\s+([\w.]+)\s+import\s+(.+)$|^import\s+([\w.]+)(?:\s+as\s+([\w]+))?$'
-    code_lines = code_string.split('\n')
-    cleaned_code_lines = []
-    
-    # Whitelist of allowed modules (restrictive)
-    allowed_modules = {
-        'pysat', 'pysat.formula', 'pysat.solvers', 'pysat.card', 'pysat.examples', 
-        'pysat.examples.rc2', 'time', 'math', 'itertools', 'random', 'collections'
-    }
-    
-    for line in code_lines:
-        match = re.match(import_pattern, line.strip())
-        if match:
-            # Handle "from X import Y" style
-            if match.group(1) and match.group(2):
-                module_name = match.group(1)
-                if module_name in allowed_modules:
-                    try:
-                        module = __import__(module_name, fromlist=['.'])
-                        for item in match.group(2).split(','):
-                            item = item.strip()
-                            if item:
-                                try:
-                                    # Add imported item to globals
-                                    obj = getattr(module, item)
-                                    restricted_globals[item] = obj
-                                except AttributeError:
-                                    result["output"] += f"Warning: Could not import {item} from {module_name}\n"
-                    except ImportError:
-                        result["output"] += f"Warning: Could not import module {module_name}\n"
-                else:
-                    result["output"] += f"Warning: Import of {module_name} not allowed for security reasons\n"
-                
-                # Skip this line in the executed code
-                continue
-            
-            # Handle "import X" or "import X as Y" style
-            elif match.group(3):
-                module_name = match.group(3)
-                alias = match.group(4) if match.group(4) else module_name
-                
-                if module_name in allowed_modules:
-                    try:
-                        module = __import__(module_name)
-                        restricted_globals[alias] = module
-                    except ImportError:
-                        result["output"] += f"Warning: Could not import module {module_name}\n"
-                else:
-                    result["output"] += f"Warning: Import of {module_name} not allowed for security reasons\n"
-                
-                # Skip this line in the executed code
-                continue
-        
-        # Keep all non-import lines
-        cleaned_code_lines.append(line)
-    
-    # Rejoin the code without the import statements
-    cleaned_code = '\n'.join(cleaned_code_lines)
-    
-    # Execute the code with timeout
     try:
-        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer), time_limit(timeout):
-            # Execute the code in the restricted environment
-            exec(cleaned_code, restricted_globals, restricted_globals)
+        # Process imports
+        # We need to modify the code to directly import the modules we need
+        processed_code = ""
+        in_import = False
+        import_lines = []
+        regular_lines = []
+        
+        for line in code.split('\n'):
+            if line.strip().startswith(('import ', 'from ')) or in_import:
+                # Track multiline imports
+                if line.strip().endswith('\\'):
+                    in_import = True
+                else:
+                    in_import = False
+                import_lines.append(line)
+            else:
+                regular_lines.append(line)
+        
+        # Add fixed imports at the top of the code
+        processed_code = """
+# Standard library imports provided by the environment
+import collections
+import itertools
+import math
+import json
+import re
+import random
+
+# PySAT imports
+from pysat.formula import CNF, WCNF
+from pysat.solvers import Glucose3, Cadical153
+from pysat.card import CardEnc, EncType
+from pysat.solution import export_solution
+
+""" + '\n'.join(regular_lines)
+        
+        # Setup restricted globals for execution
+        restricted_globals = {
+            '__builtins__': {
+                # Allowed builtins
+                'abs': abs,
+                'all': all,
+                'any': any,
+                'bool': bool,
+                'dict': dict,
+                'divmod': divmod,
+                'enumerate': enumerate,
+                'filter': filter,
+                'float': float,
+                'id': id,
+                'int': int,
+                'isinstance': isinstance,
+                'issubclass': issubclass,
+                'iter': iter,
+                'len': len,
+                'list': list,
+                'map': map,
+                'max': max,
+                'min': min,
+                'next': next,
+                'print': print,
+                'range': range,
+                'reversed': reversed,
+                'round': round,
+                'set': set,
+                'sorted': sorted,
+                'str': str,
+                'sum': sum,
+                'tuple': tuple,
+                'zip': zip,
+                'True': True,
+                'False': False,
+                'None': None,
+                'Exception': Exception,
+                'ValueError': ValueError,
+                'TypeError': TypeError,
+            },
+            # Provide the PySAT environment - only include stable solvers
+            'CNF': CNF,
+            'WCNF': WCNF,
+            'Glucose3': Glucose3,  # Standard solver 1
+            'Cadical153': Cadical153,  # Standard solver 2
+            'CardEnc': CardEnc,
+            'EncType': EncType,
+            'export_solution': export_solution,
+            'collections': collections,
+            'itertools': itertools,
+            'math': math,
+            'random': random,
+            're': re,
+            'json': json,
+        }
+        
+        # Add common variable types needed for PySAT code
+        restricted_globals['dict_keys'] = type({}.keys())
+        restricted_globals['dict_values'] = type({}.values())
+        restricted_globals['dict_items'] = type({}.items())
+        restricted_globals['map_iterator'] = type(map(lambda x: x, []))
+        restricted_globals['filter_iterator'] = type(filter(lambda x: x, []))
+        restricted_globals['enumerate_iterator'] = type(enumerate([]))
+        restricted_globals['zip_iterator'] = type(zip())
+        restricted_globals['range_iterator'] = type(range(0))
+        
+        # Add logging capability so we can trace execution
+        restricted_globals['logging'] = logging
+        
+        # Wrap code execution in a try-except block to catch syntax errors
+        try:
+            # First, compile the code to catch syntax errors before execution
+            compiled_code = compile(processed_code, '<pysat_code>', 'exec')
             
-            # Store the current solution value for use after the redirects are closed
-            from .solution import _LAST_SOLUTION as current_solution
-            current_solution_value = current_solution
+            # Execute code with timeout and capture output
+            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                with time_limit(timeout):
+                    # Execute the compiled code
+                    exec(compiled_code, restricted_globals)
             
-            # Check if a solution was exported
-            if current_solution_value is not None:
-                result["solution"] = current_solution_value
-            elif 'solution' in restricted_globals:
-                result["solution"] = restricted_globals['solution']
+            # Extract standard output and error
+            stdout = stdout_capture.getvalue()
+            stderr = stderr_capture.getvalue()
             
-            # Process the solution to extract variable values from custom dictionaries
-            if "solution" in result and result["solution"]:
-                solution = result["solution"]
+            # Check if _LAST_SOLUTION was set by export_solution
+            solution = None
+            if '_LAST_SOLUTION' in restricted_globals:
+                solution = restricted_globals['_LAST_SOLUTION']
+                logger.debug(f"_LAST_SOLUTION set to: {solution}")
                 
-                # Ensure the solution has a 'values' dictionary
-                if "values" not in solution:
-                    solution["values"] = {}
-                
-                # Look for custom dictionaries that might contain variable assignments
-                # Common keys include 'assignment', 'casting', 'schedule', etc.
-                potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
-                
-                for key in potential_value_keys:
-                    if key in solution and isinstance(solution[key], dict):
-                        # Copy values from custom dictionary to the 'values' dictionary
-                        for var_name, var_value in solution[key].items():
-                            solution["values"][var_name] = var_value
-                
-                # Also check for a 'model' field, which is a list of true variable IDs
-                if "model" in solution and "variables" in solution:
-                    # variables is typically a mapping from names to IDs
-                    if isinstance(solution["variables"], dict) and isinstance(solution["model"], list):
-                        for var_name, var_id in solution["variables"].items():
-                            # A positive ID in the model means the variable is true
-                            if isinstance(var_id, int):
-                                solution["values"][var_name] = (var_id in solution["model"])
+            # Return success result with output and solution
+            result['success'] = True
+            result['output'] = stdout + '\n' + stderr
+            result['solution'] = solution
             
-            result["success"] = True
-    except TimeoutException as e:
-        result["success"] = False
-        result["error"] = f"Execution timed out after {timeout} seconds"
+        except SyntaxError as e:
+            # Handle syntax errors in the code
+            line_num = e.lineno if hasattr(e, 'lineno') else '?'
+            col_num = e.offset if hasattr(e, 'offset') else '?'
+            error_text = e.text.strip() if hasattr(e, 'text') and e.text else 'unknown'
+            
+            error_msg = f"Syntax error at line {line_num}, column {col_num}: {str(e)}"
+            logger.error(error_msg)
+            
+            # Add detailed syntax error information
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'SyntaxError',
+                'line': line_num,
+                'column': col_num,
+                'text': error_text,
+                'message': str(e)
+            }
+            result['output'] = f"Syntax error: {error_msg}\n{stderr_capture.getvalue()}"
+            
+        except NameError as e:
+            # Handle undefined variable errors
+            var_match = re.search(r"name '(\w+)' is not defined", str(e))
+            var_name = var_match.group(1) if var_match else "unknown"
+            
+            error_msg = f"Undefined variable: '{var_name}'. {str(e)}"
+            logger.error(error_msg)
+            
+            # Provide helpful suggestions for common undefined variables
+            suggestions = {}
+            if var_name in ['variables', 'variable', 'vars', 'var']:
+                suggestions['hint'] = "Did you forget to initialize a variables dictionary? Use 'variables = {}' before adding variables."
+            elif var_name in ['cnf', 'formula', 'problem']:
+                suggestions['hint'] = "Did you forget to create a CNF object? Use 'cnf = CNF()' before adding clauses."
+            elif var_name in ['solver', 'sat_solver']:
+                suggestions['hint'] = "Did you forget to create a solver? Use 'solver = Glucose3(cnf)' or another supported solver."
+            
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'NameError',
+                'variable': var_name,
+                'message': str(e),
+                'suggestions': suggestions if suggestions else None
+            }
+            result['output'] = f"NameError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except TypeError as e:
+            # Handle type errors
+            error_msg = f"Type error: {str(e)}"
+            logger.error(error_msg)
+            
+            # Extract function name if it's a function call error
+            func_match = re.search(r"(\w+)\(\) takes", str(e))
+            func_name = func_match.group(1) if func_match else None
+            
+            # Add call context for method/function type errors
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'TypeError',
+                'function': func_name,
+                'message': str(e)
+            }
+            
+            # Add helpful suggestions for common type errors
+            if "takes 1 positional argument but 2 were given" in str(e):
+                result['error_details']['hint'] = "You may be calling a method without using the dot notation (object.method instead of method(object))."
+            elif "object is not callable" in str(e):
+                result['error_details']['hint'] = "You may be trying to call something that is not a function."
+                
+            result['output'] = f"TypeError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except AttributeError as e:
+            # Handle attribute errors
+            error_msg = f"Attribute error: {str(e)}"
+            logger.error(error_msg)
+            
+            # Extract object and attribute names
+            attr_match = re.search(r"'(\w+)' object has no attribute '(\w+)'", str(e))
+            if attr_match:
+                obj_type, attr_name = attr_match.groups()
+                
+                # Add detailed attribute error information
+                result['error_details'] = {
+                    'type': 'AttributeError',
+                    'object_type': obj_type,
+                    'attribute': attr_name,
+                    'message': str(e)
+                }
+                
+                # Common attribute error suggestions
+                if obj_type == 'NoneType':
+                    result['error_details']['hint'] = "You're trying to access an attribute on a None value. Check if your variable was properly initialized."
+                elif attr_name == 'solve' and obj_type in ['dict', 'list', 'int', 'str']:
+                    result['error_details']['hint'] = f"The '{obj_type}' object is not a solver. Did you forget to create a solver with 'solver = Glucose3(cnf)' or similar?"
+                elif attr_name == 'add_clause' and obj_type in ['dict', 'list', 'int', 'str']:
+                    result['error_details']['hint'] = f"The '{obj_type}' object is not a CNF formula. Did you forget to create a CNF with 'cnf = CNF()' or similar?"
+            
+            result['error'] = error_msg
+            result['output'] = f"AttributeError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except KeyError as e:
+            # Handle key errors
+            key = str(e).strip("'")
+            error_msg = f"Key error: Key '{key}' not found"
+            logger.error(error_msg)
+            
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'KeyError',
+                'key': key,
+                'message': str(e)
+            }
+            result['output'] = f"KeyError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except IndexError as e:
+            # Handle index errors
+            error_msg = f"Index error: {str(e)}"
+            logger.error(error_msg)
+            
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'IndexError',
+                'message': str(e)
+            }
+            result['output'] = f"IndexError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except TimeoutException:
+            # Handle timeout errors
+            error_msg = f"Execution timed out after {timeout} seconds"
+            logger.error(error_msg)
+            
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': 'TimeoutError',
+                'timeout': timeout,
+                'message': error_msg
+            }
+            result['output'] = f"Timeout Error: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
+        except Exception as e:
+            # Handle all other exceptions
+            error_msg = f"Execution error: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            # Get traceback information
+            tb_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+            
+            result['error'] = error_msg
+            result['error_details'] = {
+                'type': type(e).__name__,
+                'message': str(e),
+                'traceback': tb_str
+            }
+            result['output'] = f"Error: {error_msg}\n{tb_str}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            
     except Exception as e:
-        result["success"] = False
-        tb = traceback.format_exc()
-        result["error"] = f"Error: {str(e)}\n{tb}"
-    
-    # Calculate execution time
-    result["execution_time"] = time.time() - start_time
-    
-    # Get output from buffers
-    result["output"] = stdout_buffer.getvalue()
-    if stderr_buffer.getvalue():
-        result["output"] += "\nSTDERR:\n" + stderr_buffer.getvalue()
+        # Handle unexpected errors in the environment itself
+        error_msg = f"Environment error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        result['error'] = error_msg
+        result['output'] = f"Environment Error: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+        
+    finally:
+        # Ensure output is captured even in case of error
+        if not result['output']:
+            result['output'] = stdout_capture.getvalue() + '\n' + stderr_capture.getvalue()
     
     return result 

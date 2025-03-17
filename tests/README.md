@@ -1,46 +1,71 @@
-# MCP Solver Tests
+# MCP Solver Test Suite
 
-This directory contains test scripts for verifying various aspects of the MCP Solver project.
+This directory contains tests for the MCP Solver project.
 
-## Main Test Files
+## Test Structure
 
-- **test_all_modes.py**: Comprehensive test script that verifies all three solver modes can start correctly:
-  - MiniZinc mode (default)
-  - Z3 mode (--z3 --lite)
-  - PySAT mode (--pysat --lite)
-
-- **test_pysat_basic.py**: Tests basic PySAT integration and functionality, including:
-  - CNF formula creation
-  - SAT solving
-  - Solution extraction
-  - Memory management
-  - Error handling
-
-## Functional Tests
-
-- **test_templates.py**: Tests template functions for constraint solving models
-- **test_function_templates.py**: Validates function templates for user-defined functions
-- **test_map_coloring.py**: Tests the map coloring problem implementation
-- **test_mcp_map_coloring.py**: Tests the MCP-specific map coloring implementation
-- **test_us_states_coloring.py**: Advanced map coloring problem for US states
-- **test_subset_template.py**: Tests subset problem templates
+```
+├── tests/
+│   ├── __init__.py            # Package marker
+│   ├── conftest.py            # Shared test fixtures and configuration
+│   ├── test_config.py         # Configuration values for tests
+│   ├── problems/              # All problem definitions in one place
+│   │   ├── mzn/               # MiniZinc problem definitions
+│   │   │   └── nqueens.md     # N-Queens problem
+│   │   ├── pysat/             # PySAT problem definitions
+│   │   │   └── graph_coloring.md  # Graph coloring problem
+│   │   └── z3/                # Z3 problem definitions
+│   │       └── cryptarithmetic.md # Cryptarithmetic problem
+│   ├── run_all_tests.py       # Main runner for all tests
+│   ├── run_test_mzn.py        # Runner for MiniZinc tests
+│   ├── run_test_pysat.py      # Runner for PySAT tests
+│   ├── run_test_z3.py         # Runner for Z3 tests
+│   ├── test_mzn.py            # Unit tests for MiniZinc
+│   ├── test_pysat.py          # Unit tests for PySAT
+│   ├── test_z3.py             # Unit tests for Z3
+│   └── test_integration.py    # Cross-solver tests
+```
 
 ## Running Tests
 
-Run individual tests with:
+### Running All Tests
+
 ```bash
-uv run python tests/test_all_modes.py
+cd tests
+uv run run_all_tests.py
 ```
 
-Run all tests with:
+### Running Tests for a Specific Solver
+
 ```bash
-for test in tests/test_*.py; do uv run python $test; done
+cd tests
+uv run run_all_tests.py --mzn   # Run only MiniZinc tests
+uv run run_all_tests.py --pysat # Run only PySAT tests
+uv run run_all_tests.py --z3    # Run only Z3 tests
 ```
+
+### Running a Specific Problem
+
+```bash
+cd tests
+uv run run_test_mzn.py --problem nqueens
+uv run run_test_pysat.py --problem graph_coloring
+uv run run_test_z3.py --problem cryptarithmetic
+```
+
+### Options
+
+- `--verbose` or `-v`: Enable verbose output
+- `--timeout` or `-t`: Set timeout in seconds (default: 300)
 
 ## Adding New Tests
 
-When adding new tests, please follow these guidelines:
-1. Name files with the `test_` prefix
-2. Include documentation on the test's purpose
-3. Use proper error handling and exit codes
-4. Include the file in this README under the appropriate section 
+### Adding a New Problem
+
+1. Create a Markdown file in the appropriate problem directory
+2. Run the test with the corresponding test runner
+
+### Adding a New Unit Test
+
+1. Add test functions to the appropriate test file
+2. Test functions should start with `test_` 

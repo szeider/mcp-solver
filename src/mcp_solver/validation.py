@@ -81,31 +81,156 @@ def validate_content(content: Any) -> None:
         logger.error(msg)
         raise ValidationError(msg)
 
-def validate_python_code_safety(content: str) -> None:
+def validate_python_code_safety(code: str) -> None:
     """
-    Validate Python code for potentially unsafe patterns.
+    Validates that Python code does not contain potentially unsafe operations.
+    
+    This function checks for:
+    1. Dangerous imports (os, sys, subprocess, etc.)
+    2. File operations (open, read, write, etc.)
+    3. Network operations (socket, requests, etc.)
+    4. Code execution functions (exec, eval, etc.)
+    5. System command execution (os.system, subprocess.call, etc.)
+    6. Basic syntax errors
+    7. Common variable assignment mistakes
     
     Args:
-        content: The Python code to validate
+        code: The Python code to validate
         
     Raises:
-        ValidationError: If unsafe code patterns are detected
+        ValidationError: If the code contains potentially unsafe operations
+        SyntaxError: If the code contains syntax errors
     """
-    # Check for potentially unsafe code
-    unsafe_patterns = [
-        (r"__import__\s*\(", "Usage of __import__ is not allowed"),
-        (r"eval\s*\(", "Usage of eval() is not allowed"),
-        (r"exec\s*\(", "Usage of exec() is not allowed"),
-        (r"os\.(system|popen|execl|execle|execlp|popen|spawn)", "Direct OS command execution is not allowed"),
-        (r"subprocess", "Usage of subprocess module is not allowed"),
-        (r"open\s*\(.+?[\"']w[\"']", "Writing to files is not allowed"),
+    logger = logging.getLogger(__name__)
+    
+    # List of dangerous imports that could allow arbitrary code execution
+    dangerous_imports = [
+        'os', 'subprocess', 'sys', 'builtins', 'importlib', 'runpy',
+        'socket', 'requests', 'urllib', 'http', 'ftplib',
+        'commands', 'popen2', 'pty', 'pipes', 'pexpect', 'asyncio.subprocess',
+        'multiprocessing', 'threading', 'pickle', 'marshal', 'shelve', 'dill',
+        'cryptography', 'Crypto', 'code', 'codeop', 'inspect',
+        'pathlib', 'shutil', 'tempfile', 'fileinput', 'zipfile', 'tarfile',
+        'ctypes', 'cffi', 'distutils'
     ]
     
-    for pattern, message in unsafe_patterns:
-        if re.search(pattern, content):
-            msg = f"Validation failed: {message}"
-            logger.error(msg)
-            raise ValidationError(msg)
+    # Set of dangerous patterns that could allow code execution
+    dangerous_patterns = {
+        r'\bexec\s*\(': 'Use of exec() is not allowed',
+        r'\beval\s*\(': 'Use of eval() is not allowed',
+        r'\bcompile\s*\(': 'Use of compile() is not allowed',
+        r'\bimport\s+os\b': 'Import of os module is not allowed',
+        r'\bimport\s+sys\b': 'Import of sys module is not allowed',
+        r'\bimport\s+subprocess\b': 'Import of subprocess module is not allowed',
+        r'\bfrom\s+os\s+import': 'Import from os module is not allowed',
+        r'\bfrom\s+sys\s+import': 'Import from sys module is not allowed',
+        r'\bfrom\s+subprocess\s+import': 'Import from subprocess module is not allowed',
+        r'\bopen\s*\(': 'File operations are not allowed',
+        r'\.read\s*\(': 'File read operations are not allowed',
+        r'\.write\s*\(': 'File write operations are not allowed',
+        r'__import__\s*\(': 'Dynamic imports are not allowed',
+        r'globals\s*\(\s*\)': 'Access to globals() is not allowed',
+        r'locals\s*\(\s*\)': 'Access to locals() is not allowed',
+        r'getattr\s*\(': 'Dynamic attribute access is not allowed',
+        r'setattr\s*\(': 'Dynamic attribute setting is not allowed',
+        r'delattr\s*\(': 'Dynamic attribute deletion is not allowed',
+        r'\.system\s*\(': 'System command execution is not allowed',
+        r'\.popen\s*\(': 'Process creation is not allowed',
+        r'\.call\s*\(': 'Command execution is not allowed',
+        r'\.run\s*\(': 'Command execution is not allowed',
+        r'\.check_output\s*\(': 'Command execution is not allowed',
+        r'\.check_call\s*\(': 'Command execution is not allowed',
+        r'\.communicate\s*\(': 'Process communication is not allowed',
+        r'\.load\s*\(': 'Loading serialized data is not allowed',
+        r'\.loads\s*\(': 'Loading serialized data is not allowed',
+        r'\.readline\s*\(': 'File read operations are not allowed',
+        r'\.readlines\s*\(': 'File read operations are not allowed',
+        r'__getattribute__': 'Low-level attribute access is not allowed',
+        r'__getattr__': 'Low-level attribute access is not allowed',
+        r'__setattr__': 'Low-level attribute setting is not allowed',
+        r'__delattr__': 'Low-level attribute deletion is not allowed',
+        r'__class__': 'Access to class internals is not allowed',
+        r'__base__': 'Access to class internals is not allowed',
+        r'__bases__': 'Access to class internals is not allowed',
+        r'__mro__': 'Access to class resolution order is not allowed',
+        r'__subclasses__': 'Access to subclasses is not allowed',
+        r'__dict__': 'Access to internal dictionaries is not allowed',
+        r'__globals__': 'Access to global variables is not allowed',
+    }
+    
+    # First check for syntax errors
+    try:
+        import ast
+        ast.parse(code)
+        
+        # Find potentially dangerous patterns in code
+        for pattern, message in dangerous_patterns.items():
+            matches = re.finditer(pattern, code)
+            for match in matches:
+                line_num = code[:match.start()].count('\n') + 1
+                line_content = code.split('\n')[line_num - 1].strip()
+                
+                error_msg = f"{message} at line {line_num}: {line_content}"
+                logger.error(error_msg)
+                raise ValidationError(error_msg)
+        
+        # Parse imports using AST to catch them reliably
+        tree = ast.parse(code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for name in node.names:
+                    module_name = name.name.split('.')[0]
+                    if module_name in dangerous_imports:
+                        line_num = node.lineno
+                        error_msg = f"Import of {module_name} module is not allowed at line {line_num}"
+                        logger.error(error_msg)
+                        raise ValidationError(error_msg)
+            
+            elif isinstance(node, ast.ImportFrom):
+                module_name = node.module.split('.')[0] if node.module else ''
+                if module_name in dangerous_imports:
+                    line_num = node.lineno
+                    error_msg = f"Import from {module_name} module is not allowed at line {line_num}"
+                    logger.error(error_msg)
+                    raise ValidationError(error_msg)
+        
+        # Check common mistakes that might indicate syntax errors or logical issues
+        lines = code.split('\n')
+        for i, line in enumerate(lines):
+            line_num = i + 1
+            line = line.strip()
+            
+            # Check for common assignment errors
+            if re.search(r'if\s+\w+\s*=\s*\w+', line):  # Single = in if condition
+                error_msg = f"Potential mistake at line {line_num}: Assignment operator '=' used in condition instead of comparison operator '=='."
+                logger.warning(error_msg)
+                raise ValidationError(error_msg)
+            
+            # Check for missing colons
+            if re.search(r'^(if|for|while|def|class|with|try|except|finally)\s+.*[^:]$', line):
+                # Make sure it's not a multi-line statement or a comment
+                if not line.endswith('\\') and not line.strip().startswith('#'):
+                    error_msg = f"Potential syntax error at line {line_num}: Missing colon at the end of a control statement."
+                    logger.warning(error_msg)
+                    # Don't raise here, just warn - might be a false positive
+            
+            # Check for common indentation issues in the next line
+            if i < len(lines) - 1:
+                next_line = lines[i + 1].rstrip()
+                if re.search(r'^(if|for|while|def|class|with|try|except|finally)\s+.*:$', line) and next_line and not next_line.startswith(' ') and not next_line.startswith('\t'):
+                    if not next_line.strip().startswith('#') and not line.strip().endswith('\\'):
+                        error_msg = f"Potential indentation error after line {line_num}: The next line should be indented."
+                        logger.warning(error_msg)
+                        # Don't raise here, just warn - might be a false positive
+        
+    except SyntaxError as e:
+        line_num = e.lineno if hasattr(e, 'lineno') else '?'
+        col_num = e.offset if hasattr(e, 'offset') else '?'
+        error_text = e.text.strip() if hasattr(e, 'text') and e.text else 'unknown'
+        
+        error_msg = f"Syntax error at line {line_num}, column {col_num}: {str(e)} - '{error_text}'"
+        logger.error(error_msg)
+        raise ValidationError(error_msg) from e
 
 def validate_timeout(timeout: Any, min_timeout: timedelta, max_timeout: timedelta) -> None:
     """
