@@ -1,20 +1,6 @@
 # MCP Solver - Z3 Mode
 
-This document provides information about using MCP Solver with the Z3 SMT Solver backend. For general information about the MCP Solver, see the [main README](README.md).
-
-## Installation
-
-Install the *MCP Solver* with Z3 support:
-
-```bash
-uv pip install -e ".[z3]"
-```
-
-The setup can be tested with:
-
-```bash
-uv run test-setup-z3
-```
+This document provides information about using MCP Solver with the Z3 SMT Solver backend. For general information about the MCP Solver, see the [main README](https://claude.ai/chat/README.md).
 
 ## Configuration
 
@@ -29,6 +15,18 @@ Z3 mode provides access to SMT (Satisfiability Modulo Theories) solving capabili
 - **Optimization**: Optimize with respect to objective functions
 - **Quantifiers**: Express constraints with universal and existential quantifiers
 - **Secure execution**: Models run in a restricted environment with proper memory management
+
+## Enhanced Error Handling
+
+The system provides robust error detection and reporting to help diagnose problems in your Z3 models:
+
+1. **Descriptive Error Messages**: Errors are intercepted and translated into user-friendly messages with context about what went wrong
+2. **Input Validation**: The system automatically checks variable names, types, and values before execution
+3. **Code Safety Analysis**: Validates Python code for potentially unsafe patterns before execution
+4. **Context-Aware Diagnostics**: Error messages include details about the current state of your model, making it easier to identify issues
+5. **Solution Structure Validation**: The system validates solution structures before exporting, preventing common serialization errors
+
+These enhancements help you identify and fix issues more quickly, with clear guidance on what might be causing problems in your models.
 
 ## Template Library
 
@@ -93,12 +91,39 @@ solver, variables = build_model()
 export_solution(solver=solver, variables=variables)
 ```
 
-## Important Notes
+## Best Practices
 
 1. Always call `export_solution()` at the end of your model to extract the solution
+
 2. Wrap complex models in functions to avoid variable scope issues
+
 3. For complex problems, use the function-based templates:
+
    ```python
    from mcp_solver.z3.templates import optimization_template
    ```
-4. Z3 handles memory management automatically (unlike PySAT) 
+
+4. Use descriptive variable names to make solutions easier to interpret
+
+5. Z3 handles memory management automatically (unlike PySAT)
+
+6. When debugging, pay attention to the error messages which provide context on what went wrong
+
+## Solution Export
+
+```python
+# Basic solution export
+export_solution(solver=solver, variables=variables)
+
+# With additional structure
+export_solution(
+    solver=solver, 
+    variables=variables,
+    solution_data={
+        "puzzle": puzzle_representation,
+        "statistics": solving_statistics
+    }
+)
+```
+
+For more information on Z3, visit the [Z3 documentation](https://z3prover.github.io/api/html/namespacez3py.html).

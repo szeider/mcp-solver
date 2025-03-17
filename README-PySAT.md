@@ -139,6 +139,18 @@ This will result in:
 
 Keys that appear in only one dictionary won't be prefixed.
 
+## Enhanced Error Handling
+
+The system provides robust error detection and reporting to help diagnose problems in your SAT models:
+
+1. **Descriptive Error Messages**: Errors are intercepted and translated into user-friendly messages with context about what went wrong
+2. **Variable Validation**: The system automatically checks variable types and values, detecting issues like non-integer variable IDs or duplicate variables
+3. **Formula Validation**: Automatically validates clause structure, catching problems like empty clauses, zero literals, or missing variables
+4. **Context-Aware Diagnostics**: Error messages include details about the current state of your model, making it easier to identify issues
+5. **Solution Structure Validation**: The system validates solution structures before exporting, preventing common serialization errors
+
+These enhancements help you identify and fix issues more quickly, with clear guidance on what might be causing problems in your models.
+
 ## Available Solvers
 
 PySAT includes several SAT solvers:
