@@ -1,39 +1,31 @@
 #!/usr/bin/env python3
 """
-Test runner for the PySAT error handling improvements.
+Test runner for PySAT error handling and validation tests.
 
-This script runs the tests for the error handling module to verify it works correctly.
+This script runs the tests for PySAT error handling and validation components.
 """
 
-import os
-import sys
 import unittest
-import logging
+import sys
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# Add the src directory to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
-
-def run_tests():
-    """Run the error handling tests."""
-    print("\n===== Running PySAT Error Handling Tests =====\n")
-    
-    # Run the test file
-    test_module = "tests.test_pysat_error_handling"
-    
-    # Use unittest discovery
-    test_suite = unittest.defaultTestLoader.loadTestsFromName(test_module)
-    test_runner = unittest.TextTestRunner(verbosity=2)
-    result = test_runner.run(test_suite)
-    
-    # Return True if all tests passed
-    return result.wasSuccessful()
+# Test modules
+from tests.test_pysat_error_handling import TestPySATErrorHandling
+from tests.test_pysat_model_validation import TestModelValidation
 
 if __name__ == "__main__":
-    success = run_tests()
-    sys.exit(0 if success else 1) 
+    print("Running PySAT error handling and validation tests...")
+    
+    # Create a test suite with all test cases
+    test_suite = unittest.TestSuite()
+    
+    # Add error handling tests
+    test_suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(TestPySATErrorHandling))
+    
+    # Add model validation tests
+    test_suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(TestModelValidation))
+    
+    # Run the tests
+    result = unittest.TextTestRunner(verbosity=2).run(test_suite)
+    
+    # Exit with non-zero code if tests failed
+    sys.exit(0 if result.wasSuccessful() else 1) 

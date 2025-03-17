@@ -7,7 +7,7 @@ providing methods for managing PySAT models.
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union, cast
 from datetime import timedelta
 import time
 import re
@@ -15,6 +15,10 @@ import re
 from ..base_manager import SolverManager
 from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_pysat_code
+from .error_handling import PySATError, format_solution_error
+from .validation import validate_index, validate_content, ModelValidationError
+
+# Validation constants are now imported from validation module
 
 class PySATModelManager(SolverManager):
     """
@@ -35,8 +39,10 @@ class PySATModelManager(SolverManager):
         self.code_items: List[Tuple[int, str]] = []
         self.last_result: Optional[Dict[str, Any]] = None
         self.last_solution: Optional[Dict[str, Any]] = None
+        self.last_solve_time: float = 0.0
         self.initialized = True
-        logging.getLogger(__name__).info("PySAT model manager initialized")
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("PySAT model manager initialized")
     
     async def clear_model(self) -> Dict[str, Any]:
         """
@@ -48,8 +54,8 @@ class PySATModelManager(SolverManager):
         self.code_items = []
         self.last_result = None
         self.last_solution = None
-        logging.getLogger(__name__).info("Model cleared")
-        return {"message": "Model cleared"}
+        self.logger.info("Model cleared")
+        return {"message": "Model cleared successfully"}
     
     def get_model(self) -> List[Tuple[int, str]]:
         """
@@ -66,29 +72,48 @@ class PySATModelManager(SolverManager):
         
         Args:
             index: The index at which to add the item
-            content: The content to add
+            content: The content of the item
             
         Returns:
             A dictionary with the result of the operation
+            
+        Raises:
+            ModelValidationError: If the input is invalid
         """
-        # If index is -1, append to the end
-        if index == -1:
-            self.code_items.append((len(self.code_items), content))
-            logging.getLogger(__name__).info(f"Added item at index {len(self.code_items) - 1}")
-            return {"message": f"Added item at index {len(self.code_items) - 1}"}
-        
-        # Insert at specific index
-        for i, (idx, _) in enumerate(self.code_items):
-            if idx == index:
-                # Replace existing item
-                self.code_items[i] = (index, content)
-                logging.getLogger(__name__).info(f"Replaced item at index {index}")
-                return {"message": f"Replaced item at index {index}"}
-        
-        # If index doesn't exist, append with the specified index
-        self.code_items.append((index, content))
-        logging.getLogger(__name__).info(f"Added item at index {index}")
-        return {"message": f"Added item at index {index}"}
+        try:
+            # Validate inputs
+            validate_index(index, self.code_items)
+            validate_content(content)
+            
+            # Check if an item with the same index already exists
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    # Replace existing item
+                    self.code_items[i] = (index, content)
+                    self.logger.info(f"Replaced item at index {index}")
+                    return {"message": f"Replaced item at index {index}", "success": True}
+            
+            # Add new item
+            self.code_items.append((index, content))
+            self.logger.info(f"Added item at index {index}")
+            return {"message": f"Added item at index {index}", "success": True}
+            
+        except ModelValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in add_item: {error_msg}")
+            return {
+                "message": f"Failed to add item: {error_msg}",
+                "success": False,
+                "error": error_msg
+            }
+        except Exception as e:
+            error_msg = f"Unexpected error in add_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {
+                "message": "Failed to add item due to an internal error",
+                "success": False,
+                "error": error_msg
+            }
     
     async def delete_item(self, index: int) -> Dict[str, Any]:
         """
@@ -100,14 +125,35 @@ class PySATModelManager(SolverManager):
         Returns:
             A dictionary with the result of the operation
         """
-        for i, (idx, _) in enumerate(self.code_items):
-            if idx == index:
-                del self.code_items[i]
-                logging.getLogger(__name__).info(f"Deleted item at index {index}")
-                return {"message": f"Deleted item at index {index}"}
+        try:
+            # Basic index validation - only check if it's a valid integer
+            validate_index(index)
+            
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    del self.code_items[i]
+                    self.logger.info(f"Deleted item at index {index}")
+                    return {"message": f"Deleted item at index {index}", "success": True}
+            
+            self.logger.warning(f"Item at index {index} not found")
+            return {"message": f"Item at index {index} not found", "success": False}
         
-        logging.getLogger(__name__).warning(f"Item at index {index} not found")
-        return {"message": f"Item at index {index} not found"}
+        except ModelValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in delete_item: {error_msg}")
+            return {
+                "message": f"Failed to delete item: {error_msg}",
+                "success": False,
+                "error": error_msg
+            }
+        except Exception as e:
+            error_msg = f"Unexpected error in delete_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {
+                "message": "Failed to delete item due to an internal error",
+                "success": False,
+                "error": error_msg
+            }
     
     async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
         """
@@ -115,20 +161,44 @@ class PySATModelManager(SolverManager):
         
         Args:
             index: The index of the item to replace
-            content: The new content
+            content: The new content of the item
             
         Returns:
             A dictionary with the result of the operation
         """
-        for i, (idx, _) in enumerate(self.code_items):
-            if idx == index:
-                self.code_items[i] = (index, content)
-                logging.getLogger(__name__).info(f"Replaced item at index {index}")
-                return {"message": f"Replaced item at index {index}"}
-        
-        # If index doesn't exist, add it
-        logging.getLogger(__name__).warning(f"Item at index {index} not found, adding new item")
-        return await self.add_item(index, content)
+        try:
+            # Validate inputs
+            validate_index(index, self.code_items)
+            validate_content(content)
+            
+            # Check if the item exists
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    # Replace existing item
+                    self.code_items[i] = (index, content)
+                    self.logger.info(f"Replaced item at index {index}")
+                    return {"message": f"Replaced item at index {index}", "success": True}
+            
+            # Item not found, add as new
+            self.logger.warning(f"Item at index {index} not found, adding as new")
+            return await self.add_item(index, content)
+            
+        except ModelValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in replace_item: {error_msg}")
+            return {
+                "message": f"Failed to replace item: {error_msg}",
+                "success": False,
+                "error": error_msg
+            }
+        except Exception as e:
+            error_msg = f"Unexpected error in replace_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return {
+                "message": "Failed to replace item due to an internal error",
+                "success": False,
+                "error": error_msg
+            }
     
     async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
@@ -197,12 +267,12 @@ class PySATModelManager(SolverManager):
         sat_match = re.search(r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output)
         if sat_match:
             satisfiable = sat_match.group(1).lower() == "true"
-            logging.getLogger(__name__).debug(f"Found explicit satisfiability result: {satisfiable}")
+            self.logger.debug(f"Found explicit satisfiability result: {satisfiable}")
         else:
             # Also try to find a standard output message
             if "Is satisfiable: True" in output:
                 satisfiable = True
-                logging.getLogger(__name__).debug("Found 'Is satisfiable: True' in output")
+                self.logger.debug("Found 'Is satisfiable: True' in output")
         
         # Extract solution if available
         if self.last_result.get("solution"):
@@ -245,11 +315,11 @@ class PySATModelManager(SolverManager):
                             if isinstance(value, dict):
                                 # Copy custom dictionaries directly to last_solution
                                 self.last_solution[key] = value
-                                logging.getLogger(__name__).debug(f"Copied custom dictionary '{key}' to solution")
+                                self.logger.debug(f"Copied custom dictionary '{key}' to solution")
                                 
                         # Also populate values dictionary from individual value fields
                         if "values" in last_solution_data:
-                            logging.getLogger(__name__).debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
+                            self.logger.debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
                             # Convert JSON booleans back to Python booleans
                             for key, value in last_solution_data["values"].items():
                                 if value is True or value == "true":
@@ -259,9 +329,9 @@ class PySATModelManager(SolverManager):
                                 else:
                                     self.last_solution["values"][key] = value
                 except json.JSONDecodeError:
-                    logging.getLogger(__name__).warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
+                    self.logger.warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
             except Exception as e:
-                logging.getLogger(__name__).warning(f"Error extracting solution data: {e}")
+                self.logger.warning(f"Error extracting solution data: {e}")
         
         # Extract values from custom dictionaries if they exist
         # (this applies to any custom dictionary, not just actor-specific ones)
