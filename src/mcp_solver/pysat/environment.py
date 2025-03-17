@@ -93,6 +93,9 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
     Returns:
         Dictionary with execution results
     """
+    # Import here to avoid circular imports
+    from .solution import _LAST_SOLUTION, export_solution
+    
     result = {
         "success": False,
         "output": "",
@@ -100,6 +103,10 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
         "solution": None,
         "execution_time": 0,
     }
+    
+    # Reset _LAST_SOLUTION before execution
+    global _LAST_SOLUTION
+    _LAST_SOLUTION = None
     
     # Capture stdout and stderr
     stdout_buffer = io.StringIO()
@@ -235,9 +242,13 @@ def execute_pysat_code(code_string: str, timeout: float = 5.0) -> Dict[str, Any]
             # Execute the code in the restricted environment
             exec(cleaned_code, restricted_globals, restricted_globals)
             
-            # Check if a solution was exported - prioritize _LAST_SOLUTION over restricted_globals
-            if _LAST_SOLUTION is not None:
-                result["solution"] = _LAST_SOLUTION
+            # Store the current solution value for use after the redirects are closed
+            from .solution import _LAST_SOLUTION as current_solution
+            current_solution_value = current_solution
+            
+            # Check if a solution was exported
+            if current_solution_value is not None:
+                result["solution"] = current_solution_value
             elif 'solution' in restricted_globals:
                 result["solution"] = restricted_globals['solution']
             

@@ -254,20 +254,23 @@ class PySATModelManager(SolverManager):
             
             # Modify the code to ensure it prints the satisfiability result
             # We'll add a simple print statement that we can parse later
-            # Look for direct conditional pattern (if solver.solve():) and add appropriate debug print
             modified_code = ""
             
             # Track if we've already found and handled a solve() call
             found_solve_call = False
             
             for line in code_string.split("\n"):
-                modified_code += line + "\n"
-                
                 # Direct conditional pattern - if solver.solve():
                 if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
-                    # Add debug print inside the conditional branch
-                    modified_code += f"    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
+                    # Add the line as is
+                    modified_code += line + "\n"
+                    # Add debug print with proper indentation
+                    indent = re.match(r'^(\s*)', line).group(1)
+                    modified_code += f"{indent}    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
                     found_solve_call = True
+                else:
+                    # Just copy the line as is
+                    modified_code += line + "\n"
             
             # Set timeout
             timeout_seconds = timeout.total_seconds()
@@ -287,7 +290,7 @@ class PySATModelManager(SolverManager):
                 satisfiable = sat_match.group(1).lower() == "true"
                 self.logger.debug(f"Found explicit satisfiability result: {satisfiable}")
             else:
-                # Also try to find a standard output message
+                # Also try to find standard output messages
                 if "Is satisfiable: True" in output:
                     satisfiable = True
                     self.logger.debug("Found 'Is satisfiable: True' in output")
@@ -296,11 +299,10 @@ class PySATModelManager(SolverManager):
             if self.last_result.get("solution"):
                 self.last_solution = self.last_result["solution"]
                 
-                # Check if the solution contains satisfiability info
-                if "satisfiable" in self.last_solution:
-                    # Use our parsed result if available, otherwise use solution's value
-                    if sat_match:
-                        self.last_solution["satisfiable"] = satisfiable
+                # Use our parsed satisfiability result to override the solution
+                # This ensures consistency between satisfiable flag and status
+                if sat_match or "Is satisfiable: True" in output:
+                    self.last_solution["satisfiable"] = satisfiable
             else:
                 # Create a minimal solution with just the satisfiability flag
                 self.last_solution = {
@@ -362,17 +364,25 @@ class PySATModelManager(SolverManager):
             # Determine success/failure message
             if self.last_result.get("success", False):
                 message = "Model solved successfully"
-                status = self.last_solution.get("status", "unknown")
+                # Ensure consistency between satisfiable flag and status
                 if satisfiable:
                     message += " (satisfiable)"
                     # Ensure status is consistent with satisfiability
                     self.last_solution["status"] = "sat"
+                    self.last_solution["satisfiable"] = True
                 elif satisfiable is False:  # Explicitly False, not just falsy
                     message += " (unsatisfiable)"
                     # Ensure status is consistent with satisfiability
                     self.last_solution["status"] = "unsat"
+                    self.last_solution["satisfiable"] = False
                 else:
+                    status = self.last_solution.get("status", "unknown")
                     message += f" (status: {status})"
+                    # Make sure satisfiable matches status
+                    if status == "sat":
+                        self.last_solution["satisfiable"] = True
+                    elif status == "unsat":
+                        self.last_solution["satisfiable"] = False
             else:
                 message = "Failed to solve model"
                 if self.last_result.get("error"):

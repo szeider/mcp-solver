@@ -41,7 +41,7 @@ formula.append([-2, -3])     # Clause 3: NOT b OR NOT c
 solver = Glucose3()
 solver.append_formula(formula)
 
-# Solve the formula - IMPORTANT: Use direct conditional check
+# Solve the formula
 if solver.solve():
     model = solver.get_model()
     
@@ -78,14 +78,14 @@ solver.delete()
 
 When working with PySAT solvers:
 
-1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` rather than assigning the result to a variable
+1. **IMPORTANT:** Always use the direct conditional check pattern with `if solver.solve():` 
 2. The solver returns `True` if satisfiable and `False` if unsatisfiable
-3. Only process the model/solution when the solver returns `True`
+3. Only process the model/solution within the conditional branch when the solver returns `True`
 4. Always call `solver.delete()` to free memory when using direct PySAT solvers
 
 ```python
 # Correct pattern
-if solver.solve():  # Direct conditional check
+if solver.solve(): 
     model = solver.get_model()
     # Process solution
     export_solution({
