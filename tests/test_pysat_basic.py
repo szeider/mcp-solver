@@ -181,7 +181,7 @@ def test_model_manager():
         await manager.clear_model()
         
         # Add items
-        await manager.add_item(0, """
+        await manager.add_item(1, """
 # Import PySAT components
 from pysat.formula import CNF
 from pysat.solvers import Cadical153
@@ -190,14 +190,14 @@ from pysat.solvers import Cadical153
 formula = CNF()
 """)
         
-        await manager.add_item(1, """
+        await manager.add_item(2, """
 # Add clauses: (a OR b) AND (NOT a OR c) AND (NOT b OR NOT c)
 formula.append([1, 2])       # Clause 1: a OR b
 formula.append([-1, 3])      # Clause 2: NOT a OR c
 formula.append([-2, -3])     # Clause 3: NOT b OR NOT c
 """)
         
-        await manager.add_item(2, """
+        await manager.add_item(3, """
 # Create solver and add the formula
 solver = Cadical153()
 solver.append_formula(formula)
@@ -224,8 +224,9 @@ solver.delete()
         model_items = manager.get_model()
         print(f"Model has {len(model_items)} items")
         
-        # Solve model
-        solve_result = await manager.solve_model()
+        # Solve model with timeout
+        from datetime import timedelta
+        solve_result = await manager.solve_model(timeout=timedelta(seconds=5))
         print(f"Solve result: {solve_result}")
         
         # Get solution
@@ -241,18 +242,18 @@ solver.delete()
         print(f"Solve time: {solve_time}")
         
         # Test replace item
-        await manager.replace_item(1, """
+        await manager.replace_item(2, """
 # Add different clauses
 formula.append([1, 2])       # Clause 1: a OR b
 formula.append([-1, -2])     # Different clause
 """)
         
         # Solve again
-        solve_result = await manager.solve_model()
+        solve_result = await manager.solve_model(timeout=timedelta(seconds=5))
         print(f"Solve result after replacement: {solve_result}")
         
         # Delete item
-        await manager.delete_item(0)
+        await manager.delete_item(1)
         model_items = manager.get_model()
         print(f"Model has {len(model_items)} items after deletion")
         
@@ -261,8 +262,7 @@ formula.append([-1, -2])     # Different clause
     import asyncio
     success = asyncio.run(run_test())
     
-    print()
-    return success
+    assert success
 
 def run_all_tests():
     """Run all tests."""

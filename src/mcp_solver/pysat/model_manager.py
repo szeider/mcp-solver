@@ -16,7 +16,7 @@ from ..base_manager import SolverManager
 from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_pysat_code
 from .error_handling import PySATError, format_solution_error
-from .validation import validate_index, validate_content, ModelValidationError
+from ..validation import validate_index, validate_content, validate_python_code_safety, ValidationError, get_standardized_response, validate_timeout
 
 # Validation constants are now imported from validation module
 
@@ -78,12 +78,13 @@ class PySATModelManager(SolverManager):
             A dictionary with the result of the operation
             
         Raises:
-            ModelValidationError: If the input is invalid
+            ValidationError: If the input is invalid
         """
         try:
             # Validate inputs
-            validate_index(index, self.code_items)
+            validate_index(index, self.code_items, one_based=True)
             validate_content(content)
+            validate_python_code_safety(content)
             
             # Check if an item with the same index already exists
             for i, (idx, _) in enumerate(self.code_items):
@@ -91,29 +92,35 @@ class PySATModelManager(SolverManager):
                     # Replace existing item
                     self.code_items[i] = (index, content)
                     self.logger.info(f"Replaced item at index {index}")
-                    return {"message": f"Replaced item at index {index}", "success": True}
+                    return get_standardized_response(
+                        success=True,
+                        message=f"Replaced item at index {index}"
+                    )
             
             # Add new item
             self.code_items.append((index, content))
             self.logger.info(f"Added item at index {index}")
-            return {"message": f"Added item at index {index}", "success": True}
+            return get_standardized_response(
+                success=True,
+                message=f"Added item at index {index}"
+            )
             
-        except ModelValidationError as e:
+        except ValidationError as e:
             error_msg = str(e)
             self.logger.error(f"Validation error in add_item: {error_msg}")
-            return {
-                "message": f"Failed to add item: {error_msg}",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to add item: {error_msg}",
+                error=error_msg
+            )
         except Exception as e:
             error_msg = f"Unexpected error in add_item: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            return {
-                "message": "Failed to add item due to an internal error",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message="Failed to add item due to an internal error",
+                error=error_msg
+            )
     
     async def delete_item(self, index: int) -> Dict[str, Any]:
         """
@@ -127,33 +134,40 @@ class PySATModelManager(SolverManager):
         """
         try:
             # Basic index validation - only check if it's a valid integer
-            validate_index(index)
+            validate_index(index, one_based=True)
             
             for i, (idx, _) in enumerate(self.code_items):
                 if idx == index:
                     del self.code_items[i]
                     self.logger.info(f"Deleted item at index {index}")
-                    return {"message": f"Deleted item at index {index}", "success": True}
+                    return get_standardized_response(
+                        success=True,
+                        message=f"Deleted item at index {index}"
+                    )
             
             self.logger.warning(f"Item at index {index} not found")
-            return {"message": f"Item at index {index} not found", "success": False}
+            return get_standardized_response(
+                success=False,
+                message=f"Item at index {index} not found",
+                error="Item not found"
+            )
         
-        except ModelValidationError as e:
+        except ValidationError as e:
             error_msg = str(e)
             self.logger.error(f"Validation error in delete_item: {error_msg}")
-            return {
-                "message": f"Failed to delete item: {error_msg}",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to delete item: {error_msg}",
+                error=error_msg
+            )
         except Exception as e:
             error_msg = f"Unexpected error in delete_item: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            return {
-                "message": "Failed to delete item due to an internal error",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message="Failed to delete item due to an internal error",
+                error=error_msg
+            )
     
     async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
         """
@@ -168,8 +182,9 @@ class PySATModelManager(SolverManager):
         """
         try:
             # Validate inputs
-            validate_index(index, self.code_items)
+            validate_index(index, self.code_items, one_based=True)
             validate_content(content)
+            validate_python_code_safety(content)
             
             # Check if the item exists
             for i, (idx, _) in enumerate(self.code_items):
@@ -177,28 +192,31 @@ class PySATModelManager(SolverManager):
                     # Replace existing item
                     self.code_items[i] = (index, content)
                     self.logger.info(f"Replaced item at index {index}")
-                    return {"message": f"Replaced item at index {index}", "success": True}
+                    return get_standardized_response(
+                        success=True,
+                        message=f"Replaced item at index {index}"
+                    )
             
             # Item not found, add as new
             self.logger.warning(f"Item at index {index} not found, adding as new")
             return await self.add_item(index, content)
             
-        except ModelValidationError as e:
+        except ValidationError as e:
             error_msg = str(e)
             self.logger.error(f"Validation error in replace_item: {error_msg}")
-            return {
-                "message": f"Failed to replace item: {error_msg}",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to replace item: {error_msg}",
+                error=error_msg
+            )
         except Exception as e:
             error_msg = f"Unexpected error in replace_item: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            return {
-                "message": "Failed to replace item due to an internal error",
-                "success": False,
-                "error": error_msg
-            }
+            return get_standardized_response(
+                success=False,
+                message="Failed to replace item due to an internal error",
+                error=error_msg
+            )
     
     async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
         """
@@ -210,180 +228,189 @@ class PySATModelManager(SolverManager):
         Returns:
             A dictionary with the solving result
         """
-        if not self.initialized:
-            return {"message": "Model manager not initialized", "success": False}
-        
-        if not self.code_items:
-            return {"message": "No model items to solve", "success": False}
-        
-        # Check timeout bounds
-        if timeout < MIN_SOLVE_TIMEOUT:
-            return {
-                "message": f"Timeout must be at least {MIN_SOLVE_TIMEOUT.total_seconds()} seconds",
-                "success": False
-            }
-        elif timeout > MAX_SOLVE_TIMEOUT:
-            return {
-                "message": f"Timeout must be at most {MAX_SOLVE_TIMEOUT.total_seconds()} seconds",
-                "success": False
-            }
-        
-        # Sort code items by index
-        sorted_items = sorted(self.code_items, key=lambda x: x[0])
-        
-        # Join code items into a single string
-        code_string = "\n".join(content for _, content in sorted_items)
-        
-        # Modify the code to ensure it prints the satisfiability result
-        # We'll add a simple print statement that we can parse later
-        # Look for direct conditional pattern (if solver.solve():) and add appropriate debug print
-        modified_code = ""
-        
-        # Track if we've already found and handled a solve() call
-        found_solve_call = False
-        
-        for line in code_string.split("\n"):
-            modified_code += line + "\n"
+        try:
+            if not self.initialized:
+                return get_standardized_response(
+                    success=False,
+                    message="Model manager not initialized",
+                    error="Not initialized"
+                )
             
-            # Direct conditional pattern - if solver.solve():
-            if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
-                # Add debug print inside the conditional branch
-                modified_code += f"    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
-                found_solve_call = True
-        
-        # Set timeout
-        timeout_seconds = timeout.total_seconds()
-        
-        # Execute code with timeout
-        start_time = time.time()
-        self.last_result = execute_pysat_code(modified_code, timeout=timeout_seconds)
-        self.last_solve_time = time.time() - start_time
-        
-        # Extract solver output to check for satisfiability
-        output = self.last_result.get("output", "")
-        satisfiable = False
-        
-        # Parse output for explicit satisfiability result
-        sat_match = re.search(r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output)
-        if sat_match:
-            satisfiable = sat_match.group(1).lower() == "true"
-            self.logger.debug(f"Found explicit satisfiability result: {satisfiable}")
-        else:
-            # Also try to find a standard output message
-            if "Is satisfiable: True" in output:
-                satisfiable = True
-                self.logger.debug("Found 'Is satisfiable: True' in output")
-        
-        # Extract solution if available
-        if self.last_result.get("solution"):
-            self.last_solution = self.last_result["solution"]
+            if not self.code_items:
+                return get_standardized_response(
+                    success=False,
+                    message="No model items to solve",
+                    error="Empty model"
+                )
             
-            # Check if the solution contains satisfiability info
-            if "satisfiable" in self.last_solution:
-                # Use our parsed result if available, otherwise use solution's value
-                if sat_match:
-                    self.last_solution["satisfiable"] = satisfiable
-        else:
-            # Create a minimal solution with just the satisfiability flag
-            self.last_solution = {
-                "satisfiable": satisfiable,
-                "status": "sat" if satisfiable else "unsat",
-                "values": {}
-            }
-        
-        # Ensure there's a 'values' dictionary for standardized access
-        if "values" not in self.last_solution:
-            self.last_solution["values"] = {}
+            # Validate timeout
+            validate_timeout(timeout, MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT)
             
-        # Extract solution data from the debug output if available
-        # Look for the _LAST_SOLUTION debug output which contains the complete solution data
-        last_solution_pattern = re.compile(r"DEBUG - _LAST_SOLUTION set to: (.*)")
-        last_solution_match = last_solution_pattern.search(output)
-        if last_solution_match:
-            try:
-                last_solution_str = last_solution_match.group(1)
-                # Clean up the string to make it valid Python syntax
-                last_solution_str = last_solution_str.replace("'", '"').replace("True", "true").replace("False", "false")
-                # Try to parse as JSON
-                import json
-                try:
-                    last_solution_data = json.loads(last_solution_str)
-                    if isinstance(last_solution_data, dict):
-                        # Copy all dictionaries from last_solution_data to self.last_solution
-                        # to preserve custom dictionaries like 'casting', 'schedule', etc.
-                        for key, value in last_solution_data.items():
-                            if isinstance(value, dict):
-                                # Copy custom dictionaries directly to last_solution
-                                self.last_solution[key] = value
-                                self.logger.debug(f"Copied custom dictionary '{key}' to solution")
-                                
-                        # Also populate values dictionary from individual value fields
-                        if "values" in last_solution_data:
-                            self.logger.debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
-                            # Convert JSON booleans back to Python booleans
-                            for key, value in last_solution_data["values"].items():
-                                if value is True or value == "true":
-                                    self.last_solution["values"][key] = True
-                                elif value is False or value == "false":
-                                    self.last_solution["values"][key] = False
-                                else:
-                                    self.last_solution["values"][key] = value
-                except json.JSONDecodeError:
-                    self.logger.warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
-            except Exception as e:
-                self.logger.warning(f"Error extracting solution data: {e}")
-        
-        # Extract values from custom dictionaries if they exist
-        # (this applies to any custom dictionary, not just actor-specific ones)
-        potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
-        for key in potential_value_keys:
-            if key in self.last_solution and isinstance(self.last_solution[key], dict):
-                for var_name, var_value in self.last_solution[key].items():
-                    self.last_solution["values"][var_name] = var_value
-        
-        # Determine success/failure message
-        if self.last_result.get("success", False):
-            message = "Model solved successfully"
-            status = self.last_solution.get("status", "unknown")
-            if satisfiable:
-                message += " (satisfiable)"
-                # Ensure status is consistent with satisfiability
-                self.last_solution["status"] = "sat"
-            elif satisfiable is False:  # Explicitly False, not just falsy
-                message += " (unsatisfiable)"
-                # Ensure status is consistent with satisfiability
-                self.last_solution["status"] = "unsat"
+            # Sort code items by index
+            sorted_items = sorted(self.code_items, key=lambda x: x[0])
+            
+            # Join code items into a single string
+            code_string = "\n".join(content for _, content in sorted_items)
+            
+            # Modify the code to ensure it prints the satisfiability result
+            # We'll add a simple print statement that we can parse later
+            # Look for direct conditional pattern (if solver.solve():) and add appropriate debug print
+            modified_code = ""
+            
+            # Track if we've already found and handled a solve() call
+            found_solve_call = False
+            
+            for line in code_string.split("\n"):
+                modified_code += line + "\n"
+                
+                # Direct conditional pattern - if solver.solve():
+                if re.search(r'if\s+\w+\.solve\(\)', line) and not found_solve_call:
+                    # Add debug print inside the conditional branch
+                    modified_code += f"    print(f\"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True\")\n"
+                    found_solve_call = True
+            
+            # Set timeout
+            timeout_seconds = timeout.total_seconds()
+            
+            # Execute code with timeout
+            start_time = time.time()
+            self.last_result = execute_pysat_code(modified_code, timeout=timeout_seconds)
+            self.last_solve_time = time.time() - start_time
+            
+            # Extract solver output to check for satisfiability
+            output = self.last_result.get("output", "")
+            satisfiable = False
+            
+            # Parse output for explicit satisfiability result
+            sat_match = re.search(r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output)
+            if sat_match:
+                satisfiable = sat_match.group(1).lower() == "true"
+                self.logger.debug(f"Found explicit satisfiability result: {satisfiable}")
             else:
-                message += f" (status: {status})"
-        else:
-            message = "Failed to solve model"
-            if self.last_result.get("error"):
-                message += f": {self.last_result['error']}"
-        
-        # Build result dictionary
-        result = {
-            "message": message,
-            "success": self.last_result.get("success", False),
-            "solve_time": f"{self.last_solve_time:.6f} seconds",
-            "output": output,
-            "satisfiable": satisfiable  # Always include the satisfiability flag
-        }
-        
-        # Add solution information if available
-        if self.last_solution:
-            # Include status from solution
-            if "status" in self.last_solution:
-                result["status"] = self.last_solution["status"]
+                # Also try to find a standard output message
+                if "Is satisfiable: True" in output:
+                    satisfiable = True
+                    self.logger.debug("Found 'Is satisfiable: True' in output")
             
-            # Include values from solution - direct copy from last_solution to result
-            if "values" in self.last_solution:
-                # Add to result directly
-                result["values"] = self.last_solution["values"]
-                logging.getLogger(__name__).debug(f"Copied values to result: {result['values']}")
+            # Extract solution if available
+            if self.last_result.get("solution"):
+                self.last_solution = self.last_result["solution"]
+                
+                # Check if the solution contains satisfiability info
+                if "satisfiable" in self.last_solution:
+                    # Use our parsed result if available, otherwise use solution's value
+                    if sat_match:
+                        self.last_solution["satisfiable"] = satisfiable
+            else:
+                # Create a minimal solution with just the satisfiability flag
+                self.last_solution = {
+                    "satisfiable": satisfiable,
+                    "status": "sat" if satisfiable else "unsat",
+                    "values": {}
+                }
+            
+            # Ensure there's a 'values' dictionary for standardized access
+            if "values" not in self.last_solution:
+                self.last_solution["values"] = {}
+                
+            # Extract solution data from the debug output if available
+            # Look for the _LAST_SOLUTION debug output which contains the complete solution data
+            last_solution_pattern = re.compile(r"DEBUG - _LAST_SOLUTION set to: (.*)")
+            last_solution_match = last_solution_pattern.search(output)
+            if last_solution_match:
+                try:
+                    last_solution_str = last_solution_match.group(1)
+                    # Clean up the string to make it valid Python syntax
+                    last_solution_str = last_solution_str.replace("'", '"').replace("True", "true").replace("False", "false")
+                    # Try to parse as JSON
+                    import json
+                    try:
+                        last_solution_data = json.loads(last_solution_str)
+                        if isinstance(last_solution_data, dict):
+                            # Copy all dictionaries from last_solution_data to self.last_solution
+                            # to preserve custom dictionaries like 'casting', 'schedule', etc.
+                            for key, value in last_solution_data.items():
+                                if isinstance(value, dict):
+                                    # Copy custom dictionaries directly to last_solution
+                                    self.last_solution[key] = value
+                                    self.logger.debug(f"Copied custom dictionary '{key}' to solution")
+                                    
+                            # Also populate values dictionary from individual value fields
+                            if "values" in last_solution_data:
+                                self.logger.debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
+                                # Convert JSON booleans back to Python booleans
+                                for key, value in last_solution_data["values"].items():
+                                    if value is True or value == "true":
+                                        self.last_solution["values"][key] = True
+                                    elif value is False or value == "false":
+                                        self.last_solution["values"][key] = False
+                                    else:
+                                        self.last_solution["values"][key] = value
+                    except json.JSONDecodeError:
+                        self.logger.warning(f"Failed to parse _LAST_SOLUTION as JSON: {last_solution_str}")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting solution data: {e}")
+            
+            # Extract values from custom dictionaries if they exist
+            # (this applies to any custom dictionary, not just actor-specific ones)
+            potential_value_keys = ['assignment', 'casting', 'schedule', 'variables', 'results']
+            for key in potential_value_keys:
+                if key in self.last_solution and isinstance(self.last_solution[key], dict):
+                    for var_name, var_value in self.last_solution[key].items():
+                        self.last_solution["values"][var_name] = var_value
+            
+            # Determine success/failure message
+            if self.last_result.get("success", False):
+                message = "Model solved successfully"
+                status = self.last_solution.get("status", "unknown")
+                if satisfiable:
+                    message += " (satisfiable)"
+                    # Ensure status is consistent with satisfiability
+                    self.last_solution["status"] = "sat"
+                elif satisfiable is False:  # Explicitly False, not just falsy
+                    message += " (unsatisfiable)"
+                    # Ensure status is consistent with satisfiability
+                    self.last_solution["status"] = "unsat"
+                else:
+                    message += f" (status: {status})"
+            else:
+                message = "Failed to solve model"
+                if self.last_result.get("error"):
+                    message += f": {self.last_result['error']}"
+            
+            # Build result dictionary
+            result = {
+                "message": message,
+                "success": self.last_result.get("success", False),
+                "solve_time": f"{self.last_solve_time:.6f} seconds",
+                "output": output,
+                "satisfiable": satisfiable  # Always include the satisfiability flag
+            }
+            
+            # Add solution information if available
+            if self.last_solution:
+                # Include status from solution
+                if "status" in self.last_solution:
+                    result["status"] = self.last_solution["status"]
+                
+                # Include values from solution - direct copy from last_solution to result
+                if "values" in self.last_solution:
+                    # Add to result directly
+                    result["values"] = self.last_solution["values"]
+                    logging.getLogger(__name__).debug(f"Copied values to result: {result['values']}")
+            
+            logging.getLogger(__name__).info(f"Model solved: {result['success']}, satisfiable: {satisfiable}")
+            
+            return result
         
-        logging.getLogger(__name__).info(f"Model solved: {result['success']}, satisfiable: {satisfiable}")
-        
-        return result
+        except Exception as e:
+            error_msg = f"Unexpected error in solve_model: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return get_standardized_response(
+                success=False,
+                message="Failed to solve model due to an internal error",
+                error=error_msg
+            )
     
     def get_solution(self) -> Dict[str, Any]:
         """

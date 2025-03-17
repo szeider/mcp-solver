@@ -1,21 +1,49 @@
 """
-PySAT integration for MCP Solver.
+PySAT solver package for MCP (Model Context Protocol).
 
-This package provides integration with the PySAT library for SAT solving
-capabilities within the MCP Solver framework.
+This package provides a PySAT backend for constraint solving via MCP.
 """
 
-from .constraints import (
-    at_most_k, at_least_k, exactly_k,
-    at_most_one, exactly_one,
-    implies, mutually_exclusive, if_then_else
+__version__ = "2.3.0"
+
+from .model_manager import PySATModelManager
+from .solution import export_solution
+
+# Export error handling utilities for easier access
+from .error_handling import (
+    PySATError,
+    pysat_error_handler,
+    validate_variables,
+    validate_formula,
+    format_solution_error
 )
 
-# MaxSAT functionality removed
+# Include common cardinality constraints from templates
+from .templates.cardinality_templates import (
+    at_most_k, 
+    at_least_k, 
+    exactly_k
+)
+
+# Include additional constraints from constraints.py
+from .constraints import (
+    at_most_one,
+    exactly_one
+)
 
 __all__ = [
-    "at_most_k", "at_least_k", "exactly_k",
-    "at_most_one", "exactly_one",
-    "implies", "mutually_exclusive", "if_then_else"
-    # MaxSAT functionality removed
+    "PySATModelManager",
+    "export_solution",
+    # Error handling
+    "PySATError",
+    "pysat_error_handler",
+    "validate_variables",
+    "validate_formula",
+    "format_solution_error",
+    # Constraints
+    "at_most_k", 
+    "at_least_k", 
+    "exactly_k", 
+    "at_most_one", 
+    "exactly_one"
 ] 
