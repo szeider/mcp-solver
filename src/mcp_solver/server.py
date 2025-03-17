@@ -133,7 +133,7 @@ async def serve() -> None:
                 ),
                 types.Tool(
                     name="get_model", 
-                    description="Fetch the current content of the minizinc model, listing each item with its index.",
+                    description="Fetch the current content of the minizinc model, listing each item with its index. To save bandwidth, only the first few characters of each item is shown.",
                     inputSchema={"type": "object", "properties": {}}
                 ),
                 types.Tool(

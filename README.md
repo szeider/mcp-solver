@@ -59,6 +59,8 @@ Model modification has transitioned in this version from a line-based to an item
 
 ---
 
+
+
 ## Installation
 
 1. Install an MCP-compatible client (e.g., Claude web interface or desktop app)
@@ -73,16 +75,12 @@ Model modification has transitioned in this version from a line-based to an item
 
 3. Create the configuration file:
 
-   For macOS/Linux:
+   ### For macOS/Linux:
+
+   Create the configuration file at:
 
    ```bash
    ~/Library/Application/Support/Claude/claude_desktop_config.json
-   ```
-
-   For Windows:
-
-   ```bash
-   %APPDATA%\Claude\claude_desktop_config.json
    ```
 
    Add the following content:
@@ -103,22 +101,36 @@ Model modification has transitioned in this version from a line-based to an item
    }
    ```
 
-   Note: For Windows, use backslashes and escape them:
+   ### For Windows:
+
+   Create the configuration file at:
+
+   ```
+   %APPDATA%\Claude\claude_desktop_config.json
+   ```
+
+   Add the following content:
 
    ```json
-   "args": ["--directory", "C:\\absolute\\path\\to\\mcp-solver", "run", "mcp-solver"]
+   {
+     "mcpServers": {
+       "MCP Solver": {
+         "command": "cmd.exe",
+         "args": [
+           "/C",
+           "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver"
+         ]
+       }
+     }
+   }
    ```
 
 4. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
 
 5. The setup can be tested with:
- ```json
+   ```bash
    uv run test-setup
- ```
-
-------
-
-Below is a proposed new section for your README that describes the Lite Mode. This section highlights the differences, lists the reduced toolset, and shows how to configure the solver to run in Lite Mode using the `--lite` flag.
+   ```
 
 ---
 
@@ -137,12 +149,12 @@ In this mode:
 - **solve_model** returns the status of the solution—if the model is satisfiable (`SAT`), it also returns the solution; otherwise, only the status (`UNSAT` or `TIMEOUT`) is provided.
 - The instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`.
 
-To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows:
+To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows (similar for Windows):
 
 ```json
 {
   "mcpServers": {
-    "minizinc": {
+    "MCP Solver": {
       "command": "uv",
       "args": [
         "--directory",
