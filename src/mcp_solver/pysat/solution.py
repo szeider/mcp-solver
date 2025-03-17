@@ -7,8 +7,9 @@ and converting it to a standardized format.
 
 import sys
 import os
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Any, Optional, Union, List, TypeVar, cast
 import logging
+import traceback
 
 # IMPORTANT: Properly import the PySAT library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -35,58 +36,143 @@ except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
+# Import our error handling utilities
+from .error_handling import PySATError, validate_variables
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
 # Track the last solution - make it global and accessible
 _LAST_SOLUTION = None
 
-def export_solution(solver=None, variables=None, objective=None) -> Dict[str, Any]:
+# Reserved keys that shouldn't be processed as custom dictionaries
+RESERVED_KEYS = {"satisfiable", "model", "values", "status", "objective", 
+                 "error_type", "error_message", "warnings"}
+
+class SolutionError(Exception):
     """
-    Extract and format solutions from a PySAT solver.
+    Custom exception for solution processing errors.
     
-    This function collects and standardizes solution data from PySAT solvers.
-    It should be called at the end of PySAT code to export the solution.
-    All values in custom dictionaries are automatically extracted and made 
-    available in the "values" dictionary.
+    This exception is used when errors occur during solution processing
+    that should be captured and returned as a structured error solution.
+    """
+    pass
+
+def export_solution(data: Union[Dict[str, Any], Solver, None] = None, 
+                   variables: Optional[Dict[str, int]] = None,
+                   objective: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Extract and format solutions from a PySAT solver or solution data.
+    
+    This function processes PySAT solution data and creates a standardized
+    output format. It supports both direct dictionary input and PySAT Solver
+    objects. All values in custom dictionaries are automatically extracted 
+    and made available in the flat "values" dictionary.
     
     Args:
-        solver: PySAT Solver object or dictionary containing solution data
-        variables: Dictionary mapping variable names to their values or IDs
+        data: PySAT Solver object or dictionary containing solution data
+        variables: Dictionary mapping variable names to their variable IDs
         objective: Optional objective value for optimization problems
         
     Returns:
-        Dictionary with solution data
+        Dictionary with structured solution data, including:
+        - satisfiable: Boolean indicating satisfiability
+        - status: String status ("sat", "unsat", or "error")
+        - values: Flattened dictionary of all values from custom dictionaries
+        - model: List of true variable IDs (if satisfiable)
+        - Other custom dictionaries provided in the input
+        
+    If an error occurs, the returned dictionary will include:
+        - satisfiable: False
+        - error_type: Type of the error
+        - error_message: Detailed error message
+        - status: "error"
     """
     global _LAST_SOLUTION
     
+    try:
+        solution_data = _process_input_data(data, variables, objective)
+        solution_data = _extract_values_from_dictionaries(solution_data)
+        
+        # Log the solution data
+        logger.debug(f"Setting _LAST_SOLUTION: {solution_data}")
+        print(f"DEBUG - _LAST_SOLUTION set to: {solution_data}")
+        
+        # Store the solution and return it
+        _LAST_SOLUTION = solution_data
+        return solution_data
+        
+    except Exception as e:
+        # Create an error solution with structured error information
+        error_solution = _create_error_solution(e)
+        
+        # Store and return the error solution
+        _LAST_SOLUTION = error_solution
+        logger.error(f"Error in export_solution: {str(e)}", exc_info=True)
+        print(f"DEBUG - _LAST_SOLUTION set to error: {error_solution}")
+        
+        return error_solution
+
+def _process_input_data(data: Union[Dict[str, Any], Solver, None],
+                       variables: Optional[Dict[str, int]] = None,
+                       objective: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Process input data from various sources into a standardized solution dictionary.
+    
+    Args:
+        data: PySAT Solver object or dictionary containing solution data
+        variables: Dictionary mapping variable names to their variable IDs
+        objective: Optional objective value for optimization problems
+        
+    Returns:
+        Standardized solution dictionary
+        
+    Raises:
+        SolutionError: If the input data cannot be processed
+    """
     # Initialize solution data
-    solution_data = {}
+    solution_data: Dict[str, Any] = {}
     
     # Case 1: Direct dictionary data
-    if isinstance(solver, dict):
-        solution_data = solver.copy()
+    if isinstance(data, dict):
+        solution_data = data.copy()
         
     # Case 2: PySAT Solver object
-    elif hasattr(solver, 'get_model') and callable(getattr(solver, 'get_model')):
-        # Get the model directly - solver.solve() should have been called in a direct conditional
-        model = solver.get_model()
+    elif data is not None and hasattr(data, 'get_model') and callable(getattr(data, 'get_model')):
+        # Extract model from solver (solver.solve() should have already been called)
+        model = data.get_model()
+        
         if model is not None:
-            # Solver has already been run and is satisfiable
+            # Solver has a satisfiable solution
             solution_data["satisfiable"] = True
             solution_data["model"] = model
+            
+            # Extract variable assignments if variables dictionary is provided
+            if variables:
+                # Validate variables dictionary
+                errors = validate_variables(variables)
+                if errors:
+                    error_msg = "; ".join(errors)
+                    raise SolutionError(f"Invalid variables dictionary: {error_msg}")
+                
+                # Map variable names to their truth values based on the model
+                solution_data["assignment"] = {
+                    name: (var_id in model) if var_id > 0 else ((-var_id) not in model)
+                    for name, var_id in variables.items()
+                }
         else:
-            # If no model, it's likely unsatisfiable
+            # No model means unsatisfiable
             solution_data["satisfiable"] = False
-        
-        # Extract variable assignments if variables dictionary is provided
-        if solution_data.get("satisfiable", False) and variables and "model" in solution_data:
-            solution_data["assignment"] = {
-                name: (var_id in solution_data["model"]) if var_id > 0 else ((-var_id) not in solution_data["model"])
-                for name, var_id in variables.items()
-            }
     
-    # Ensure the satisfiable flag matches the actual model status
-    if "model" in solution_data and solution_data.get("model") is not None:
-        solution_data["satisfiable"] = True
-    elif "model" in solution_data and solution_data.get("model") is None:
+    # Case 3: None or unknown type
+    elif data is None:
+        # Default to empty unsatisfiable solution
+        solution_data["satisfiable"] = False
+    else:
+        raise SolutionError(f"Unsupported data type: {type(data).__name__}")
+    
+    # Ensure the satisfiable flag is set
+    if "satisfiable" not in solution_data:
         solution_data["satisfiable"] = False
     
     # Set the status field to match satisfiability
@@ -96,51 +182,89 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
     if objective is not None:
         solution_data["objective"] = objective
     
-    # Remove any existing values dictionary as we'll create a fresh one
-    if "values" in solution_data:
-        del solution_data["values"]
+    # Ensure values dictionary exists (may be populated later)
+    solution_data["values"] = solution_data.get("values", {})
+    
+    return solution_data
+
+def _extract_values_from_dictionaries(solution_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract values from custom dictionaries into a flat values dictionary.
+    
+    Args:
+        solution_data: The solution dictionary to process
+        
+    Returns:
+        The processed solution dictionary with extracted values
+    """
+    # Skip extraction for unsatisfiable solutions that don't need values
+    if not solution_data.get("satisfiable", False):
+        # Ensure values dictionary exists even for unsatisfiable solutions
+        solution_data["values"] = solution_data.get("values", {})
+        return solution_data
     
     # Create a new values dictionary
-    solution_data["values"] = {}
-    
-    # Define reserved keys that shouldn't be processed as custom dictionaries
-    reserved_keys = {"satisfiable", "model", "values", "status", "objective"}
+    values: Dict[str, Any] = {}
     
     # First pass: collect all keys to detect potential collisions
-    all_keys = set()
-    for key, value in solution_data.items():
-        if key not in reserved_keys and isinstance(value, dict):
-            all_keys.update(value.keys())
+    key_counts: Dict[str, int] = {}
     
-    # Count occurrences of each key to identify collisions
-    key_counts = {}
     for key, value in solution_data.items():
-        if key not in reserved_keys and isinstance(value, dict):
+        if key not in RESERVED_KEYS and isinstance(value, dict):
             for subkey in value.keys():
                 key_counts[subkey] = key_counts.get(subkey, 0) + 1
     
     # Second pass: extract values and handle collisions
     for key, value in solution_data.items():
-        if key not in reserved_keys and isinstance(value, dict):
+        if key not in RESERVED_KEYS and isinstance(value, dict):
             for subkey, subvalue in value.items():
                 # Only extract leaf nodes (not nested dictionaries)
                 if not isinstance(subvalue, dict):
                     if key_counts[subkey] > 1:
                         # This is a collision - prefix with parent dictionary name
-                        solution_data["values"][f"{key}.{subkey}"] = subvalue
+                        values[f"{key}.{subkey}"] = subvalue
                     else:
                         # No collision - use the key directly
-                        solution_data["values"][subkey] = subvalue
+                        values[subkey] = subvalue
     
-    # Add debug marker that can be used by the model manager to extract data
-    # This is helpful because sometimes the _LAST_SOLUTION variable isn't shared properly
-    # between modules
-    logging.getLogger(__name__).debug(f"Setting _LAST_SOLUTION: {solution_data}")
-    print(f"DEBUG - _LAST_SOLUTION set to: {solution_data}")
+    # Update the values dictionary in the solution
+    solution_data["values"] = values
     
-    # Store the solution for debugging/inspection and make it available
-    # to other modules
-    _LAST_SOLUTION = solution_data
+    return solution_data
+
+def _create_error_solution(error: Exception) -> Dict[str, Any]:
+    """
+    Create a standardized error solution dictionary from an exception.
     
-    # Return the solution dictionary to make it accessible to the caller
-    return solution_data 
+    Args:
+        error: The exception that occurred
+        
+    Returns:
+        A solution dictionary with error information
+    """
+    # If it's already a structured PySAT error, use its context
+    if isinstance(error, PySATError):
+        error_context = getattr(error, "context", {})
+        error_solution = {
+            "satisfiable": False,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "status": "error",
+            "values": {}
+        }
+        
+        # Add context if available
+        if error_context:
+            error_solution["error_context"] = error_context
+            
+    else:
+        # For standard exceptions, create a basic error solution
+        error_solution = {
+            "satisfiable": False,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "status": "error",
+            "values": {}
+        }
+    
+    return error_solution 
