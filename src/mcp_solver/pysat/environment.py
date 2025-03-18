@@ -90,6 +90,20 @@ def time_limit(seconds: float):
         # Reset signal handler
         signal.setitimer(signal.ITIMER_REAL, 0)
 
+def safe_import(name, *args, **kwargs):
+    """A restricted version of __import__ that only allows importing safe modules."""
+    ALLOWED_MODULES = {
+        # Standard modules
+        'math', 'random', 'collections', 'itertools', 're', 'json',
+        
+        # PySAT modules
+        'pysat', 'pysat.formula', 'pysat.solvers', 'pysat.card', 
+        'pysat.examples', 'pysat.examples.rc2', 'pysat.pb', 'pysat.engines'
+    }
+    if name not in ALLOWED_MODULES:
+        raise ImportError(f"Module '{name}' is not allowed in the restricted environment")
+    return __import__(name, *args, **kwargs)
+
 def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
     """
     Executes PySAT Python code in a secure environment.
@@ -155,7 +169,83 @@ import random
 from pysat.formula import CNF, WCNF
 from pysat.solvers import Glucose3, Cadical153
 from pysat.card import CardEnc, EncType
-from pysat.solution import export_solution
+
+# Constraint helper functions
+def at_most_one(variables):
+    \"\"\"Returns clauses ensuring at most one variable is true\"\"\"
+    clauses = []
+    for i in range(len(variables)):
+        for j in range(i + 1, len(variables)):
+            clauses.append([-variables[i], -variables[j]])
+    return clauses
+
+def exactly_one(variables):
+    \"\"\"Returns clauses ensuring exactly one variable is true\"\"\"
+    clauses = []
+    # At least one is true
+    clauses.append(list(variables))
+    # At most one is true
+    for i in range(len(variables)):
+        for j in range(i + 1, len(variables)):
+            clauses.append([-variables[i], -variables[j]])
+    return clauses
+
+def implies(a, b):
+    \"\"\"Returns a clause representing a -> b (if a then b)\"\"\"
+    return [[-a, b]]
+
+def mutually_exclusive(variables):
+    \"\"\"Returns clauses ensuring variables are mutually exclusive\"\"\"
+    return at_most_one(variables)
+
+def if_then_else(condition, then_var, else_var):
+    \"\"\"Returns clauses for if-then-else construct\"\"\"
+    return [[-condition, then_var], [condition, else_var]]
+
+# Cardinality template functions
+def at_most_k(variables, k):
+    \"\"\"Returns clauses ensuring at most k variables are true\"\"\"
+    clauses = []
+    if k < 0:
+        # Trivially unsatisfiable
+        clauses.append([])  # Empty clause means contradiction
+    elif k == 0:
+        # All variables must be false
+        for var in variables:
+            clauses.append([-var])
+    elif k >= len(variables):
+        # Trivially satisfiable
+        pass
+    else:
+        # For each combination of k+1 variables, at least one must be false
+        from itertools import combinations
+        for combo in combinations(variables, k + 1):
+            clauses.append([-var for var in combo])
+    return clauses
+
+def at_least_k(variables, k):
+    \"\"\"Returns clauses ensuring at least k variables are true\"\"\"
+    clauses = []
+    if k <= 0:
+        # Trivially satisfiable
+        pass
+    elif k > len(variables):
+        # Trivially unsatisfiable
+        clauses.append([])  # Empty clause means contradiction
+    else:
+        # For each combination of n-k+1 variables, at least one must be true
+        from itertools import combinations
+        n = len(variables)
+        negated_vars = [-var for var in variables]
+        for combo in combinations(negated_vars, n - k + 1):
+            clauses.append([-var for var in combo])
+    return clauses
+
+def exactly_k(variables, k):
+    \"\"\"Returns clauses ensuring exactly k variables are true\"\"\"
+    at_most = at_most_k(variables, k)
+    at_least = at_least_k(variables, k)
+    return at_most + at_least
 
 """ + '\n'.join(regular_lines)
         
@@ -199,6 +289,7 @@ from pysat.solution import export_solution
                 'Exception': Exception,
                 'ValueError': ValueError,
                 'TypeError': TypeError,
+                '__import__': safe_import,
             },
             # Provide the PySAT environment - only include stable solvers
             'CNF': CNF,
@@ -214,6 +305,16 @@ from pysat.solution import export_solution
             'random': random,
             're': re,
             'json': json,
+            # Add cardinality template functions
+            'at_most_k': at_most_k,
+            'at_least_k': at_least_k,
+            'exactly_k': exactly_k,
+            # Add constraint helper functions
+            'at_most_one': at_most_one,
+            'exactly_one': exactly_one,
+            'implies': implies,
+            'mutually_exclusive': mutually_exclusive,
+            'if_then_else': if_then_else,
         }
         
         # Add common variable types needed for PySAT code

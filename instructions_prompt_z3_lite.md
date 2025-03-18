@@ -99,6 +99,57 @@ export_solution(solver=solver, variables=variables)
 
 6. For complex constraints, break them down into smaller, more manageable parts
 
+## Function Scope and Variable Access
+
+When working with Z3 models, be careful with variable scope and how you call `export_solution()`:
+
+```python
+# RECOMMENDED APPROACH:
+# Define a function to build your model that returns solver and variables
+def build_model():
+    x = Int('x')
+    y = Int('y')
+    
+    solver = Solver()
+    solver.add(x > 0, y > 0, x + y == 10)
+    
+    # Return all necessary context
+    return solver, {"x": x, "y": y}
+
+# Call the function and use its return values
+solver, variables = build_model()
+
+# Call export_solution OUTSIDE the function
+if solver.check() == sat:
+    export_solution(solver=solver, variables=variables)
+else:
+    print("No solution")
+```
+
+### Avoiding Common Scope Issues
+
+If you need to call `export_solution()` inside a function, make sure to pass complete context:
+
+```python
+# When calling from inside a function:
+def solve_problem():
+    x = Int('x')
+    y = Int('y')
+    
+    solver = Solver()
+    solver.add(x > 0, y > 0, x + y == 10)
+    
+    if solver.check() == sat:
+        # Must pass BOTH solver AND variables to export_solution
+        export_solution(
+            solver=solver,
+            variables={"x": x, "y": y}
+        )
+        return True
+    else:
+        return False
+```
+
 ## Solution Export
 
 ```python

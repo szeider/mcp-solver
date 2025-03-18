@@ -32,31 +32,86 @@ This directory contains tests for the MCP Solver project.
 
 ```bash
 cd tests
-uv run run_all_tests.py
+uv run python run_all_tests.py
 ```
 
 ### Running Tests for a Specific Solver
 
 ```bash
 cd tests
-uv run run_all_tests.py --mzn   # Run only MiniZinc tests
-uv run run_all_tests.py --pysat # Run only PySAT tests
-uv run run_all_tests.py --z3    # Run only Z3 tests
+uv run python run_all_tests.py --mzn   # Run only MiniZinc tests
+uv run python run_all_tests.py --pysat # Run only PySAT tests
+uv run python run_all_tests.py --z3    # Run only Z3 tests
 ```
 
 ### Running a Specific Problem
 
 ```bash
 cd tests
-uv run run_test_mzn.py --problem nqueens
-uv run run_test_pysat.py --problem graph_coloring
-uv run run_test_z3.py --problem cryptarithmetic
+uv run python run_test_mzn.py --problem nqueens
+uv run python run_test_pysat.py --problem graph_coloring
+uv run python run_test_z3.py --problem cryptarithmetic
+```
+
+### Running Individual Tests
+
+You can run specific test files directly with Python:
+
+```bash
+# In the project root directory
+uv run python -m tests.test_environment_imports
+uv run python -m tests.test_pysat_constraints
+uv run python -m tests.test_pysat_solution_export
+```
+
+Or from the tests directory:
+
+```bash
+cd tests
+uv run python test_environment_imports.py
+uv run python test_pysat_constraints.py
+```
+
+### Custom Test Scripts
+
+For quick testing during development, you can create and run simple test scripts in the project root:
+
+```bash
+# Custom test scripts
+uv run python pysat_import_test2.py  # Test PySAT import functionality
 ```
 
 ### Options
 
 - `--verbose` or `-v`: Enable verbose output
 - `--timeout` or `-t`: Set timeout in seconds (default: 300)
+
+## Troubleshooting Common Issues
+
+### Import Errors
+
+If you encounter `ModuleNotFoundError` when running tests with pytest, try running the tests as Python modules instead:
+
+```bash
+# Instead of:
+pytest tests/test_environment_imports.py
+
+# Use:
+python -m tests.test_environment_imports
+```
+
+### PySAT Environment
+
+The PySAT execution environment includes:
+
+1. Standard Python modules: `math`, `random`, `collections`, `itertools`, `re`, `json`
+2. PySAT modules: `pysat.formula`, `pysat.solvers`, `pysat.card`
+3. Constraint helpers: `at_most_one`, `exactly_one`, `implies`, etc.
+4. Cardinality templates: `at_most_k`, `at_least_k`, `exactly_k`
+
+If you add new helper functions, make sure to include them in:
+- `restricted_globals` dictionary in `environment.py`
+- The processed code template in `execute_pysat_code`
 
 ## Adding New Tests
 

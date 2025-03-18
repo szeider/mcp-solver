@@ -74,6 +74,27 @@ solver.delete()
 
 ## Important Guidelines
 
+### Handling Imports
+
+When working with PySAT, the following imports are automatically available to you:
+
+```python
+# Core PySAT modules
+from pysat.formula import CNF, WCNF
+from pysat.solvers import Glucose3, Cadical153
+from pysat.card import CardEnc, EncType
+
+# Standard Python modules
+import math  
+import random
+import collections
+import itertools
+import re
+import json
+```
+
+**Note:** For security reasons, only a limited set of modules can be imported. These include the standard modules shown above and all core `pysat` modules.
+
 ### Handling Solver Results
 
 When working with PySAT solvers:
@@ -152,13 +173,16 @@ PySAT includes several SAT solvers:
 
 For convenience, PySAT provides helper functions for common constraints:
 
-| Function      | Description                              |
-| ------------- | ---------------------------------------- |
-| `at_most_k`   | At most k variables are true             |
-| `at_least_k`  | At least k variables are true            |
-| `exactly_k`   | Exactly k variables are true             |
-| `exactly_one` | Exactly one variable is true (optimized) |
-| `implies`     | If a is true, then b must be true        |
+| Function             | Description                                      |
+| -------------------- | ------------------------------------------------ |
+| `at_most_k`          | At most k variables are true                     |
+| `at_least_k`         | At least k variables are true                    |
+| `exactly_k`          | Exactly k variables are true                     |
+| `at_most_one`        | At most one variable is true (optimized)         |
+| `exactly_one`        | Exactly one variable is true (optimized)         |
+| `implies`            | If a is true, then b must be true                |
+| `mutually_exclusive` | Set of variables where at most one can be true   |
+| `if_then_else`       | Implement if-then-else logic (condition ? a : b) |
 
 Example usage:
 
@@ -170,6 +194,18 @@ for clause in exactly_one([1, 4, 7]):  # Course A on exactly one day
 
 # At most 2 courses per day
 for clause in at_most_k([1, 2, 3], 2):  # At most 2 courses on Monday
+    formula.append(clause)
+
+# Mutually exclusive activities (can't do both)
+for clause in mutually_exclusive([10, 11]):  # Can't do both activities
+    formula.append(clause)
+
+# Implication - if course 1 is scheduled, then course 2 must be too
+for clause in implies(1, 2):  # If course 1 then course 2
+    formula.append(clause)
+
+# If-then-else - if condition is true use var1, else use var2
+for clause in if_then_else(5, 6, 7):  # if 5 then 6 else 7
     formula.append(clause)
 ```
 

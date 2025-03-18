@@ -309,7 +309,17 @@ async def serve() -> None:
 
         if LITE_MODE:
             # In lite mode, return a reduced set of tools
-            return base_tools
+            lite_tools = [
+                tool for tool in base_tools if tool.name in [
+                    "clear_model", 
+                    "add_item", 
+                    "replace_item", 
+                    "delete_item", 
+                    "get_model", 
+                    "solve_model"
+                ]
+            ]
+            return lite_tools
         else:
             # Only MiniZinc supports non-lite mode for now
             if not Z3_MODE and not PYSAT_MODE:

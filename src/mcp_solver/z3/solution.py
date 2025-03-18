@@ -113,14 +113,11 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
                 print(f"Error extracting objective value: {e}")
                 result["objective"] = f"Error: {str(e)}"
     
-    # Store result for retrieval by environment module
+    # Store result in global variable for the environment to find
     global _LAST_SOLUTION
     _LAST_SOLUTION = result
     
-    # Set solution in calling namespace to make it available to exec
-    import inspect
-    caller_globals = inspect.currentframe().f_back.f_globals
-    caller_locals = inspect.currentframe().f_back.f_locals
-    caller_locals["solution"] = result
+    # Don't try to modify caller's scope, as it doesn't work reliably with nested functions
+    # Instead, the environment will retrieve the result from _LAST_SOLUTION
     
     return result 

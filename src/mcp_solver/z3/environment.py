@@ -125,6 +125,19 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
     
     processed_code_string = '\n'.join(processed_code)
     
+    # Modify code to catch common variable naming issues
+    # Add a preamble that makes solver, s, and z3_solver global to avoid issues
+    # with export_solution not being able to access them
+    processed_code_string = """
+# Make sure 'solver', 's', and 'z3_solver' variables are accessible globally
+# This helps with the common issue of local solver variables not being visible to export_solution
+global solver, s, z3_solver
+solver = None
+s = None
+z3_solver = None
+
+""" + processed_code_string
+    
     # Create restricted globals dict with only necessary functions/modules
     restricted_globals = {
         # Allow a limited subset of builtins
@@ -159,6 +172,11 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
         "zip": zip,
         # Explicitly set open to None to force NameError
         "open": None,
+        # Add global keywords
+        "global": None,
+        "solver": None,
+        "s": None, 
+        "z3_solver": None,
     }
     
     # Add Z3 module itself
@@ -236,17 +254,24 @@ def execute_z3_code(code_string: str, timeout: float = 4.0, auto_extract: bool =
             local_vars = {}
             exec(processed_code_string, restricted_globals, local_vars)
             
-            # Check if solution was exported via local_vars
+            # Check solution from local_vars
             if "solution" in local_vars:
                 result["solution"] = local_vars["solution"]
                 result["status"] = "success"
-            # Also check if exported via the solution module
-            elif hasattr(export_solution, "_LAST_SOLUTION") and export_solution._LAST_SOLUTION:
-                result["solution"] = export_solution._LAST_SOLUTION
+            # Check for solution in _LAST_SOLUTION
+            elif _LAST_SOLUTION is not None:
+                result["solution"] = _LAST_SOLUTION
                 result["status"] = "success"
             else:
-                result["status"] = "no_solution"
-                result["error"] = "No solution was exported. Make sure to call export_solution()."
+                # Important: Also check export_solution module's _LAST_SOLUTION directly
+                # since it might be set by code executed in different scope
+                from .solution import _LAST_SOLUTION as solution_last_solution
+                if solution_last_solution is not None:
+                    result["solution"] = solution_last_solution
+                    result["status"] = "success"
+                else:
+                    result["status"] = "no_solution"
+                    result["error"] = "No solution was exported. Make sure to call export_solution()"
     except TimeoutException as e:
         result["status"] = "timeout"
         result["error"] = str(e)
