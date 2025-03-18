@@ -60,7 +60,7 @@ Originally the *MCP Solver* was implemented as an interface to the MiniZinc cons
 
 ## Installation
 
-1. Install an MCP-compatible client (e.g., [Claude Desktop app](https://claude.ai/download))
+1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download) (for testing, you can also use our [internal test client](README-client.md))
 
 2. Install the MCP Solver:
 
