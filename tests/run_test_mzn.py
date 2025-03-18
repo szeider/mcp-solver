@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 MiniZinc Problem Test Runner
-Runs MiniZinc problems through the mcp-react-os client
+Runs MiniZinc problems through the test-client
 """
 import os
 import subprocess
@@ -37,7 +37,7 @@ def validate_files_exist():
     return True
 
 def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
-    """Run a single problem through mcp-react-os"""
+    """Run a single problem through test-client"""
     problem_name = os.path.basename(problem_file).replace('.md', '')
     print(f"\n{'='*60}")
     print(f"Testing problem: {problem_name}")
@@ -45,14 +45,13 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     
     # Get absolute path to the problem file
     abs_problem_path = os.path.abspath(problem_file)
-    abs_prompt_path = get_prompt_path(MZN_PROMPT_FILE)
     
     # Create the command with MiniZinc specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run mcp-react-os --query {abs_problem_path} --prompt {abs_prompt_path} --server \"uv run mcp-solver --lite\""
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client --query {abs_problem_path}"
     if verbose:
         cmd += " --streaming"  # Add streaming output if verbose
     
-    # Run the mcp-react-os command
+    # Run the test-client (MiniZinc) command
     try:
         print(f"\nExecuting: {cmd}\n")
         print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
@@ -113,7 +112,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
 
 def main():
     """Main function to run MiniZinc tests"""
-    parser = argparse.ArgumentParser(description="Run MiniZinc problems through mcp-react-os")
+    parser = argparse.ArgumentParser(description="Run MiniZinc problems through test-client")
     parser.add_argument("--problem", help="Specific problem to run (without .md extension)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT, 

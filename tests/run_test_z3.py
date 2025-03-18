@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Z3 Problem Test Runner
-Runs Z3 problems through the mcp-react-os client
+Runs Z3 problems through the test-client
 """
 import os
 import subprocess
@@ -22,9 +22,10 @@ from test_config import (
 
 def validate_files_exist():
     """Check that required files and directories exist"""
-    if not os.path.exists(get_prompt_path(Z3_PROMPT_FILE)):
-        print(f"Error: Prompt file '{Z3_PROMPT_FILE}' not found")
-        return False
+    prompt_path = get_prompt_path(Z3_PROMPT_FILE)
+    if not os.path.exists(prompt_path):
+        print(f"Warning: Prompt file '{Z3_PROMPT_FILE}' not found at {prompt_path}")
+        print("The test-client-z3 command will attempt to find a suitable prompt file automatically")
     
     if not os.path.exists(Z3_PROBLEMS_DIR):
         print(f"Error: Problems directory '{Z3_PROBLEMS_DIR}' not found")
@@ -37,7 +38,7 @@ def validate_files_exist():
     return True
 
 def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
-    """Run a single problem through mcp-react-os"""
+    """Run a single problem through test-client"""
     problem_name = os.path.basename(problem_file).replace('.md', '')
     print(f"\n{'='*60}")
     print(f"Testing problem: {problem_name}")
@@ -45,14 +46,13 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     
     # Get absolute path to the problem file
     abs_problem_path = os.path.abspath(problem_file)
-    abs_prompt_path = get_prompt_path(Z3_PROMPT_FILE)
     
     # Create the command with Z3 specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run mcp-react-os --query {abs_problem_path} --prompt {abs_prompt_path} --server \"uv run mcp-solver-z3 --lite\""
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client-z3 --query {abs_problem_path}"
     if verbose:
         cmd += " --streaming"  # Add streaming output if verbose
     
-    # Run the mcp-react-os command
+    # Run the test-client-z3 command
     try:
         print(f"\nExecuting: {cmd}\n")
         print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
@@ -113,7 +113,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
 
 def main():
     """Main function to run Z3 tests"""
-    parser = argparse.ArgumentParser(description="Run Z3 problems through mcp-react-os")
+    parser = argparse.ArgumentParser(description="Run Z3 problems through test-client")
     parser.add_argument("--problem", help="Specific problem to run (without .md extension)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT, 

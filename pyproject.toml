@@ -21,8 +21,22 @@ z3 = [
 pysat = [
     "python-sat",
 ]
+client = [
+    "langchain>=0.3.18",
+    "langchain-core>=0.2.22",
+    "langchain-mcp-adapters>=0.0.2",
+    "langgraph>=0.2.74",
+    "langchain-openai>=0.3.5",
+    "langchain-anthropic>=0.3.7",
+    "langchain-google-genai>=2.0.9",
+    "google-generativeai>=0.7.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.9.4",
+    "uuid>=1.30",
+]
 all = [
-    "mcp-solver[z3,pysat]",
+    "mcp-solver[z3,pysat,client]",
 ]
 dev = [
     "coverage",
@@ -36,6 +50,9 @@ test-setup-pysat = "mcp_solver.pysat.test_setup:main"
 mcp-solver = "mcp_solver.__main__:main"
 mcp-solver-z3 = "mcp_solver.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.__main__:main_pysat"
+test-client = "mcp_solver.client.mcp_react_os:main"
+test-client-pysat = "mcp_solver.client.test_client_pysat:main"
+test-client-z3 = "mcp_solver.client.test_client_z3:main"
 
 [tool.black]
 line-length = 88

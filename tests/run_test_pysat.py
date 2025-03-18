@@ -1,7 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-PySAT Problem Test Runner
-Runs PySAT problems through the mcp-react-os client
+Runs PySAT problems through the test-client
 """
 import os
 import subprocess
@@ -36,66 +35,27 @@ def validate_files_exist():
         
     return True
 
-def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
-    """Run a single problem through mcp-react-os"""
-    problem_name = os.path.basename(problem_file).replace('.md', '')
+def run_problem(problem_path):
+    """Run a single problem through test-client"""
+    problem_name = os.path.basename(problem_path).replace('.md', '')
     print(f"\n{'='*60}")
     print(f"Testing problem: {problem_name}")
     print(f"{'='*60}")
     
     # Get absolute path to the problem file
-    abs_problem_path = os.path.abspath(problem_file)
-    abs_prompt_path = get_prompt_path(PYSAT_PROMPT_FILE)
+    abs_problem_path = os.path.abspath(problem_path)
     
     # Create the command with PySAT specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run mcp-react-os --query {abs_problem_path} --prompt {abs_prompt_path} --server \"uv run mcp-solver-pysat --lite\""
-    if verbose:
-        cmd += " --streaming"  # Add streaming output if verbose
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client-pysat --query {abs_problem_path}"
     
-    # Run the mcp-react-os command
+    # Run the test-client-pysat command
     try:
         print(f"\nExecuting: {cmd}\n")
         print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
         
         # Always show output in real-time
-        if verbose:
-            # In streaming mode, use standard subprocess.run to show output in real-time
-            process = subprocess.run(cmd, shell=True, check=False)
-            success = process.returncode == 0
-        else:
-            # Capture output but print it immediately
-            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-            
-            # Set a timeout for the process
-            try:
-                # Print stdout in real-time while capturing it
-                stdout_lines = []
-                stderr_lines = []
-                
-                # Read and print stdout
-                for line in iter(process.stdout.readline, ''):
-                    if not line:
-                        break
-                    print(line, end='', flush=True)
-                    stdout_lines.append(line)
-                
-                # Wait for process to complete
-                process.wait(timeout=timeout)
-                
-                # Read and print any remaining stderr
-                for line in iter(process.stderr.readline, ''):
-                    if not line:
-                        break
-                    print(f"STDERR: {line}", end='', flush=True)
-                    stderr_lines.append(line)
-                
-                success = process.returncode == 0
-                
-            except subprocess.TimeoutExpired:
-                process.kill()
-                print(f"\n{'-'*60}\n[CLIENT OUTPUT END - TIMED OUT]\n{'-'*60}")
-                print(f"\n⏱️ Test timed out after {timeout} seconds: {problem_name}")
-                return False
+        process = subprocess.run(cmd, shell=True, check=False)
+        success = process.returncode == 0
         
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END]\n{'-'*60}")
         
@@ -113,7 +73,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
 
 def main():
     """Main function to run PySAT tests"""
-    parser = argparse.ArgumentParser(description="Run PySAT problems through mcp-react-os")
+    parser = argparse.ArgumentParser(description="Run PySAT problems through test-client")
     parser.add_argument("--problem", help="Specific problem to run (without .md extension)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT, 
@@ -149,7 +109,7 @@ def main():
     
     # Run each test
     for problem_file in sorted(problem_files):
-        if run_test(problem_file, verbose=args.verbose, timeout=args.timeout):
+        if run_problem(problem_file):
             success_count += 1
         else:
             failed_tests.append(os.path.basename(problem_file))

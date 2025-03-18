@@ -2,7 +2,7 @@
 Z3 integration for MCP Solver.
 """
 
-# Placeholder for future imports
-# from .model_manager import Z3ModelManager
-# 
-# __all__ = ['Z3ModelManager'] 
+# Export the solution module functions
+from .solution import export_solution, _LAST_SOLUTION
+
+__all__ = ['export_solution', '_LAST_SOLUTION'] 
