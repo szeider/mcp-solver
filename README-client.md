@@ -1,10 +1,10 @@
-# MCP Client Mode
+# Test Client
 
-This client is a one-shot agent for solving constraint problems using LLMs with the MCP Solver backends. It functions as an intermediary between an LLM and MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions.
+This client is a one-shot agent for testing the MCP solver. It functions as an intermediary between an LLM and MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions.
 
 ## Available Tools
 
-The test-client provides a set of tools to the LLM that allow it to interact with the MCP server:
+The test-client provides a set of tools to the LLM that allow it to interact with the MCP solver:
 - CRUD operations for solver models
 - Solving models with timeout
 
@@ -64,15 +64,6 @@ Where `[backend]` is optional or one of `pysat` or `z3`.
 | `--model` | (Optional) Model to use (default: AT:claude-3-7-sonnet-20250219) |
 | `--server` | (Optional) Custom command to run the MCP server |
 
-### Supported Models
-
-| Code | Description | Provider | API Key Required |
-|------|-------------|----------|------------------|
-| `AT:claude-3-7-sonnet-20250219` | Claude 3.7 Sonnet | Anthropic | Yes |
-| `AT:claude-3-opus-20240229` | Claude 3 Opus | Anthropic | Yes |
-| `AT:claude-3-5-sonnet-20240620` | Claude 3.5 Sonnet | Anthropic | Yes |
-| `OA:gpt-4-turbo` | GPT-4 Turbo | OpenAI | Yes |
-| `OA:gpt-4o` | GPT-4o | OpenAI | Yes |
 
 ## Basic Workflow
 
