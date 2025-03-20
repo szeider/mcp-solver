@@ -16,6 +16,20 @@ The client is an optional dependency in the mcp-solver package. To install it:
 uv install "mcp-solver[client]"
 ```
 
+## Testing Client Setup
+
+To verify your client installation and environment is correctly configured:
+
+```bash
+uv run test-setup-client
+```
+
+This checks:
+- Required configuration files
+- LLM client dependencies 
+- API key for the default LLM model (Anthropic Claude)
+- Basic client functionality
+
 ## Command Line Usage
 
 ### Streamlined Commands

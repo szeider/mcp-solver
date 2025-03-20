@@ -44,9 +44,10 @@ dev = [
 ]
 
 [project.scripts]
-test-setup = "mcp_solver.test_setup:main"
+test-setup = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
+test-setup-client = "mcp_solver.client.test_setup:main"
 mcp-solver = "mcp_solver.__main__:main"
 mcp-solver-mzn = "mcp_solver.__main__:main_mzn"
 mcp-solver-z3 = "mcp_solver.__main__:main_z3"
