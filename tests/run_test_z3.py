@@ -48,7 +48,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     abs_problem_path = os.path.abspath(problem_file)
     
     # Create the command with Z3 specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client-z3 --query {abs_problem_path}"
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client --query {abs_problem_path} --prompt {get_prompt_path(Z3_PROMPT_FILE)} --server 'uv run mcp-solver-z3'"
     if verbose:
         cmd += " --streaming"  # Add streaming output if verbose
     

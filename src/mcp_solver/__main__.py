@@ -11,6 +11,10 @@ def main():
     from .server import main as server_main
     return server_main()
 
+def main_mzn():
+    """Entry point for MiniZinc mode (alias of main for consistency)"""
+    return main()
+
 def main_z3():
     """Entry point for Z3 mode"""
     try:

@@ -4,7 +4,7 @@ Shared configuration for all test files.
 import os
 
 # Configuration
-MCP_CLIENT_DIR = "/Users/stefanszeider/git/mcp-client"
+MCP_CLIENT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # Use the current project directory
 DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
 # MiniZinc configuration

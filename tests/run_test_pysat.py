@@ -46,7 +46,7 @@ def run_problem(problem_path):
     abs_problem_path = os.path.abspath(problem_path)
     
     # Create the command with PySAT specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client-pysat --query {abs_problem_path}"
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client --query {abs_problem_path} --prompt {get_prompt_path(PYSAT_PROMPT_FILE)} --server 'uv run mcp-solver-pysat'"
     
     # Run the test-client-pysat command
     try:

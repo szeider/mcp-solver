@@ -100,7 +100,7 @@ Originally the *MCP Solver* was implemented as an interface to the MiniZinc cons
            "--directory",
            "/absolute/path/to/mcp-solver/",
            "run",
-           "mcp-solver"
+           "mcp-solver-mzn"
          ]
        }
      }
@@ -116,7 +116,7 @@ for Windows:
           "command": "cmd.exe",
           "args": [
             "/C",
-            "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver"
+            "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver-mzn"
           ]
         }
       }
@@ -151,7 +151,7 @@ To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For e
         "--directory",
         "/absolute/path/to/mcp-solver",
         "run",
-        "mcp-solver",
+        "mcp-solver-mzn",
         "--lite"
       ]
     }

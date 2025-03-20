@@ -37,7 +37,7 @@ def validate_files_exist():
     return True
 
 def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
-    """Run a single problem through test-client"""
+    """Run a single problem through test-client-mzn"""
     problem_name = os.path.basename(problem_file).replace('.md', '')
     print(f"\n{'='*60}")
     print(f"Testing problem: {problem_name}")
@@ -47,68 +47,61 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     abs_problem_path = os.path.abspath(problem_file)
     
     # Create the command with MiniZinc specific args
-    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client --query {abs_problem_path}"
-    if verbose:
-        cmd += " --streaming"  # Add streaming output if verbose
+    cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client-mzn --query {abs_problem_path}"
     
-    # Run the test-client (MiniZinc) command
+    # Add verbose flag if requested
+    if verbose:
+        cmd += " --verbose"
+    
+    # Add timeout if specified
+    if timeout and timeout != DEFAULT_TIMEOUT:
+        cmd += f" --timeout {timeout}"
+    
+    # Run the command and capture output
+    print(f"Running command: {cmd}")
+    start_time = datetime.now()
     try:
-        print(f"\nExecuting: {cmd}\n")
-        print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
+        process = subprocess.Popen(
+            cmd, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            text=True
+        )
         
-        # Always show output in real-time
-        if verbose:
-            # In streaming mode, use standard subprocess.run to show output in real-time
-            process = subprocess.run(cmd, shell=True, check=False)
-            success = process.returncode == 0
-        else:
-            # Capture output but print it immediately
-            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-            
-            # Set a timeout for the process
-            try:
-                # Print stdout in real-time while capturing it
-                stdout_lines = []
-                stderr_lines = []
-                
-                # Read and print stdout
-                for line in iter(process.stdout.readline, ''):
-                    if not line:
-                        break
-                    print(line, end='', flush=True)
-                    stdout_lines.append(line)
-                
-                # Wait for process to complete
-                process.wait(timeout=timeout)
-                
-                # Read and print any remaining stderr
-                for line in iter(process.stderr.readline, ''):
-                    if not line:
-                        break
-                    print(f"STDERR: {line}", end='', flush=True)
-                    stderr_lines.append(line)
-                
-                success = process.returncode == 0
-                
-            except subprocess.TimeoutExpired:
-                process.kill()
-                print(f"\n{'-'*60}\n[CLIENT OUTPUT END - TIMED OUT]\n{'-'*60}")
-                print(f"\n⏱️ Test timed out after {timeout} seconds: {problem_name}")
-                return False
+        # Use communicate with timeout to prevent hanging
+        stdout, stderr = process.communicate(timeout=timeout)
         
-        print(f"\n{'-'*60}\n[CLIENT OUTPUT END]\n{'-'*60}")
+        # Get exit code
+        exit_code = process.returncode
         
-        if success:
-            print(f"\n✅ Successfully tested: {problem_name}")
-            return True
-        else:
-            print(f"\n❌ Failed to test {problem_name} (Exit code: {process.returncode})")
-            return False
-            
-    except Exception as e:
-        print(f"\n{'-'*60}\n[CLIENT OUTPUT END - ERROR]\n{'-'*60}")
-        print(f"\n❌ Failed to test {problem_name}: {str(e)}")
+    except subprocess.TimeoutExpired:
+        print(f"ERROR: Test timed out after {timeout} seconds")
+        try:
+            process.kill()
+        except:
+            pass
         return False
+        
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    
+    # Print results
+    print(f"Exit code: {exit_code}")
+    print(f"Duration: {duration:.2f} seconds")
+    
+    if exit_code != 0:
+        print("ERROR: Test failed with non-zero exit code")
+        print("STDERR:")
+        print(stderr)
+        return False
+    
+    if verbose:
+        print("STDOUT:")
+        print(stdout)
+    
+    print("Test completed successfully")
+    return True
 
 def main():
     """Main function to run MiniZinc tests"""

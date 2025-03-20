@@ -31,7 +31,7 @@ DEFAULT_MODEL = "MC1"  # Default model to use
 
 # Default server configuration
 DEFAULT_SERVER_COMMAND = "uv"
-DEFAULT_SERVER_ARGS = ["run", "mcp-solver", "--lite"]
+DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn", "--lite"]
 
 # Global Rich Console instance with color support
 console = Console(color_system="truecolor")
@@ -408,7 +408,7 @@ def main_wrapper():
     
     # Set default server if not specified
     if not any(arg.startswith("--server") for arg in args):
-        modified_args.extend(["--server", "uv run mcp-solver --lite"])
+        modified_args.extend(["--server", "uv run mcp-solver-mzn --lite"])
         
     # Filter out flags that are meant for the test runner but not supported by the client
     # (We just silently ignore them to maintain compatibility with test scripts)
