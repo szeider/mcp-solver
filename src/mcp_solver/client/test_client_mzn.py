@@ -27,7 +27,7 @@ def main():
         print("Warning: Could not find default MiniZinc prompt file")
     
     # Set default server to MiniZinc
-    server_cmd = "uv run mcp-solver-mzn --lite"
+    server_cmd = "uv run mcp-solver-mzn"
     
     # Insert defaults into sys.argv if not overridden
     args = sys.argv[1:]

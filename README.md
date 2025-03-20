@@ -140,7 +140,7 @@ The MCP Solver also supports a **Lite Mode**, which provides a streamlined inter
 - **get_model**
 
 In Lite mode, the instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`. If you provide the instructions prompt manually to your client, make sure to provide the correct prompt.
-To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For example, update your configuration file as follows (similar for Windows):
+To run the MCP Solver, update your configuration file as follows (similar for Windows):
 
 ```
 {
@@ -151,8 +151,7 @@ To run the MCP Solver in Lite Mode, add the `--lite` flag to your command. For e
         "--directory",
         "/absolute/path/to/mcp-solver",
         "run",
-        "mcp-solver-mzn",
-        "--lite"
+        "mcp-solver-mzn"
       ]
     }
   }

@@ -17,7 +17,6 @@ from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT,
 from .memo import MemoManager
 
 # Global flags for mode selection
-LITE_MODE = False
 Z3_MODE = False
 PYSAT_MODE = False
 
@@ -48,14 +47,14 @@ async def serve() -> None:
     # Initialize the appropriate model manager based on mode
     if Z3_MODE:
         from .z3.model_manager import Z3ModelManager
-        model_mgr = Z3ModelManager(lite_mode=LITE_MODE)
+        model_mgr = Z3ModelManager()
         logging.getLogger(__name__).info("Using Z3 model manager")
     elif PYSAT_MODE:
         from .pysat.model_manager import PySATModelManager
-        model_mgr = PySATModelManager(lite_mode=LITE_MODE)
+        model_mgr = PySATModelManager()
         logging.getLogger(__name__).info("Using PySAT model manager")
     else:
-        model_mgr = MiniZincModelManager(lite_mode=LITE_MODE)
+        model_mgr = MiniZincModelManager()
         logging.getLogger(__name__).info("Using MiniZinc model manager")
     
     memo = MemoManager(MEMO_FILE)
@@ -101,26 +100,21 @@ async def serve() -> None:
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         # Choose the appropriate instruction prompt based on mode
         if name == "instructions":
-            # Z3 and PySAT modes always use lite mode
+            # Z3 and PySAT modes
             if Z3_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3_lite.md")
-                logging.getLogger(__name__).info("Using Z3 lite instructions")
+                logging.getLogger(__name__).info("Using Z3 instructions")
             elif PYSAT_MODE:
                 prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat_lite.md")
-                logging.getLogger(__name__).info("Using PySAT lite instructions")
-            # MiniZinc mode can be lite or full
-            elif LITE_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
-                logging.getLogger(__name__).info("Using MiniZinc lite instructions")
+                logging.getLogger(__name__).info("Using PySAT instructions")
+            # MiniZinc mode
             else:
-                prompt_path = INSTRUCTIONS_PROMPT
-                logging.getLogger(__name__).info("Using MiniZinc full instructions")
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
+                logging.getLogger(__name__).info("Using MiniZinc instructions")
             
             try:
                 with open(prompt_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                    if not LITE_MODE:
-                        content += "\n\n## Memo\n\n" + memo.get_memo()
                     
                     # Add debugging logs
                     logging.getLogger(__name__).info(f"Prompt loaded from: {prompt_path}")
@@ -196,8 +190,8 @@ async def serve() -> None:
 
     @server.list_tools()
     async def list_tools() -> List[types.Tool]:
-        # Base tools common to both MiniZinc and Z3 modes
-        base_tools = [
+        # Tools for all modes
+        tools = [
             types.Tool(
                 name="clear_model", 
                 description=get_description({
@@ -281,69 +275,8 @@ async def serve() -> None:
                     "required": ["timeout"]
                 }
             ),
-            types.Tool(
-                name="get_solution", 
-                description="Retrieve the current solution from the last solve operation.",
-                inputSchema={"type": "object", "properties": {}}
-            ),
-            types.Tool(
-                name="get_variable_value", 
-                description=get_description({
-                    'default': "Get the value of a specific variable from the solution.",
-                    'pysat': "Get the value of a specific variable from the PySAT solution."
-                }),
-                inputSchema={
-                    "type": "object", 
-                    "properties": {
-                        "variable_name": {"type": "string"}
-                    }, 
-                    "required": ["variable_name"]
-                }
-            ),
-            types.Tool(
-                name="get_solve_time", 
-                description="Retrieve the execution time of the most recent solve operation.",
-                inputSchema={"type": "object", "properties": {}}
-            )
         ]
-
-        if LITE_MODE:
-            # In lite mode, return a reduced set of tools
-            lite_tools = [
-                tool for tool in base_tools if tool.name in [
-                    "clear_model", 
-                    "add_item", 
-                    "replace_item", 
-                    "delete_item", 
-                    "get_model", 
-                    "solve_model"
-                ]
-            ]
-            return lite_tools
-        else:
-            # Only MiniZinc supports non-lite mode for now
-            if not Z3_MODE and not PYSAT_MODE:
-                # Full set of tools for non-lite MiniZinc mode
-                full_tools = base_tools + [
-                    types.Tool(
-                        name="get_memo", 
-                        description="Retrieve the current knowledge base memo for MiniZinc models.",
-                        inputSchema={"type": "object", "properties": {}}
-                    ),
-                    types.Tool(
-                        name="edit_memo", 
-                        description="Edit the MiniZinc knowledge base memo by adding content within a specified line range.",
-                        inputSchema={"type": "object", "properties": {
-                            "line_start": {"type": "integer"},
-                            "line_end": {"type": ["integer", "null"]},
-                            "content": {"type": "string"}
-                        }, "required": ["line_start", "content"]}
-                    )
-                ]
-                return full_tools
-            else:
-                # Z3 and PySAT modes only support lite mode for now
-                return base_tools
+        return tools
 
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
@@ -394,25 +327,6 @@ async def serve() -> None:
                         
                     result = await model_mgr.solve_model(timeout=timeout_val)
                     return [types.TextContent(type="text", text=str(result))]
-                case "get_solution":
-                    result = model_mgr.get_solution()
-                    return [types.TextContent(type="text", text=str(result))]
-                case "get_variable_value":
-                    var_name = arguments["variable_name"]
-                    result = model_mgr.get_variable_value(var_name)
-                    return [types.TextContent(type="text", text=str(result))]
-                case "get_solve_time":
-                    result = model_mgr.get_solve_time()
-                    return [types.TextContent(type="text", text=str(result))]
-                case "get_memo":
-                    return [types.TextContent(type="text", text=memo.content)]
-                case "edit_memo":
-                    memo.edit_range(
-                        arguments["line_start"],
-                        arguments.get("line_end"),
-                        arguments["content"]
-                    )
-                    return [types.TextContent(type="text", text="Memo updated")]
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
@@ -438,31 +352,28 @@ def main() -> int:
     import argparse
     
     parser = argparse.ArgumentParser(description="MCP Solver")
-    parser.add_argument("--lite", action="store_true", help="Run in lite mode")
     parser.add_argument("--z3", action="store_true", help="Use Z3 solver")
     parser.add_argument("--pysat", action="store_true", help="Use PySAT solver")
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
     
     # Set global flags based on arguments
-    global LITE_MODE, Z3_MODE, PYSAT_MODE
-    LITE_MODE = args.lite
+    global Z3_MODE, PYSAT_MODE
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
-    
-    # Z3 and PySAT only support lite mode for now
-    if Z3_MODE or PYSAT_MODE:
-        LITE_MODE = True
-        logging.getLogger(__name__).info("Server running in lite mode as currently Z3/PySAT are only supported in lite mode")
-    elif LITE_MODE:
-        logging.getLogger(__name__).info("Server running in lite mode")
-    else:
-        logging.getLogger(__name__).info("Server running in full mode")
     
     # Check for incompatible flags
     if Z3_MODE and PYSAT_MODE:
         print("Error: Cannot use both --z3 and --pysat flags at the same time")
         return 1
+    
+    # Log the mode
+    if Z3_MODE:
+        logging.getLogger(__name__).info("Server running with Z3 solver")
+    elif PYSAT_MODE:
+        logging.getLogger(__name__).info("Server running with PySAT solver")
+    else:
+        logging.getLogger(__name__).info("Server running with MiniZinc solver")
     
     # Setup logging
     log_level = logging.INFO

@@ -24,8 +24,8 @@ class ModelError(Exception):
     pass
 
 class MiniZincModelManager(SolverManager):
-    def __init__(self, solver_name: str = "chuffed", lite_mode: bool = False):
-        super().__init__(lite_mode)
+    def __init__(self, solver_name: str = "chuffed"):
+        super().__init__()
         self.items: List[Tuple[int, str]] = []
         self.current_solution: Optional[Any] = None
         self.solver = Solver.lookup(solver_name)

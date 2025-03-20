@@ -23,14 +23,11 @@ class Z3ModelManager(SolverManager):
     model items, as well as solving models and extracting solutions.
     """
     
-    def __init__(self, lite_mode: bool = False):
+    def __init__(self):
         """
         Initialize a new Z3 model manager.
-        
-        Args:
-            lite_mode: Whether the solver is running in lite mode
         """
-        super().__init__(lite_mode)
+        super().__init__()
         self.code_items = []  # List of (index, content) tuples
         self.last_result = None
         self.last_solution = None

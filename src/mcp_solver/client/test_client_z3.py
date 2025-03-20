@@ -27,7 +27,7 @@ def main():
         print("Warning: Could not find default Z3 prompt file")
     
     # Set default server to Z3
-    server_cmd = "uv run mcp-solver-z3 --lite"
+    server_cmd = "uv run mcp-solver-z3"
     
     # Insert defaults into sys.argv if not overridden
     args = sys.argv[1:]

@@ -8,14 +8,10 @@ class SolverManager(ABC):
     This class defines the interface that all solver implementations must follow.
     """
     
-    def __init__(self, lite_mode: bool = False):
+    def __init__(self):
         """
         Initialize a new solver manager.
-        
-        Args:
-            lite_mode: Whether the solver is running in lite mode
         """
-        self.lite_mode = lite_mode
         self.initialized = False
         self.last_solve_time = None
     

@@ -26,7 +26,7 @@ def main_z3():
         
     from .server import main as server_main
     # Set command line arguments for Z3 mode
-    sys.argv = [sys.argv[0], "--z3", "--lite"]
+    sys.argv = [sys.argv[0], "--z3"]
     return server_main()
 
 def main_pysat():
@@ -40,7 +40,7 @@ def main_pysat():
         
     from .server import main as server_main
     # Set command line arguments for PySAT mode
-    sys.argv = [sys.argv[0], "--pysat", "--lite"]
+    sys.argv = [sys.argv[0], "--pysat"]
     return server_main()
 
 if __name__ == "__main__":

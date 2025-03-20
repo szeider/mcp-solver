@@ -25,7 +25,7 @@ def main():
         print("Warning: Could not find default PySAT prompt file")
     
     # Set default server to PySAT
-    server_cmd = "uv run mcp-solver-pysat --lite"
+    server_cmd = "uv run mcp-solver-pysat"
     
     # Insert defaults into sys.argv if not overridden
     args = sys.argv[1:]

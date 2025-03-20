@@ -28,14 +28,11 @@ class PySATModelManager(SolverManager):
     model items, as well as solving models and extracting solutions.
     """
     
-    def __init__(self, lite_mode: bool = False):
+    def __init__(self):
         """
         Initialize a new PySAT model manager.
-        
-        Args:
-            lite_mode: Whether the solver is running in lite mode
         """
-        super().__init__(lite_mode)
+        super().__init__()
         self.code_items: List[Tuple[int, str]] = []
         self.last_result: Optional[Dict[str, Any]] = None
         self.last_solution: Optional[Dict[str, Any]] = None
