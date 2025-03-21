@@ -6,7 +6,7 @@ import json
 import re
 import textwrap
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 # Core dependencies
@@ -36,6 +36,14 @@ DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn"]
 # Global Rich Console instance with color support
 console = Console(color_system="truecolor")
 _current_title = None  # Stores the current title for system messages
+
+class ToolError:
+    """Class to represent tool errors in a format that LangGraph can process correctly."""
+    def __init__(self, message: str):
+        self.content = f"ERROR: {message}"
+        
+    def __str__(self) -> str:
+        return self.content
 
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
@@ -132,7 +140,11 @@ def format_tool_output(result):
     if hasattr(result, "content"):
         out = result.content
     elif isinstance(result, dict):
-        out = result.get("content", str(result))
+        # Check if it's an MCP error response
+        if result.get("isError") is True:
+            out = f"ERROR: {result.get('content', 'Unknown error')}"
+        else:
+            out = result.get("content", str(result))
     elif isinstance(result, str):
         m = re.search(r"content='([^']*)'", result)
         out = m.group(1) if m else result
@@ -152,15 +164,30 @@ def wrap_tool(tool):
 
         def new_invoke(call_args, config=None):
             args_only = call_args.get("args", {})
+            
+            # Handle missing content parameter for add_item tool
+            if tool_name == "add_item" and "index" in args_only and "content" not in args_only:
+                error_msg = f"Missing required parameter: 'content' is required for add_item tool"
+                log_system(f"Error: {error_msg}")
+                
+                # Return consistent error for LangGraph
+                return ToolError(error_msg)
+                
             args_str = json.dumps(args_only, indent=2).strip()
             if args_str.startswith("{") and args_str.endswith("}"):
                 args_str = args_str[1:-1].strip()
             set_system_title(f"tool: {tool_name}")
             log_system(f"{tool_name} called with args: {args_str}")
-            result = orig_invoke(call_args, config)
-            formatted = format_tool_output(result)
-            log_system(f"{tool_name} output: {formatted}")
-            return result
+            
+            try:
+                result = orig_invoke(call_args, config)
+                formatted = format_tool_output(result)
+                log_system(f"{tool_name} output: {formatted}")
+                return result
+            except Exception as e:
+                error_msg = f"Tool execution failed: {str(e)}"
+                log_system(f"Error: {error_msg}")
+                return ToolError(error_msg)
 
         updates["invoke"] = new_invoke
     if hasattr(tool, "ainvoke"):
@@ -168,15 +195,30 @@ def wrap_tool(tool):
 
         async def new_ainvoke(call_args, config=None):
             args_only = call_args.get("args", {})
+            
+            # Handle missing content parameter for add_item tool  
+            if tool_name == "add_item" and "index" in args_only and "content" not in args_only:
+                error_msg = f"Missing required parameter: 'content' is required for add_item tool"
+                log_system(f"Error: {error_msg}")
+                
+                # Return consistent error for LangGraph
+                return ToolError(error_msg)
+                
             args_str = json.dumps(args_only, indent=2).strip()
             if args_str.startswith("{") and args_str.endswith("}"):
                 args_str = args_str[1:-1].strip()
             set_system_title(f"TOOL: {tool_name}")
             log_system(f"{tool_name} called with args: {args_str}")
-            result = await orig_ainvoke(call_args, config)
-            formatted = format_tool_output(result)
-            log_system(f"{tool_name} output: {formatted}")
-            return result
+            
+            try:
+                result = await orig_ainvoke(call_args, config)
+                formatted = format_tool_output(result)
+                log_system(f"{tool_name} output: {formatted}")
+                return result
+            except Exception as e:
+                error_msg = f"Tool execution failed: {str(e)}"
+                log_system(f"Error: {error_msg}")
+                return ToolError(error_msg)
 
         updates["ainvoke"] = new_ainvoke
     if updates:
