@@ -167,14 +167,6 @@ def wrap_tool(tool):
         def new_invoke(call_args, config=None):
             args_only = call_args.get("args", {})
             
-            # Handle missing content parameter for add_item tool
-            if tool_name == "add_item" and "index" in args_only and "content" not in args_only:
-                error_msg = f"Missing required parameter: 'content' is required for add_item tool"
-                log_system(f"Error: {error_msg}")
-                
-                # Return consistent error for LangGraph
-                return ToolError(error_msg)
-                
             args_str = json.dumps(args_only, indent=2).strip()
             if args_str.startswith("{") and args_str.endswith("}"):
                 args_str = args_str[1:-1].strip()
@@ -198,14 +190,6 @@ def wrap_tool(tool):
         async def new_ainvoke(call_args, config=None):
             args_only = call_args.get("args", {})
             
-            # Handle missing content parameter for add_item tool  
-            if tool_name == "add_item" and "index" in args_only and "content" not in args_only:
-                error_msg = f"Missing required parameter: 'content' is required for add_item tool"
-                log_system(f"Error: {error_msg}")
-                
-                # Return consistent error for LangGraph
-                return ToolError(error_msg)
-                
             args_str = json.dumps(args_only, indent=2).strip()
             if args_str.startswith("{") and args_str.endswith("}"):
                 args_str = args_str[1:-1].strip()
