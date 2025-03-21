@@ -6,12 +6,14 @@ import json
 import re
 import textwrap
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from pathlib import Path
 
 # Core dependencies
 from .llm_factory import LLMFactory, ModelInfo
-from langchain_mcp_adapters.client import MultiServerMCPClient
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
@@ -282,92 +284,96 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}")
 
     try:
-        async with MultiServerMCPClient() as client:
-            await client.connect_to_server(
-                server_name="MCP Solver",
-                command=mcp_command,
-                args=mcp_args,
-            )
+        # Set up server parameters for stdio connection
+        server_params = StdioServerParameters(
+            command=mcp_command,
+            args=mcp_args
+        )
 
-            # Get all tools and wrap them for the agent
-            tools = client.get_tools()
-            wrapped_tools = [wrap_tool(tool) for tool in tools]
-            
-            # Print tools for debugging
-            print(f"Available tools ({len(wrapped_tools)}):")
-            for i, tool in enumerate(wrapped_tools):
-                print(f"  {i+1}. {tool.name}")
+        # Create a direct client session
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize the connection
+                await session.initialize()
+                
+                # Get tools directly using the langchain-mcp-adapters
+                raw_tools = await load_mcp_tools(session)
+                
+                # Wrap tools for better logging
+                wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
+                
+                # Print tools for debugging
+                print(f"Available tools ({len(wrapped_tools)}):")
+                for i, tool in enumerate(wrapped_tools):
+                    print(f"  {i+1}. {tool.name}")
 
-            # Tracking function that can be attached to any tool
-            def track_tool_call(tool_name, tool_input, tool_output):
-                # Only track useful information and log outputs
-                if tool_name == "get_model":
-                    print(f"Model retrieved: {getattr(tool_output, 'content', str(tool_output))[:100]}...")
-                    
-                    if "Empty Model" in str(tool_output) or "Model is empty" in str(tool_output):
-                        print("WARNING: Model appears to be empty or incomplete")
+                # Custom callback handler for tool tracking
+                class SimpleToolTracker(BaseCallbackHandler):
+                    def on_tool_end(self, output, **kwargs):
+                        tool_name = kwargs.get("name", "unknown_tool")
+                        tool_input = kwargs.get("input", {})
+                        
+                        # Log tool output
+                        if tool_name == "get_model":
+                            print(f"Model retrieved: {getattr(output, 'content', str(output))[:100]}...")
+                            
+                            if "Empty Model" in str(output) or "Model is empty" in str(output):
+                                print("WARNING: Model appears to be empty or incomplete")
 
-                elif tool_name == "solve_model":
-                    print(f"Solve model called: {getattr(tool_output, 'content', str(tool_output))[:100]}...")
-                    
-                    # Check for errors and log them
-                    if isinstance(tool_output, dict) and "error" in tool_output:
-                        error_code = tool_output.get("error", {}).get("code", "")
-                        error_msg = tool_output.get("error", {}).get("message", "")
-                        print(f"Solver error: {error_code} - {error_msg}")
+                        elif tool_name == "solve_model":
+                            print(f"Solve model called: {getattr(output, 'content', str(output))[:100]}...")
+                            
+                            # Check for errors and log them
+                            if isinstance(output, dict) and "error" in output:
+                                error_code = output.get("error", {}).get("code", "")
+                                error_msg = output.get("error", {}).get("message", "")
+                                print(f"Solver error: {error_code} - {error_msg}")
 
-                    elif isinstance(tool_output, dict):
-                        if "status" in tool_output and tool_output["status"] == "SAT":
-                            if "solution" in tool_output:
-                                print("SAT solution found! This solution satisfies all constraints.")
+                            elif isinstance(output, dict):
+                                if "status" in output and output["status"] == "SAT":
+                                    if "solution" in output:
+                                        print("SAT solution found! This solution satisfies all constraints.")
 
-            # Custom callback handler for tool tracking
-            class SimpleToolTracker(BaseCallbackHandler):
-                def on_tool_end(self, output, **kwargs):
-                    tool_name = kwargs.get("name", "unknown_tool")
-                    tool_input = kwargs.get("input", {})
-                    track_tool_call(tool_name, tool_input, output)
+                # Create agent with higher recursion limit and our tool tracker
+                config = RunnableConfig(
+                    recursion_limit=100,
+                    callbacks=[SimpleToolTracker()]
+                )
 
-            # Create agent with higher recursion limit and our tool tracker
-            config = RunnableConfig(
-                recursion_limit=100,
-                callbacks=[SimpleToolTracker()]
-            )
+                # Initialize the solver LLM and create the agent
+                solver_llm = SOLVE_MODEL
+                agent = create_react_agent(solver_llm, wrapped_tools)
 
-            # Initialize the solver LLM and create the agent
-            solver_llm = SOLVE_MODEL
-            agent = create_react_agent(solver_llm, wrapped_tools)
-
-            try:
-                # Regular invoke method
                 try:
-                    print("Sending request to LLM...")
-                    response = await agent.ainvoke({"messages": state["messages"]}, config=config)
-                    print("Received response from LLM.")
+                    # Regular invoke method
+                    try:
+                        print("Sending request to LLM...")
+                        response = await agent.ainvoke({"messages": state["messages"]}, config=config)
+                        print("Received response from LLM.")
 
-                    # Extract the agent's response content
-                    if response.get("messages") and len(response["messages"]) > 0:
-                        agent_reply = response["messages"][-1].content
-                        print("Agent reply received, length:", len(agent_reply))
-                        print(agent_reply)
+                        # Extract the agent's response content
+                        if response.get("messages") and len(response["messages"]) > 0:
+                            agent_reply = response["messages"][-1].content
+                            print("Agent reply received, length:", len(agent_reply))
+                            print(agent_reply)
 
-                        # Add the response to state messages
-                        state["messages"].append({"role": "assistant", "content": agent_reply})
-                    else:
-                        print("Warning: No message content found in response")
-                except Exception as invoke_error:
-                    print(f"Error during LLM invocation: {str(invoke_error)}")
-                    raise invoke_error
+                            # Add the response to state messages
+                            state["messages"].append({"role": "assistant", "content": agent_reply})
+                        else:
+                            print("Warning: No message content found in response")
+                    except Exception as invoke_error:
+                        print(f"Error during LLM invocation: {str(invoke_error)}")
+                        raise invoke_error
 
-            except Exception as e:
-                print(f"Agent error: {str(e)}")
-                import traceback
-                print(traceback.format_exc())
+                except Exception as e:
+                    print(f"Agent error: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
 
-                state["messages"].append({
-                    "role": "assistant",
-                    "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."
-                })
+                    state["messages"].append({
+                        "role": "assistant",
+                        "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."
+                    })
     except Exception as e:
         console.print(f"[bold red]Error connecting to MCP server: {str(e)}[/bold red]")
         sys.exit(1)
