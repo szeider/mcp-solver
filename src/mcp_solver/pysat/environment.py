@@ -60,6 +60,7 @@ from .constraints import (
     at_most_one, exactly_one, 
     implies, mutually_exclusive, if_then_else
 )
+from .templates.mapping import VariableMap
 
 # Exception for timeouts
 class TimeoutException(Exception):
@@ -315,6 +316,8 @@ def exactly_k(variables, k):
             'implies': implies,
             'mutually_exclusive': mutually_exclusive,
             'if_then_else': if_then_else,
+            # Add VariableMap for user code
+            'VariableMap': VariableMap,
         }
         
         # Add common variable types needed for PySAT code
