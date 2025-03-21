@@ -50,10 +50,8 @@ class SetupTest:
     def test_configuration_files(self):
         """Test for the presence of required configuration files."""
         print(f"\n{self.BOLD}Configuration Files:{self.RESET}")
-        # Only check core configuration files
         files = [
-            ("instructions_prompt.md", True),
-            ("instructions_prompt_lite.md", True),
+            ("instructions_prompt_mzn.md", True),
             ("pyproject.toml", True)
         ]
         for file, required in files:

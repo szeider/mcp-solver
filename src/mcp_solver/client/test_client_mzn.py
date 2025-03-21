@@ -10,9 +10,8 @@ def main():
     # Find the standard MiniZinc prompt
     base_dir = Path(__file__).parent.parent.parent.parent
     prompt_paths = [
-        base_dir / "docs" / "standard_prompt_mzn.md",      # Try docs directory first
-        base_dir / "instructions_prompt_lite.md",          # Try lite prompt in root directory
-        base_dir / "instructions_prompt.md",               # Try regular prompt in root directory
+        base_dir / "docs" / "standard_prompt.md",          # Try docs directory first
+        base_dir / "instructions_prompt_mzn.md",          # Try root directory
     ]
     
     # Find the first prompt file that exists

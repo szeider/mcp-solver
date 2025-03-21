@@ -1,10 +1,10 @@
-# MCP Solver Lite – Quick Start Guide
+# MCP Solver – Quick Start Guide
 
-Welcome to the MCP Solver Lite. This document provides concise guidelines on how to interact with the MCP Solver in its streamlined (lite) mode. In this mode, you have access only to the essential tools for building and solving MiniZinc models.
+Welcome to the MCP Solver. This document provides concise guidelines on how to interact with the MCP Solver. You have access to the essential tools for building and solving MiniZinc models.
 
 ## Overview
 
-The MCP Solver integrates MiniZinc constraint solving with the Model Context Protocol, allowing you to create, modify, and solve constraint models. In Lite mode, only the following tools are available:
+The MCP Solver integrates MiniZinc constraint solving with the Model Context Protocol, allowing you to create, modify, and solve constraint models. The following tools are available:
 
 - **clear_model**
 - **add_item**
@@ -28,7 +28,7 @@ These tools let you construct your model incrementally and solve it using the Ch
 - **Indices Start at 0:**  
   Items are added one by one, starting with index 0 (i.e., index=0, index=1, etc.).
 
-## Tool Input and Output Details (Lite Mode)
+## Tool Input and Output Details
 
 1. **clear_model**  
    - **Input:** No arguments.  
@@ -87,4 +87,4 @@ These tools let you construct your model incrementally and solve it using the Ch
 - **Verification:**  
   Always verify the solution after a solve operation by checking that all constraints are met.
 
-Happy modeling with MCP Solver Lite!
+Happy modeling with MCP Solver!

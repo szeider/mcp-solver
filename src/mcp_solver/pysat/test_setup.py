@@ -50,7 +50,7 @@ class PySATSetupTest:
         """Test for the presence of required configuration files."""
         print(f"\n{self.BOLD}Configuration Files:{self.RESET}")
         files = [
-            ("instructions_prompt_pysat_lite.md", True),
+            ("instructions_prompt_pysat.md", True),
             ("pyproject.toml", True)
         ]
         for file, required in files:

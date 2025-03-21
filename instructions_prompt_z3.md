@@ -7,7 +7,6 @@ This document provides information about using MCP Solver with the Z3 SMT Solver
 To run the MCP Solver in Z3 mode:
 
 - Use `mcp-solver-z3` command (instead of `mcp-solver`)
-- Include the `--lite` flag as Z3 currently only supports lite mode
 
 ## Core Features
 

@@ -1,4 +1,4 @@
-# PySAT Solver (Lite Mode)
+# PySAT Solver
 
 This service provides access to PySAT (Python SAT Solver) with a simplified interface. PySAT allows for propositional constraint modeling using CNF (Conjunctive Normal Form).
 

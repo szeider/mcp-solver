@@ -50,7 +50,7 @@ class Z3SetupTest:
         """Test for the presence of required configuration files."""
         print(f"\n{self.BOLD}Configuration Files:{self.RESET}")
         files = [
-            ("instructions_prompt_z3_lite.md", True),
+            ("instructions_prompt_z3.md", True),
             ("pyproject.toml", True)
         ]
         for file, required in files:

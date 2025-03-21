@@ -41,8 +41,6 @@ Originally the *MCP Solver* was implemented as an interface to the MiniZinc cons
 | `solve_model`    | Solve the model with the Chuffed constraint solver           |
 | `get_solution`   | Get specific variable value from solution with optional array indices |
 | `get_solve_time` | Get last solve execution time                                |
-| `get_memo`       | Get current knowledge base                                   |
-| `edit_memo`      | Edit knowledge base                                          |
 
 ---
 
@@ -122,9 +120,8 @@ for Windows:
       }
     }
 ```
-5. The memo file location defaults to the standard configuration directory for your operating system. The default can be overridden in `pyproject.toml`.
-6. Included is an [instructions prompt](./instructions_prompt.md) which should be used together with the text containing citations. On Claude Desktop, the instructions prompt is available via the electrical plug icon.
-7. For Linux there is no Claude Desktop but other alternatives, for instance the [Cursor](https://www.cursor.com) client.
+5. Included is an [instructions prompt](./instructions_prompt.md) which should be used together with the text containing citations. On Claude Desktop, the instructions prompt is available via the electrical plug icon.
+6. For Linux there is no Claude Desktop but other alternatives, for instance the [Cursor](https://www.cursor.com) client.
 
 ---
 
@@ -139,7 +136,7 @@ The MCP Solver also supports a **Lite Mode**, which provides a streamlined inter
 - **solve_model**
 - **get_model**
 
-In Lite mode, the instructions prompt is loaded from `instructions_prompt_lite.md` instead of the full `instructions_prompt.md`. If you provide the instructions prompt manually to your client, make sure to provide the correct prompt.
+In each mode, the appropriate instructions prompt is loaded: MiniZinc mode: `instructions_prompt_mzn.md`, PySAT mode: `instructions_prompt_pysat.md`, Z3 mode: `instructions_prompt_z3.md`. If you provide the instructions prompt manually to your client, make sure to provide the correct prompt.
 To run the MCP Solver, update your configuration file as follows (similar for Windows):
 
 ```

@@ -8,13 +8,13 @@ MCP_CLIENT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 
 DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
 # MiniZinc configuration
-MZN_PROMPT_FILE = "instructions_prompt_lite.md"
+MZN_PROMPT_FILE = "instructions_prompt_mzn.md"
 
 # PySAT configuration
-PYSAT_PROMPT_FILE = "instructions_prompt_pysat_lite.md"
+PYSAT_PROMPT_FILE = "instructions_prompt_pysat.md"
 
 # Z3 configuration
-Z3_PROMPT_FILE = "instructions_prompt_z3_lite.md"
+Z3_PROMPT_FILE = "instructions_prompt_z3.md"
 
 # Get absolute paths to key directories
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

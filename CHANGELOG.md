@@ -10,12 +10,12 @@ Here's a suggestion for the new version number and a corresponding changelog ent
 
 - **New Feature:** Introduced Lite Mode for the MCP Solver. When run with the `--lite` flag, the server advertises only a reduced set of tools (clear_model, add_item, replace_item, delete_item, and solve_model).
 - **New Feature:** In Lite Mode, the `solve_model` tool returns only the status (and the solution if SAT) without additional metadata.
-- **New Feature:** The instructions prompt in Lite Mode is loaded from `instructions_prompt_lite.md` instead of `instructions_prompt.md`.
+- **New Feature:** Mode-specific instruction prompts are used: `instructions_prompt_mzn.md` for MiniZinc, `instructions_prompt_pysat.md` for PySAT, and `instructions_prompt_z3.md` for Z3.
 
 ### [2.2.0] - 2025-02-15
 
 - **New Feature:** Integrated static prompt endpoints (`prompts/list` and `prompts/get`) to advertise MCP prompt templates ("quick_prompt" and "detailed_prompt") without requiring any arguments.
-- **New Feature:** Advertised detailed tool capabilities by adding descriptive metadata for each tool in the server’s capabilities declaration.
+- **New Feature:** Advertised detailed tool capabilities by adding descriptive metadata for each tool in the server's capabilities declaration.
 - **Improvement:** Enhanced error reporting for tool endpoints with improved logging and standardized error responses.
 - **Update:** Refactored server initialization to explicitly log the declared capabilities for greater transparency and easier debugging.
 

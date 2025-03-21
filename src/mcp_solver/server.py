@@ -13,8 +13,7 @@ import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
-from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT, CLEANUP_TIMEOUT, MEMO_FILE, ITEM_CHARS, INSTRUCTIONS_PROMPT
-from .memo import MemoManager
+from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT, CLEANUP_TIMEOUT, ITEM_CHARS, INSTRUCTIONS_PROMPT
 
 # Global flags for mode selection
 Z3_MODE = False
@@ -57,8 +56,6 @@ async def serve() -> None:
         model_mgr = MiniZincModelManager()
         logging.getLogger(__name__).info("Using MiniZinc model manager")
     
-    memo = MemoManager(MEMO_FILE)
-
     # Helper function to get mode-specific descriptions
     def get_description(descriptions: dict) -> str:
         """
@@ -102,14 +99,14 @@ async def serve() -> None:
         if name == "instructions":
             # Z3 and PySAT modes
             if Z3_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3_lite.md")
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3.md")
                 logging.getLogger(__name__).info("Using Z3 instructions")
             elif PYSAT_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat_lite.md")
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat.md")
                 logging.getLogger(__name__).info("Using PySAT instructions")
             # MiniZinc mode
             else:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_lite.md")
+                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_mzn.md")
                 logging.getLogger(__name__).info("Using MiniZinc instructions")
             
             try:

@@ -11,7 +11,7 @@ def main():
     base_dir = Path(__file__).parent.parent.parent.parent
     prompt_paths = [
         base_dir / "docs" / "standard_prompt_pysat.md",  # Try docs directory first
-        base_dir / "instructions_prompt_pysat_lite.md",  # Try root directory
+        base_dir / "instructions_prompt_pysat.md",  # Try root directory
     ]
     
     # Find the first prompt file that exists
