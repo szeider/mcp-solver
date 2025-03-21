@@ -228,17 +228,15 @@ class PySATModelManager(SolverManager):
         try:
             if not self.initialized:
                 return get_standardized_response(
-                    success=True,  # Always return success=True to maintain connection
+                    success=False,
                     message="Model manager not initialized",
-                    status="error",
                     error="Not initialized"
                 )
             
             if not self.code_items:
                 return get_standardized_response(
-                    success=True,  # Always return success=True to maintain connection
+                    success=False,
                     message="No model items to solve",
-                    status="error",
                     error="Empty model"
                 )
             
@@ -268,9 +266,8 @@ class PySATModelManager(SolverManager):
                 if solve_calls == 0:
                     self.logger.warning("No solver.solve() call found in the code")
                     return get_standardized_response(
-                        success=True,  # Always return success=True to maintain connection
+                        success=False,
                         message="No solver.solve() call found in the code. Make sure to create a solver and call its solve() method.",
-                        status="error",
                         error="Missing solve call",
                         code_analysis="Missing solver.solve() call"
                     )
@@ -286,9 +283,8 @@ class PySATModelManager(SolverManager):
                 if export_calls == 0:
                     self.logger.warning("No export_solution() call found in the code")
                     return get_standardized_response(
-                        success=True,  # Always return success=True to maintain connection
+                        success=False,
                         message="No export_solution() call found in the code. Make sure to call export_solution() with your result.",
-                        status="error",
                         error="Missing export_solution call",
                         code_analysis="Missing export_solution() call"
                     )
@@ -326,9 +322,8 @@ class PySATModelManager(SolverManager):
                 
                 self.logger.error(f"Syntax error in code at line {line_num}, column {col_num}: {str(e)}")
                 return get_standardized_response(
-                    success=True,  # Always return success=True to maintain connection
+                    success=False,
                     message=f"Syntax error at line {line_num}, column {col_num}: {str(e)}",
-                    status="error",
                     error="Syntax error",
                     error_details={
                         "line": line_num,
@@ -346,104 +341,34 @@ class PySATModelManager(SolverManager):
             
             # Set timeout
             timeout_seconds = timeout.total_seconds()
-            self.last_solve_time = 0.0
             
-            # Execute code with timeout using asyncio to avoid blocking the event loop
+            # Execute code with timeout
             start_time = time.time()
+            self.last_result = execute_pysat_code(modified_code, timeout=timeout_seconds)
+            self.last_solve_time = time.time() - start_time
             
-            # Use run_in_executor to execute the synchronous execute_pysat_code in a separate thread
-            # This prevents it from blocking the asyncio event loop
-            loop = asyncio.get_running_loop()
-            try:
-                # Execute the code in a thread pool to not block the event loop
-                self.last_result = await loop.run_in_executor(
-                    None,  # Use default executor
-                    lambda: execute_pysat_code(modified_code, timeout=timeout_seconds)
-                )
-                self.last_solve_time = time.time() - start_time
-                
-            except asyncio.CancelledError:
-                # Handle cancellation during execution - create a timeout response
-                self.last_solve_time = time.time() - start_time
-                self.logger.warning(f"Execution was cancelled after {self.last_solve_time:.2f} seconds")
-                
-                # Create a timeout-like response that is still a success
-                self.last_result = {
-                    'success': True,  # Mark as successful to prevent disconnection
-                    'error': None,
-                    'status': 'timeout',
-                    'output': f"Execution was cancelled after {self.last_solve_time:.2f} seconds",
-                    'solution': None,
-                    'timeout': True
-                }
-                
-            except Exception as e:
-                # Handle other exceptions during execution
-                self.last_solve_time = time.time() - start_time
-                self.logger.error(f"Error executing code: {str(e)}", exc_info=True)
-                
-                # Create an error response that is still a success
-                self.last_result = {
-                    'success': True,  # Mark as successful to prevent disconnection
-                    'error': f"Execution error: {str(e)}",
-                    'status': 'error',
-                    'output': f"Error during execution: {str(e)}",
-                    'solution': None
-                }
-            
-            # If solve time exceeds timeout (shouldn't happen but just in case)
-            if self.last_solve_time > timeout_seconds:
-                self.logger.warning(f"Actual solving time ({self.last_solve_time:.2f}s) exceeds timeout ({timeout_seconds}s)")
-            
-            # Check if there was a timeout
-            if self.last_result and self.last_result.get('timeout') is True:
-                # Handle timeout as a special case
-                self.logger.warning(f"PySAT execution timed out after {timeout_seconds} seconds")
-                
-                # Create a standardized timeout response
-                self.last_solution = {
-                    "satisfiable": None,
-                    "status": "timeout",
-                    "values": {},
-                    "solve_time": f"{self.last_solve_time:.6f} seconds",
-                    "timeout": True
-                }
-                
-                # Return a timeout response that's successful but indicates timeout
-                timeout_response = {
-                    "message": f"Model execution timed out after {timeout_seconds} seconds",
-                    "success": True,  # We're treating timeout as a successful execution with a timeout result
-                    "status": "timeout",
-                    "solve_time": self.last_solve_time,
-                    "timeout": True
-                }
-                
-                # Log that we're returning a controlled timeout response
-                self.logger.info("Returning controlled timeout response to client")
-                return timeout_response
-            
-            # Check if there were other execution errors but still maintain connection
-            elif self.last_result and self.last_result.get("error"):
+            # Check if there were execution errors
+            if self.last_result.get("error"):
                 error_msg = self.last_result["error"]
                 self.logger.error(f"Error executing code: {error_msg}")
                 
-                # Return a response that indicates an error but is still a success
-                error_response = {
-                    "message": f"Error executing code: {error_msg}",
-                    "success": True,  # Mark as successful to prevent disconnection
-                    "status": "error",
-                    "error": error_msg,
-                    "solve_time": self.last_solve_time
-                }
-                
                 # If we captured line issues during analysis, include them in error details
                 if line_issues:
-                    error_response["error_details"] = {
-                        "execution_error": error_msg,
-                        "code_issues": line_issues
-                    }
+                    return get_standardized_response(
+                        success=False,
+                        message=f"Error executing code: {error_msg}",
+                        error="Execution error",
+                        error_details={
+                            "execution_error": error_msg,
+                            "code_issues": line_issues
+                        }
+                    )
                 
-                return error_response
+                return get_standardized_response(
+                    success=False,
+                    message=f"Error executing code: {error_msg}",
+                    error="Execution error"
+                )
             
             # Extract solver output to check for satisfiability
             output = self.last_result.get("output", "")
@@ -479,6 +404,46 @@ class PySATModelManager(SolverManager):
             # Ensure there's a 'values' dictionary for standardized access
             if "values" not in self.last_solution:
                 self.last_solution["values"] = {}
+                
+            # Extract solution data from the debug output if available
+            # Look for the _LAST_SOLUTION debug output which contains the complete solution data
+            last_solution_pattern = re.compile(r"DEBUG - _LAST_SOLUTION set to: (.*)")
+            last_solution_match = last_solution_pattern.search(output)
+            if last_solution_match:
+                try:
+                    last_solution_str = last_solution_match.group(1)
+                    # Clean up the string to make it valid Python syntax
+                    last_solution_str = last_solution_str.replace("'", '"').replace("True", "true").replace("False", "false")
+                    # Try to parse as JSON
+                    import json
+                    try:
+                        last_solution_data = json.loads(last_solution_str)
+                        if isinstance(last_solution_data, dict):
+                            # Copy all dictionaries from last_solution_data to self.last_solution
+                            # to preserve custom dictionaries like 'casting', 'schedule', etc.
+                            for key, value in last_solution_data.items():
+                                if isinstance(value, dict):
+                                    # Copy custom dictionaries directly to last_solution
+                                    self.last_solution[key] = value
+                                    self.logger.debug(f"Copied custom dictionary '{key}' to solution")
+                                    
+                            # Also populate values dictionary from individual value fields
+                            if "values" in last_solution_data:
+                                self.logger.debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
+                                # Convert JSON booleans back to Python booleans
+                                for key, value in last_solution_data["values"].items():
+                                    if value is True or value == "true":
+                                        self.last_solution["values"][key] = True
+                                    elif value is False or value == "false":
+                                        self.last_solution["values"][key] = False
+                                    else:
+                                        self.last_solution["values"][key] = value
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"Error parsing solution JSON: {str(e)}")
+                        self.last_solution["warning"] = f"Solution parsing error: {str(e)}"
+                except Exception as e:
+                    self.logger.error(f"Error extracting solution: {str(e)}")
+                    self.last_solution["warning"] = f"Solution extraction error: {str(e)}"
             
             # Add solve time to solution
             self.last_solution["solve_time"] = f"{self.last_solve_time:.6f} seconds"
@@ -496,7 +461,7 @@ class PySATModelManager(SolverManager):
             response = {
                 "message": "Model solved successfully" + (" (satisfiable)" if satisfiable else " (unsatisfiable)"),
                 "success": True,
-                "solve_time": self.last_solve_time,
+                "solve_time": f"{self.last_solve_time:.6f} seconds",
                 "output": output,
                 "satisfiable": satisfiable
             }
@@ -517,14 +482,12 @@ class PySATModelManager(SolverManager):
             # Log the error
             self.logger.error(f"Error in solve_model: {str(e)}", exc_info=True)
             
-            # Return a structured error response that is still a success
-            return {
-                "message": f"Error solving model: {str(e)}",
-                "success": True,  # Mark as successful to prevent disconnection
-                "status": "error",
-                "error": str(e),
-                "solve_time": self.last_solve_time if hasattr(self, 'last_solve_time') else 0.0
-            }
+            # Return a structured error response
+            return get_standardized_response(
+                success=False,
+                message=f"Error solving model: {str(e)}",
+                error="Internal error"
+            )
             
     def _enhance_code_for_debugging(self, code_string: str) -> str:
         """

@@ -465,4 +465,4 @@ def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
             },
             'solution': None,
             'status': 'error'  # Indicate that there was an error even though success=True
-        } 
+        }
