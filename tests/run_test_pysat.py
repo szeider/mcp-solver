@@ -9,6 +9,7 @@ import sys
 import argparse
 from datetime import datetime
 from pathlib import Path
+from collections import Counter
 
 # Import test configuration
 from test_config import (
@@ -59,6 +60,9 @@ def run_problem(problem_path, save_results=False):
         response_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_response.txt")
         model_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_model.py")
     
+    # Initialize tool call counter
+    tool_calls = Counter()
+    
     # Run the test-client-pysat command
     try:
         print(f"\nExecuting: {cmd}\n")
@@ -82,6 +86,16 @@ def run_problem(problem_path, save_results=False):
                 
                 for line in stream:
                     print(f"{prefix}: {line}", end='')
+                    
+                    # Track tool usage
+                    if "TOOL:" in line:
+                        parts = line.split(":", 2)
+                        if len(parts) >= 2:
+                            tool_name = parts[1].strip()
+                            # Extract just the tool name without additional info
+                            if " " in tool_name:
+                                tool_name = tool_name.split(" ")[0]
+                            tool_calls[tool_name] += 1
                     
                     # If saving is enabled, parse output to extract model and response
                     if save_results and prefix == "STDOUT":
@@ -127,6 +141,18 @@ def run_problem(problem_path, save_results=False):
         
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END]\n{'-'*60}")
         
+        # Display tool usage statistics
+        if tool_calls:
+            print(f"\n{'-'*60}")
+            print(f"Tool Usage Statistics for {problem_name}:")
+            print(f"{'-'*60}")
+            
+            # Sort by most frequently used tools
+            for tool, count in sorted(tool_calls.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {tool}: {count} calls")
+            
+            print(f"  Total tool calls: {sum(tool_calls.values())}")
+        
         # Save the model and agent response if enabled
         if save_results:
             if model_content:
@@ -141,15 +167,15 @@ def run_problem(problem_path, save_results=False):
         
         if success:
             print(f"\n✅ Successfully tested: {problem_name}")
-            return True
+            return True, tool_calls
         else:
             print(f"\n❌ Failed to test {problem_name} (Exit code: {process.returncode})")
-            return False
+            return False, tool_calls
             
     except Exception as e:
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END - ERROR]\n{'-'*60}")
         print(f"\n❌ Failed to test {problem_name}: {str(e)}")
-        return False
+        return False, Counter()
 
 def main():
     """Main function to run PySAT tests"""
@@ -187,13 +213,18 @@ def main():
     # Track results
     success_count = 0
     failed_tests = []
+    all_tool_calls = Counter()
     
     # Run each test
     for problem_file in sorted(problem_files):
-        if run_problem(problem_file, save_results=args.save):
+        success, tool_counts = run_problem(problem_file, save_results=args.save)
+        if success:
             success_count += 1
         else:
             failed_tests.append(os.path.basename(problem_file))
+        
+        # Aggregate tool usage stats
+        all_tool_calls.update(tool_counts)
     
     # Print summary
     print(f"\n{'='*60}")
@@ -207,6 +238,19 @@ def main():
         print("\nFailed tests:")
         for test in failed_tests:
             print(f"  - {test}")
+    
+    # Print overall tool usage statistics
+    if all_tool_calls:
+        print(f"\n{'-'*60}")
+        print(f"OVERALL TOOL USAGE STATISTICS:")
+        print(f"{'-'*60}")
+        
+        # Sort by most frequently used tools
+        for tool, count in sorted(all_tool_calls.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {tool}: {count} calls")
+        
+        print(f"  Total tool calls: {sum(all_tool_calls.values())}")
+        print(f"  Average tool calls per problem: {sum(all_tool_calls.values()) / len(problem_files):.2f}")
     
     if len(problem_files) == success_count:
         print("\n🎉 All PySAT tests passed! 🎉")

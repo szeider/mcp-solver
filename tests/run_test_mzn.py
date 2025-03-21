@@ -10,6 +10,7 @@ import sys
 import argparse
 from datetime import datetime
 from pathlib import Path
+from collections import Counter
 
 # Import test configuration
 from test_config import (
@@ -57,6 +58,9 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     if timeout and timeout != DEFAULT_TIMEOUT:
         cmd += f" --timeout {timeout}"
     
+    # Initialize tool call counter
+    tool_calls = Counter()
+    
     # Run the command and capture output
     print(f"Running command: {cmd}")
     start_time = datetime.now()
@@ -66,14 +70,31 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
             shell=True, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            bufsize=1,
+            universal_newlines=True
         )
         
-        # Use communicate with timeout to prevent hanging
-        stdout, stderr = process.communicate(timeout=timeout)
+        # Process output in real-time to track tool usage
+        for line in iter(process.stdout.readline, ''):
+            if verbose:
+                print(line, end='')
+            
+            # Track tool usage
+            if "TOOL:" in line:
+                parts = line.split(":", 2)
+                if len(parts) >= 2:
+                    tool_name = parts[1].strip()
+                    # Extract just the tool name without additional info
+                    if " " in tool_name:
+                        tool_name = tool_name.split(" ")[0]
+                    tool_calls[tool_name] += 1
         
-        # Get exit code
-        exit_code = process.returncode
+        # Wait for process to complete with timeout
+        exit_code = process.wait(timeout=timeout)
+        
+        # Read any stderr if needed
+        stderr = process.stderr.read()
         
     except subprocess.TimeoutExpired:
         print(f"ERROR: Test timed out after {timeout} seconds")
@@ -81,7 +102,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
             process.kill()
         except:
             pass
-        return False
+        return False, Counter()
         
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
@@ -90,18 +111,26 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     print(f"Exit code: {exit_code}")
     print(f"Duration: {duration:.2f} seconds")
     
+    # Display tool usage statistics
+    if tool_calls:
+        print(f"\n{'-'*60}")
+        print(f"Tool Usage Statistics for {problem_name}:")
+        print(f"{'-'*60}")
+        
+        # Sort by most frequently used tools
+        for tool, count in sorted(tool_calls.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {tool}: {count} calls")
+        
+        print(f"  Total tool calls: {sum(tool_calls.values())}")
+    
     if exit_code != 0:
         print("ERROR: Test failed with non-zero exit code")
         print("STDERR:")
         print(stderr)
-        return False
-    
-    if verbose:
-        print("STDOUT:")
-        print(stdout)
+        return False, tool_calls
     
     print("Test completed successfully")
-    return True
+    return True, tool_calls
 
 def main():
     """Main function to run MiniZinc tests"""
@@ -138,13 +167,18 @@ def main():
     # Track results
     success_count = 0
     failed_tests = []
+    all_tool_calls = Counter()
     
     # Run each test
     for problem_file in sorted(problem_files):
-        if run_test(problem_file, verbose=args.verbose, timeout=args.timeout):
+        success, tool_counts = run_test(problem_file, verbose=args.verbose, timeout=args.timeout)
+        if success:
             success_count += 1
         else:
             failed_tests.append(os.path.basename(problem_file))
+        
+        # Aggregate tool usage stats
+        all_tool_calls.update(tool_counts)
     
     # Print summary
     print(f"\n{'='*60}")
@@ -158,6 +192,19 @@ def main():
         print("\nFailed tests:")
         for test in failed_tests:
             print(f"  - {test}")
+    
+    # Print overall tool usage statistics
+    if all_tool_calls:
+        print(f"\n{'-'*60}")
+        print(f"OVERALL TOOL USAGE STATISTICS:")
+        print(f"{'-'*60}")
+        
+        # Sort by most frequently used tools
+        for tool, count in sorted(all_tool_calls.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {tool}: {count} calls")
+        
+        print(f"  Total tool calls: {sum(all_tool_calls.values())}")
+        print(f"  Average tool calls per problem: {sum(all_tool_calls.values()) / len(problem_files):.2f}")
     
     if len(problem_files) == success_count:
         print("\n🎉 All MiniZinc tests passed! 🎉")

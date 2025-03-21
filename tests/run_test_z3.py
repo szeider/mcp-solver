@@ -10,6 +10,7 @@ import sys
 import argparse
 from datetime import datetime
 from pathlib import Path
+from collections import Counter
 
 # Import test configuration
 from test_config import (
@@ -52,6 +53,9 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
     if verbose:
         cmd += " --streaming"  # Add streaming output if verbose
     
+    # Initialize tool call counter
+    tool_calls = Counter()
+    
     # Run the test-client-z3 command
     try:
         print(f"\nExecuting: {cmd}\n")
@@ -62,6 +66,7 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
             # In streaming mode, use standard subprocess.run to show output in real-time
             process = subprocess.run(cmd, shell=True, check=False)
             success = process.returncode == 0
+            # Note: In streaming mode, we cannot track tool calls reliably
         else:
             # Capture output but print it immediately
             process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
@@ -78,6 +83,16 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
                         break
                     print(line, end='', flush=True)
                     stdout_lines.append(line)
+                    
+                    # Track tool usage
+                    if "TOOL:" in line:
+                        parts = line.split(":", 2)
+                        if len(parts) >= 2:
+                            tool_name = parts[1].strip()
+                            # Extract just the tool name without additional info
+                            if " " in tool_name:
+                                tool_name = tool_name.split(" ")[0]
+                            tool_calls[tool_name] += 1
                 
                 # Wait for process to complete
                 process.wait(timeout=timeout)
@@ -95,21 +110,33 @@ def run_test(problem_file, verbose=False, timeout=DEFAULT_TIMEOUT):
                 process.kill()
                 print(f"\n{'-'*60}\n[CLIENT OUTPUT END - TIMED OUT]\n{'-'*60}")
                 print(f"\n⏱️ Test timed out after {timeout} seconds: {problem_name}")
-                return False
+                return False, Counter()
         
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END]\n{'-'*60}")
         
+        # Display tool usage statistics
+        if tool_calls:
+            print(f"\n{'-'*60}")
+            print(f"Tool Usage Statistics for {problem_name}:")
+            print(f"{'-'*60}")
+            
+            # Sort by most frequently used tools
+            for tool, count in sorted(tool_calls.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {tool}: {count} calls")
+            
+            print(f"  Total tool calls: {sum(tool_calls.values())}")
+        
         if success:
             print(f"\n✅ Successfully tested: {problem_name}")
-            return True
+            return True, tool_calls
         else:
             print(f"\n❌ Failed to test {problem_name} (Exit code: {process.returncode})")
-            return False
+            return False, tool_calls
             
     except Exception as e:
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END - ERROR]\n{'-'*60}")
         print(f"\n❌ Failed to test {problem_name}: {str(e)}")
-        return False
+        return False, Counter()
 
 def main():
     """Main function to run Z3 tests"""
@@ -146,13 +173,18 @@ def main():
     # Track results
     success_count = 0
     failed_tests = []
+    all_tool_calls = Counter()
     
     # Run each test
     for problem_file in sorted(problem_files):
-        if run_test(problem_file, verbose=args.verbose, timeout=args.timeout):
+        success, tool_counts = run_test(problem_file, verbose=args.verbose, timeout=args.timeout)
+        if success:
             success_count += 1
         else:
             failed_tests.append(os.path.basename(problem_file))
+        
+        # Aggregate tool usage stats
+        all_tool_calls.update(tool_counts)
     
     # Print summary
     print(f"\n{'='*60}")
@@ -166,6 +198,19 @@ def main():
         print("\nFailed tests:")
         for test in failed_tests:
             print(f"  - {test}")
+    
+    # Print overall tool usage statistics
+    if all_tool_calls:
+        print(f"\n{'-'*60}")
+        print(f"OVERALL TOOL USAGE STATISTICS:")
+        print(f"{'-'*60}")
+        
+        # Sort by most frequently used tools
+        for tool, count in sorted(all_tool_calls.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {tool}: {count} calls")
+        
+        print(f"  Total tool calls: {sum(all_tool_calls.values())}")
+        print(f"  Average tool calls per problem: {sum(all_tool_calls.values()) / len(problem_files):.2f}")
     
     if len(problem_files) == success_count:
         print("\n🎉 All Z3 tests passed! 🎉")
