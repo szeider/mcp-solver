@@ -21,6 +21,8 @@ from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import re
 import random
 import logging
+import multiprocessing
+from multiprocessing import Process, Queue
 
 # Import path management to ensure we get the correct PySAT
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -105,41 +107,29 @@ def safe_import(name, *args, **kwargs):
         raise ImportError(f"Module '{name}' is not allowed in the restricted environment")
     return __import__(name, *args, **kwargs)
 
-def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
+def _execute_pysat_code_in_process(code: str, result_queue: Queue) -> None:
     """
-    Executes PySAT Python code in a secure environment.
+    Helper function to execute PySAT code in a separate process.
+    This function will be run in a separate process.
     
     Args:
-        code: The PySAT Python code to execute
-        timeout: Maximum execution time in seconds
-        
-    Returns:
-        A dictionary containing the execution results:
-        {
-            'success': bool,
-            'output': str,
-            'error': Optional[str],
-            'solution': Optional[Dict]
-        }
+        code: PySAT code to execute
+        result_queue: Queue to send the result back to the parent process
     """
-    logger = logging.getLogger(__name__)
-    logger.debug(f"Executing PySAT code with timeout {timeout} seconds")
-    
-    # Initialize result dictionary
-    result = {
-        'success': False,
-        'output': '',
-        'error': None,
-        'solution': None
-    }
-    
-    # Capture standard output and error
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
-    
     try:
-        # Process imports
-        # We need to modify the code to directly import the modules we need
+        # Capture standard output and error
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        
+        # Initialize result dictionary
+        result = {
+            'success': False,
+            'output': '',
+            'error': None,
+            'solution': None
+        }
+        
+        # Process imports (same as in the original function)
         processed_code = ""
         in_import = False
         import_lines = []
@@ -156,7 +146,7 @@ def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
             else:
                 regular_lines.append(line)
         
-        # Add fixed imports at the top of the code
+        # Add fixed imports at the top (same as in original function)
         processed_code = """
 # Standard library imports provided by the environment
 import collections
@@ -250,7 +240,7 @@ def exactly_k(variables, k):
 
 """ + '\n'.join(regular_lines)
         
-        # Setup restricted globals for execution
+        # Setup restricted globals for execution (same as in original function)
         restricted_globals = {
             '__builtins__': {
                 # Allowed builtins
@@ -306,6 +296,7 @@ def exactly_k(variables, k):
             'random': random,
             're': re,
             'json': json,
+            'time': time,  # Add time module to the restricted globals
             # Add cardinality template functions
             'at_most_k': at_most_k,
             'at_least_k': at_least_k,
@@ -336,11 +327,10 @@ def exactly_k(variables, k):
             # First, compile the code to catch syntax errors before execution
             compiled_code = compile(processed_code, '<pysat_code>', 'exec')
             
-            # Execute code with timeout and capture output
+            # Execute code and capture output
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                with time_limit(timeout):
-                    # Execute the compiled code
-                    exec(compiled_code, restricted_globals)
+                # Execute the compiled code (no need for time_limit here as we're in a separate process)
+                exec(compiled_code, restricted_globals)
             
             # Extract standard output and error
             stdout = stdout_capture.getvalue()
@@ -350,179 +340,129 @@ def exactly_k(variables, k):
             solution = None
             if '_LAST_SOLUTION' in restricted_globals:
                 solution = restricted_globals['_LAST_SOLUTION']
-                logger.debug(f"_LAST_SOLUTION set to: {solution}")
                 
             # Return success result with output and solution
             result['success'] = True
             result['output'] = stdout + '\n' + stderr
             result['solution'] = solution
             
-        except SyntaxError as e:
-            # Handle syntax errors in the code
-            line_num = e.lineno if hasattr(e, 'lineno') else '?'
-            col_num = e.offset if hasattr(e, 'offset') else '?'
-            error_text = e.text.strip() if hasattr(e, 'text') and e.text else 'unknown'
-            
-            error_msg = f"Syntax error at line {line_num}, column {col_num}: {str(e)}"
-            logger.error(error_msg)
-            
-            # Add detailed syntax error information
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'SyntaxError',
-                'line': line_num,
-                'column': col_num,
-                'text': error_text,
-                'message': str(e)
-            }
-            result['output'] = f"Syntax error: {error_msg}\n{stderr_capture.getvalue()}"
-            
-        except NameError as e:
-            # Handle undefined variable errors
-            var_match = re.search(r"name '(\w+)' is not defined", str(e))
-            var_name = var_match.group(1) if var_match else "unknown"
-            
-            error_msg = f"Undefined variable: '{var_name}'. {str(e)}"
-            logger.error(error_msg)
-            
-            # Provide helpful suggestions for common undefined variables
-            suggestions = {}
-            if var_name in ['variables', 'variable', 'vars', 'var']:
-                suggestions['hint'] = "Did you forget to initialize a variables dictionary? Use 'variables = {}' before adding variables."
-            elif var_name in ['cnf', 'formula', 'problem']:
-                suggestions['hint'] = "Did you forget to create a CNF object? Use 'cnf = CNF()' before adding clauses."
-            elif var_name in ['solver', 'sat_solver']:
-                suggestions['hint'] = "Did you forget to create a solver? Use 'solver = Glucose3(cnf)' or another supported solver."
-            
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'NameError',
-                'variable': var_name,
-                'message': str(e),
-                'suggestions': suggestions if suggestions else None
-            }
-            result['output'] = f"NameError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
-        except TypeError as e:
-            # Handle type errors
-            error_msg = f"Type error: {str(e)}"
-            logger.error(error_msg)
-            
-            # Extract function name if it's a function call error
-            func_match = re.search(r"(\w+)\(\) takes", str(e))
-            func_name = func_match.group(1) if func_match else None
-            
-            # Add call context for method/function type errors
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'TypeError',
-                'function': func_name,
-                'message': str(e)
-            }
-            
-            # Add helpful suggestions for common type errors
-            if "takes 1 positional argument but 2 were given" in str(e):
-                result['error_details']['hint'] = "You may be calling a method without using the dot notation (object.method instead of method(object))."
-            elif "object is not callable" in str(e):
-                result['error_details']['hint'] = "You may be trying to call something that is not a function."
-                
-            result['output'] = f"TypeError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
-        except AttributeError as e:
-            # Handle attribute errors
-            error_msg = f"Attribute error: {str(e)}"
-            logger.error(error_msg)
-            
-            # Extract object and attribute names
-            attr_match = re.search(r"'(\w+)' object has no attribute '(\w+)'", str(e))
-            if attr_match:
-                obj_type, attr_name = attr_match.groups()
-                
-                # Add detailed attribute error information
-                result['error_details'] = {
-                    'type': 'AttributeError',
-                    'object_type': obj_type,
-                    'attribute': attr_name,
-                    'message': str(e)
-                }
-                
-                # Common attribute error suggestions
-                if obj_type == 'NoneType':
-                    result['error_details']['hint'] = "You're trying to access an attribute on a None value. Check if your variable was properly initialized."
-                elif attr_name == 'solve' and obj_type in ['dict', 'list', 'int', 'str']:
-                    result['error_details']['hint'] = f"The '{obj_type}' object is not a solver. Did you forget to create a solver with 'solver = Glucose3(cnf)' or similar?"
-                elif attr_name == 'add_clause' and obj_type in ['dict', 'list', 'int', 'str']:
-                    result['error_details']['hint'] = f"The '{obj_type}' object is not a CNF formula. Did you forget to create a CNF with 'cnf = CNF()' or similar?"
-            
-            result['error'] = error_msg
-            result['output'] = f"AttributeError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
-        except KeyError as e:
-            # Handle key errors
-            key = str(e).strip("'")
-            error_msg = f"Key error: Key '{key}' not found"
-            logger.error(error_msg)
-            
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'KeyError',
-                'key': key,
-                'message': str(e)
-            }
-            result['output'] = f"KeyError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
-        except IndexError as e:
-            # Handle index errors
-            error_msg = f"Index error: {str(e)}"
-            logger.error(error_msg)
-            
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'IndexError',
-                'message': str(e)
-            }
-            result['output'] = f"IndexError: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
-        except TimeoutException:
-            # Handle timeout errors
-            error_msg = f"Execution timed out after {timeout} seconds"
-            logger.error(error_msg)
-            
-            result['error'] = error_msg
-            result['error_details'] = {
-                'type': 'TimeoutError',
-                'timeout': timeout,
-                'message': error_msg
-            }
-            result['output'] = f"Timeout Error: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            
         except Exception as e:
-            # Handle all other exceptions
-            error_msg = f"Execution error: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            
-            # Get traceback information
-            tb_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
-            
+            # Handle any exception
+            error_msg = f"Error: {type(e).__name__}: {str(e)}"
             result['error'] = error_msg
-            result['error_details'] = {
-                'type': type(e).__name__,
-                'message': str(e),
-                'traceback': tb_str
-            }
-            result['output'] = f"Error: {error_msg}\n{tb_str}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
+            result['output'] = f"{error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
             
+        # Send the result back through the queue
+        result_queue.put(result)
     except Exception as e:
-        # Handle unexpected errors in the environment itself
-        error_msg = f"Environment error: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        result['error'] = error_msg
-        result['output'] = f"Environment Error: {error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-        
-    finally:
-        # Ensure output is captured even in case of error
-        if not result['output']:
-            result['output'] = stdout_capture.getvalue() + '\n' + stderr_capture.getvalue()
+        # Handle any unexpected exceptions in the process
+        result_queue.put({
+            'success': False,
+            'error': f"Process error: {str(e)}",
+            'output': traceback.format_exc(),
+            'solution': None
+        })
+
+def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
+    """
+    Executes PySAT Python code in a secure environment with robust timeout handling.
     
-    return result 
+    This implementation uses a separate process to execute the code, which allows for
+    more reliable timeout handling by terminating the entire process if needed.
+    
+    Args:
+        code: The PySAT Python code to execute
+        timeout: Maximum execution time in seconds
+        
+    Returns:
+        A dictionary containing the execution results:
+        {
+            'success': bool,
+            'output': str,
+            'error': Optional[str],
+            'solution': Optional[Dict]
+        }
+    """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Executing PySAT code with timeout {timeout} seconds")
+    
+    # Initialize result dictionary with default timeout error
+    result = {
+        'success': True,  # Important: Mark as success but with timeout information
+        'output': f"Execution timed out after {timeout} seconds",
+        'error': None,  # No error, just a timeout
+        'solution': None,
+        'timeout': True,
+        'error_details': {
+            'type': 'TimeoutInfo',  # Not an error type
+            'timeout': timeout,
+            'message': f"PySAT execution exceeded the {timeout} second timeout and was terminated"
+        }
+    }
+    
+    # Create a queue for inter-process communication
+    result_queue = Queue()
+    
+    # Create and start a process to execute the code
+    # Use daemon=True to ensure the process doesn't block server shutdown
+    process = Process(
+        target=_execute_pysat_code_in_process,
+        args=(code, result_queue),
+        daemon=True
+    )
+    
+    start_time = time.time()
+    
+    try:
+        # Start the process
+        process.start()
+        
+        # Use a non-blocking approach to wait for results or timeout
+        elapsed = 0
+        check_interval = 0.1  # Check every 100ms
+        
+        # Check for a result or timeout without blocking
+        while elapsed < timeout:
+            # Check if process completed and placed result in queue
+            if not result_queue.empty():
+                result = result_queue.get()
+                execution_time = time.time() - start_time
+                
+                # Add execution time info
+                if 'error_details' not in result:
+                    result['error_details'] = {}
+                result['error_details']['execution_time'] = execution_time
+                
+                logger.debug(f"PySAT code execution completed in {execution_time:.2f} seconds")
+                return result
+            
+            # Sleep briefly to avoid busy waiting
+            time.sleep(check_interval)
+            elapsed = time.time() - start_time
+        
+        # If we've reached here, it's a timeout
+        logger.warning(f"PySAT code execution timed out after {timeout} seconds")
+        
+        # Attempt to terminate the process gently
+        if process.is_alive():
+            try:
+                process.terminate()
+            except Exception as e:
+                logger.error(f"Error during process termination: {e}")
+                
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in execute_pysat_code: {str(e)}", exc_info=True)
+        # Return a success=True result even for errors to maintain connection
+        return {
+            'success': True,  # Mark as successful to prevent disconnection
+            'output': f"Error executing PySAT code: {str(e)}",
+            'error': f"Execution error: {str(e)}",
+            'error_details': {
+                'type': type(e).__name__,
+                'message': str(e)
+            },
+            'solution': None,
+            'status': 'error'  # Indicate that there was an error even though success=True
+        } 

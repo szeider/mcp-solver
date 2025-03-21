@@ -6,6 +6,7 @@ from typing import List, Optional, Any, Tuple
 from datetime import timedelta
 from pathlib import Path
 from importlib.metadata import version
+import json
 
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -304,6 +305,8 @@ async def serve() -> None:
                     return [types.TextContent(type="text", text="Model cleared")]
                 case "solve_model":
                     timeout_val = None
+                    
+                    # Parse and validate timeout parameter
                     try:
                         raw_timeout = arguments.get("timeout")
                         # Default to MIN_SOLVE_TIMEOUT if missing or not a number
@@ -321,9 +324,78 @@ async def serve() -> None:
                     except (ValueError, TypeError):
                         # Use MIN_SOLVE_TIMEOUT for any parsing errors
                         timeout_val = MIN_SOLVE_TIMEOUT
+                    
+                    # Log that we're about to solve with a timeout
+                    logging.getLogger(__name__).info(f"Solving model with timeout {timeout_val.total_seconds()} seconds")
+                    
+                    # Create a safe timeout task to avoid hanging the server
+                    try:
+                        # Create a task with a slightly longer timeout than requested to allow for graceful handling
+                        safe_timeout = timeout_val.total_seconds() + 5.0  # Increased buffer
                         
-                    result = await model_mgr.solve_model(timeout=timeout_val)
-                    return [types.TextContent(type="text", text=str(result))]
+                        # Run the solve_model with timeout and catch any exceptions
+                        async with asyncio.timeout(safe_timeout):
+                            try:
+                                # Call the model manager to solve the model
+                                result = await model_mgr.solve_model(timeout=timeout_val)
+                                
+                                # Check if the result indicates a timeout
+                                if result.get("status") == "timeout" or result.get("timeout") is True:
+                                    logging.getLogger(__name__).info("Model solving timed out, but handled gracefully")
+                                
+                                # Always ensure we're returning a valid result to prevent disconnections
+                                if not isinstance(result, dict):
+                                    # Convert to dictionary with success=True
+                                    result = {
+                                        "message": "Invalid result format from model manager",
+                                        "success": True,
+                                        "status": "error",
+                                        "error": "Invalid result format"
+                                    }
+                                
+                                # Ensure success is True to avoid client disconnection
+                                if not result.get("success", False):
+                                    result["success"] = True
+                                    result["status"] = "error"
+                                
+                                # Convert result to string for client response
+                                return [types.TextContent(type="text", text=str(result))]
+                                
+                            except Exception as e:
+                                # Catch any exceptions from the model manager
+                                logging.getLogger(__name__).error(f"Error in model manager during solve: {str(e)}", exc_info=True)
+                                # Return a valid result even when errors occur
+                                error_result = {
+                                    "message": f"Error solving model: {str(e)}",
+                                    "success": True,  # Important: still success=True
+                                    "status": "error",
+                                    "error": str(e)
+                                }
+                                return [types.TextContent(type="text", text=str(error_result))]
+                    
+                    except asyncio.TimeoutError:
+                        # This should rarely happen since we use a timeout in model_mgr.solve_model
+                        # But as an extra safety net, we handle it here at the server level
+                        logging.getLogger(__name__).warning(f"Server timeout occurred after {safe_timeout} seconds")
+                        timeout_result = {
+                            "message": f"Model solving timed out after {timeout_val.total_seconds()} seconds",
+                            "success": True,
+                            "status": "timeout",
+                            "timeout": True
+                        }
+                        return [types.TextContent(type="text", text=str(timeout_result))]
+                    
+                    except Exception as e:
+                        # Handle any other errors during timeout handling itself
+                        logging.getLogger(__name__).error(f"Error in timeout handling: {str(e)}", exc_info=True)
+                        error_result = {
+                            "message": f"Error in timeout handling: {str(e)}",
+                            "success": True,  # Always success=True for client connection
+                            "status": "error",
+                            "error": str(e)
+                        }
+                        return [types.TextContent(type="text", text=str(error_result))]
+                
                 case _:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
@@ -331,19 +403,56 @@ async def serve() -> None:
             error_message = f"Tool execution failed: {str(e)}"
             return [types.TextContent(type="text", text=error_message)]
 
+    # Wrap the server run in try-except to handle unexpected errors
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="mcp-solver",
-                server_version=version_str,
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
+        try:
+            logging.getLogger(__name__).info("Starting MCP server")
+            # Set up a handler for unexpected exceptions
+            def global_exception_handler(loop, context):
+                exception = context.get('exception')
+                if exception:
+                    logging.getLogger(__name__).error(f"Uncaught exception: {str(exception)}", exc_info=exception)
+                else:
+                    logging.getLogger(__name__).error(f"Uncaught exception context: {context}")
+                
+                # Don't terminate the loop - attempt to continue running
+                # This helps maintain the client connection even during errors
+            
+            # Get the event loop and set the exception handler
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(global_exception_handler)
+            
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name="mcp-solver",
+                    server_version=version_str,
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
                 ),
-            ),
-        )
+            )
+        except asyncio.CancelledError:
+            # This is typically raised during normal shutdown, log but don't treat as an error
+            logging.getLogger(__name__).info("MCP server operation cancelled, shutting down gracefully")
+            raise  # Re-raise to allow proper shutdown
+        except Exception as e:
+            # Log the error but try to avoid crashing the server
+            logging.getLogger(__name__).error(f"Error in MCP server operation: {str(e)}", exc_info=True)
+            # Don't re-raise - this would terminate the server and disconnect clients
+            # Instead, attempt to continue or at least shutdown more gracefully
+            try:
+                # Try to send a final message to the client before exiting
+                if write_stream:
+                    error_msg = {
+                        "message": "Server experienced an error but is attempting to recover",
+                        "error": str(e)
+                    }
+                    await write_stream.write(json.dumps(error_msg).encode() + b"\n")
+            except:
+                pass  # Ignore any errors in the error handler
 
 def main() -> int:
     import argparse
