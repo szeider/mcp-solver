@@ -316,8 +316,6 @@ def exactly_k(variables, k):
             'implies': implies,
             'mutually_exclusive': mutually_exclusive,
             'if_then_else': if_then_else,
-            # Add VariableMap for user code
-            'VariableMap': VariableMap,
         }
         
         # Add common variable types needed for PySAT code

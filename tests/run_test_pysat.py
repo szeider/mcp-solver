@@ -35,9 +35,10 @@ def validate_files_exist():
         
     return True
 
-def run_problem(problem_path):
+def run_problem(problem_path, save_results=False):
     """Run a single problem through test-client"""
     problem_name = os.path.basename(problem_path).replace('.md', '')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     print(f"\n{'='*60}")
     print(f"Testing problem: {problem_name}")
     print(f"{'='*60}")
@@ -48,16 +49,95 @@ def run_problem(problem_path):
     # Create the command with PySAT specific args
     cmd = f"cd {MCP_CLIENT_DIR} && uv run test-client --query {abs_problem_path} --prompt {get_prompt_path(PYSAT_PROMPT_FILE)} --server 'uv run mcp-solver-pysat'"
     
+    # Set up result saving if enabled
+    if save_results:
+        # Define output directory for saving results
+        output_dir = os.path.join(os.path.dirname(__file__), "results", "pysat")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Define output file paths with timestamp
+        response_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_response.txt")
+        model_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_model.py")
+    
     # Run the test-client-pysat command
     try:
         print(f"\nExecuting: {cmd}\n")
         print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
         
-        # Always show output in real-time
-        process = subprocess.run(cmd, shell=True, check=False)
-        success = process.returncode == 0
+        # Use Popen to capture output in real-time
+        with subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                            text=True, bufsize=1, universal_newlines=True) as process:
+            
+            # Initialize variables to capture model and response if saving is enabled
+            if save_results:
+                model_content = ""
+                agent_response = ""
+                capture_model = False
+                capture_response = False
+            
+            # Set up threads to read stdout and stderr
+            def read_stream(stream, prefix):
+                if save_results:
+                    nonlocal model_content, agent_response, capture_model, capture_response
+                
+                for line in stream:
+                    print(f"{prefix}: {line}", end='')
+                    
+                    # If saving is enabled, parse output to extract model and response
+                    if save_results and prefix == "STDOUT":
+                        # Capture the final model content
+                        if "Current model:" in line:
+                            capture_model = True
+                            model_content = ""  # Reset to get only the latest model
+                            continue
+                        elif capture_model:
+                            if line.strip().startswith("TOOL:"):
+                                capture_model = False
+                            else:
+                                # Remove the "STDOUT: " prefix if present
+                                cleaned_line = line.replace("STDOUT: ", "")
+                                model_content += cleaned_line
+                        
+                        # Capture agent response
+                        if "Agent reply received" in line:
+                            capture_response = True
+                            continue
+                        elif capture_response and not line.strip().startswith("[CLIENT OUTPUT END]"):
+                            if "------------------------------------------------------------" in line:
+                                capture_response = False
+                            else:
+                                # Remove the "STDOUT: " prefix if present
+                                cleaned_line = line.replace("STDOUT: ", "")
+                                agent_response += cleaned_line
+            
+            import threading
+            stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, "STDOUT"))
+            stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, "STDERR"))
+            
+            stdout_thread.start()
+            stderr_thread.start()
+            
+            # Wait for threads to complete
+            stdout_thread.join()
+            stderr_thread.join()
+            
+            # Wait for process to complete
+            process.wait()
+            success = process.returncode == 0
         
         print(f"\n{'-'*60}\n[CLIENT OUTPUT END]\n{'-'*60}")
+        
+        # Save the model and agent response if enabled
+        if save_results:
+            if model_content:
+                with open(model_file, 'w') as f:
+                    f.write(model_content)
+                print(f"\nSaved final model to: {model_file}")
+                
+            if agent_response:
+                with open(response_file, 'w') as f:
+                    f.write(agent_response)
+                print(f"\nSaved agent response to: {response_file}")
         
         if success:
             print(f"\n✅ Successfully tested: {problem_name}")
@@ -78,6 +158,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT, 
                        help=f"Timeout in seconds (default: {DEFAULT_TIMEOUT})")
+    parser.add_argument("--save", "-s", action="store_true", help="Save test results to files")
     args = parser.parse_args()
     
     # Validate required files exist
@@ -109,7 +190,7 @@ def main():
     
     # Run each test
     for problem_file in sorted(problem_files):
-        if run_problem(problem_file):
+        if run_problem(problem_file, save_results=args.save):
             success_count += 1
         else:
             failed_tests.append(os.path.basename(problem_file))

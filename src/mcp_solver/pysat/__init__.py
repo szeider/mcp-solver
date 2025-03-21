@@ -8,6 +8,7 @@ __version__ = "2.3.0"
 
 from .model_manager import PySATModelManager
 from .solution import export_solution
+from .templates.mapping import VariableMap
 
 # Export error handling utilities for easier access
 from .error_handling import (
@@ -34,6 +35,7 @@ from .constraints import (
 __all__ = [
     "PySATModelManager",
     "export_solution",
+    "VariableMap",
     # Error handling
     "PySATError",
     "pysat_error_handler",
