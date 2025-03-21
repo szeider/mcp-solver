@@ -232,13 +232,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
 
-    # Initialize these keys so they're always available
-    if "get_model_result" not in state:
-        state["get_model_result"] = "No model generated yet"
-
-    if "solve_model_result" not in state:
-        state["solve_model_result"] = "No solution generated yet"
-
     # Get the model code from the model name
     if model_name not in MODEL_CODES:
         console.print(f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]")
@@ -259,11 +252,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                 "role": "assistant",
                 "content": error_msg
             })
-            state["solver_error"] = True
             return state
     except Exception as e:
         console.print(f"[bold red]Error parsing model code: {str(e)}[/bold red]")
-        state["solver_error"] = True
         state["messages"].append({
             "role": "assistant",
             "content": f"Error parsing model code: {str(e)}"
@@ -309,34 +300,25 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
 
             # Tracking function that can be attached to any tool
             def track_tool_call(tool_name, tool_input, tool_output):
+                # Only track useful information and log outputs
                 if tool_name == "get_model":
-                    state["get_model_result"] = getattr(tool_output, "content", str(tool_output))
-
+                    print(f"Model retrieved: {getattr(tool_output, 'content', str(tool_output))[:100]}...")
+                    
                     if "Empty Model" in str(tool_output) or "Model is empty" in str(tool_output):
-                        state["empty_model_error"] = True
                         print("WARNING: Model appears to be empty or incomplete")
 
                 elif tool_name == "solve_model":
-                    state["solve_model_result"] = getattr(tool_output, "content", str(tool_output))
-                    # Mark that we've attempted to solve the model
-                    state["solve_model_called"] = True
-
-                    # Check for errors
+                    print(f"Solve model called: {getattr(tool_output, 'content', str(tool_output))[:100]}...")
+                    
+                    # Check for errors and log them
                     if isinstance(tool_output, dict) and "error" in tool_output:
                         error_code = tool_output.get("error", {}).get("code", "")
                         error_msg = tool_output.get("error", {}).get("message", "")
-                        state["solver_error"] = True
-                        state["solver_error_code"] = error_code
-                        state["solver_error_message"] = error_msg
                         print(f"Solver error: {error_code} - {error_msg}")
 
                     elif isinstance(tool_output, dict):
                         if "status" in tool_output and tool_output["status"] == "SAT":
                             if "solution" in tool_output:
-                                solution = tool_output["solution"]
-                                state["solution"] = solution
-                                # Flag as valid solution
-                                state["sat_solution_found"] = True
                                 print("SAT solution found! This solution satisfies all constraints.")
 
             # Custom callback handler for tool tracking
@@ -386,9 +368,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     "role": "assistant",
                     "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."
                 })
-                
-                # Set error flag
-                state["solver_error"] = True
     except Exception as e:
         console.print(f"[bold red]Error connecting to MCP server: {str(e)}[/bold red]")
         sys.exit(1)
