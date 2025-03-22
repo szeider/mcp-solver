@@ -12,8 +12,15 @@ from .llm_factory import LLMFactory
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langgraph.prebuilt import create_react_agent
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.tools import BaseTool
+from langgraph.prebuilt import create_react_agent
+
+# Custom agent implementation
+from mcp_solver.client.custom_agent import create_custom_react_agent
+
+# Flag to toggle between the built-in React agent and our custom implementation
+USE_CUSTOM_AGENT = False
 
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
@@ -274,7 +281,13 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     sys.stdout.flush()
 
                     # Initialize the agent with tools
-                    agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+                    if USE_CUSTOM_AGENT:
+                        print("Using custom React agent implementation...")
+                        agent = create_custom_react_agent(SOLVE_MODEL, wrapped_tools, None)
+                    else:
+                        print("Using built-in React agent implementation...")
+                        agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+                    
                     config = RunnableConfig(recursion_limit=100)
 
                     # Process the request
