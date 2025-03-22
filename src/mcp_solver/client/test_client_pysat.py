@@ -21,11 +21,11 @@ def main():
     for path in prompt_paths:
         if path.exists():
             default_prompt = str(path)
-            print(f"Using PySAT prompt: {path}")
+            print(f"Using PySAT prompt: {path}", flush=True)
             break
     
     if not default_prompt:
-        print("Warning: Could not find default PySAT prompt file")
+        print("Warning: Could not find default PySAT prompt file", flush=True)
     
     # Set default server to PySAT
     server_cmd = "uv run mcp-solver-pysat"

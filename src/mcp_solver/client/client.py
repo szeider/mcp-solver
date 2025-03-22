@@ -36,7 +36,7 @@ DEFAULT_SERVER_COMMAND = "uv"
 DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn"]
 
 # Global Rich Console instance with color support
-console = Console(color_system="truecolor")
+console = Console(color_system="truecolor", flush=True)
 _current_title = None  # Stores the current title for system messages
 
 class ToolError:
@@ -51,7 +51,7 @@ class ToolError:
 class SimpleToolTracker(BaseCallbackHandler):
     def on_tool_end(self, output, **kwargs):
         tool_name = kwargs.get("name", "unknown_tool")
-        print(f"Tool executed: {tool_name}")
+        print(f"Tool executed: {tool_name}", flush=True)
 
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
@@ -69,6 +69,9 @@ def log_system(msg: str, title: str = None) -> None:
         console.print(f"[bold blue]{_current_title}[/bold blue]: {msg}")
     else:
         console.print(f"[bold blue]system[/bold blue]: {msg}")
+    
+    # Ensure output is flushed immediately
+    sys.stdout.flush()
 
 class ClientError(Exception):
     """Client related errors."""
@@ -176,15 +179,18 @@ def wrap_tool(tool):
         def wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
             log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
+            sys.stdout.flush()  # Force flush to ensure immediate output
             
             try:
                 result = func(call_args, config)
                 formatted = format_tool_output(result)
                 log_system(f"{tool_name} output: {formatted}")
+                sys.stdout.flush()  # Force flush again after tool completes
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
+                sys.stdout.flush()  # Force flush error messages too
                 return ToolError(error_msg)
         return wrapper
     
@@ -197,15 +203,18 @@ def wrap_tool(tool):
         async def ainvoke_wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
             log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
+            sys.stdout.flush()  # Force flush to ensure immediate output
             
             try:
                 result = await orig_ainvoke(call_args, config)
                 formatted = format_tool_output(result)
                 log_system(f"{tool_name} output: {formatted}")
+                sys.stdout.flush()  # Force flush after tool completes
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
+                sys.stdout.flush()  # Force flush error messages
                 return ToolError(error_msg)
         updates["ainvoke"] = ainvoke_wrapper
     
@@ -254,19 +263,19 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     model_str = f"{model_info.platform}:{model_info.model_name}" if model_info else "Unknown"
     
     state["solve_llm"] = model_str
-    print(f"Using model: {model_str}")
+    print(f"Using model: {model_str}", flush=True)
 
     # Get server command and args from command line or use defaults
     if state.get("server_command") and state.get("server_args"):
         # Use server command from command line
         mcp_command = state["server_command"]
         mcp_args = state["server_args"]
-        print(f"Using custom server command: {mcp_command} {' '.join(mcp_args)}")
+        print(f"Using custom server command: {mcp_command} {' '.join(mcp_args)}", flush=True)
     else:
         # Use default server command
         mcp_command = DEFAULT_SERVER_COMMAND
         mcp_args = DEFAULT_SERVER_ARGS
-        print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}")
+        print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}", flush=True)
 
     # Set up server parameters for stdio connection
     server_params = StdioServerParameters(
@@ -289,9 +298,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
                     
                     # Print tools for debugging
-                    print(f"Available tools ({len(wrapped_tools)}):")
+                    print(f"Available tools ({len(wrapped_tools)}):", flush=True)
                     for i, tool in enumerate(wrapped_tools):
-                        print(f"  {i+1}. {tool.name}")
+                        print(f"  {i+1}. {tool.name}", flush=True)
 
                     # Configure the agent with tool tracker
                     config = RunnableConfig(
@@ -303,21 +312,21 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
 
                     # Process the request
-                    print("Sending request to LLM...")
+                    print("Sending request to LLM...", flush=True)
                     try:
                         response = await agent.ainvoke({"messages": state["messages"]}, config=config)
-                        print("Received response from LLM.")
+                        print("Received response from LLM.", flush=True)
 
                         # Extract and add the agent's response to state
                         if response.get("messages") and len(response["messages"]) > 0:
                             agent_reply = response["messages"][-1].content
-                            print(f"Agent reply received, length: {len(agent_reply)}")
+                            print(f"Agent reply received, length: {len(agent_reply)}", flush=True)
                             state["messages"].append({"role": "assistant", "content": agent_reply})
                         else:
-                            print("Warning: No message content found in response")
+                            print("Warning: No message content found in response", flush=True)
                     except Exception as e:
                         error_msg = f"Error during LLM invocation: {str(e)}"
-                        print(error_msg)
+                        print(error_msg, flush=True)
                         state["messages"].append({
                             "role": "assistant", 
                             "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."

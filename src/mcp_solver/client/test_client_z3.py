@@ -21,11 +21,11 @@ def main():
     for path in prompt_paths:
         if path.exists():
             default_prompt = str(path)
-            print(f"Using Z3 prompt: {path}")
+            print(f"Using Z3 prompt: {path}", flush=True)
             break
     
     if not default_prompt:
-        print("Warning: Could not find default Z3 prompt file")
+        print("Warning: Could not find default Z3 prompt file", flush=True)
     
     # Set default server to Z3
     server_cmd = "uv run mcp-solver-z3"

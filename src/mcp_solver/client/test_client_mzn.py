@@ -21,11 +21,11 @@ def main():
     for path in prompt_paths:
         if path.exists():
             default_prompt = str(path)
-            print(f"Using MiniZinc prompt: {path}")
+            print(f"Using MiniZinc prompt: {path}", flush=True)
             break
     
     if not default_prompt:
-        print("Warning: Could not find default MiniZinc prompt file")
+        print("Warning: Could not find default MiniZinc prompt file", flush=True)
     
     # Set default server to MiniZinc
     server_cmd = "uv run mcp-solver-mzn"
