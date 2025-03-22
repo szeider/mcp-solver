@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from mcp_solver.client.test_client import main as client_main
+from mcp_solver.client.client import main_cli as client_main
 
 def main():
     """Run the test client with MiniZinc defaults."""

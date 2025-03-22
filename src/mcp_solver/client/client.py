@@ -4,17 +4,20 @@ import asyncio
 import argparse
 import json
 import re
+import textwrap
+from datetime import datetime
+from typing import Dict, Any, List
 from pathlib import Path
 
 # Core dependencies
-from .llm_factory import LLMFactory
+from .llm_factory import LLMFactory, ModelInfo
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
+from langgraph.prebuilt import create_react_agent
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from rich.console import Console
-from .react_agent import create_mcp_react_agent  # Import our custom ReAct agent
 
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
@@ -65,14 +68,25 @@ class ClientError(Exception):
     """Client related errors."""
     pass
 
+def load_system_prompt(prompt_file: str = "system_prompt.md") -> str:
+    """Load system prompt from a markdown file located at the project root."""
+    try:
+        if not os.path.exists(prompt_file):
+            raise ClientError(f"System prompt file not found: {prompt_file}")
+        
+        with open(prompt_file, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception as e:
+        raise ClientError(f"Failed to load system prompt: {e}")
+
 def parse_arguments():
-    """Parse command line arguments."""
+    """Parse command line arguments focusing on the essential parameters."""
     parser = argparse.ArgumentParser(description='MCP Solver Client')
     parser.add_argument(
-        '--query',
+        '--query', 
         type=str,
         required=True,
-        help='Path to the file containing the query'
+        help='Path to the file containing the problem query'
     )
     parser.add_argument(
         '--prompt',
@@ -83,14 +97,14 @@ def parse_arguments():
     parser.add_argument(
         '--server',
         type=str,
-        help='Server command to use instead of defaults. Format: "command arg1 arg2 arg3..."'
+        help='Server command to use. Format: "command arg1 arg2 arg3..."'
     )
     parser.add_argument(
         '--model',
         type=str,
         choices=list(MODEL_CODES.keys()),
         default=DEFAULT_MODEL,
-        help=f'Model to use (default: {DEFAULT_MODEL}). Available models: {", ".join(MODEL_CODES.keys())}'
+        help=f'Model to use (default: {DEFAULT_MODEL})'
     )
     return parser.parse_args()
 
@@ -100,7 +114,7 @@ def load_file_content(file_path):
         with open(file_path, 'r', encoding='utf-8') as file:
             return file.read().strip()
     except Exception as e:
-        console.print(f"[bold red]Error loading file {file_path}: {e}[/bold red]")
+        print(f"Error loading file {file_path}: {e}")
         sys.exit(1)
 
 def load_initial_state(custom_prompt_path, query_path) -> dict:
@@ -117,7 +131,11 @@ def load_initial_state(custom_prompt_path, query_path) -> dict:
     # Add the user query
     messages.append({"role": "user", "content": query})
 
-    return {"messages": messages}
+    return {
+        "messages": messages,
+        "is_pure_mode": True,
+        "start_time": datetime.now()
+    }
 
 def format_tool_output(result):
     """Helper function to format tool outputs."""
@@ -142,21 +160,17 @@ def wrap_tool(tool):
     tool_name = tool.name
     if tool_name.startswith("[Tool]"):
         tool_name = tool_name.replace("[Tool]", "").strip()
+    
     updates = {}
-    if hasattr(tool, "invoke"):
-        orig_invoke = tool.invoke
-
-        def new_invoke(call_args, config=None):
+    
+    # Define a wrapper function for both sync and async invocation
+    def log_and_call(func):
+        def wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            
-            args_str = json.dumps(args_only, indent=2).strip()
-            if args_str.startswith("{") and args_str.endswith("}"):
-                args_str = args_str[1:-1].strip()
-            set_system_title(f"tool: {tool_name}")
-            log_system(f"{tool_name} called with args: {args_str}")
+            log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
             
             try:
-                result = orig_invoke(call_args, config)
+                result = func(call_args, config)
                 formatted = format_tool_output(result)
                 log_system(f"{tool_name} output: {formatted}")
                 return result
@@ -164,19 +178,17 @@ def wrap_tool(tool):
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
                 return ToolError(error_msg)
-
-        updates["invoke"] = new_invoke
+        return wrapper
+    
+    # Apply wrappers to sync and async methods if they exist
+    if hasattr(tool, "invoke"):
+        updates["invoke"] = log_and_call(tool.invoke)
+    
     if hasattr(tool, "ainvoke"):
         orig_ainvoke = tool.ainvoke
-
-        async def new_ainvoke(call_args, config=None):
+        async def ainvoke_wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            
-            args_str = json.dumps(args_only, indent=2).strip()
-            if args_str.startswith("{") and args_str.endswith("}"):
-                args_str = args_str[1:-1].strip()
-            set_system_title(f"TOOL: {tool_name}")
-            log_system(f"{tool_name} called with args: {args_str}")
+            log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
             
             try:
                 result = await orig_ainvoke(call_args, config)
@@ -187,17 +199,18 @@ def wrap_tool(tool):
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
                 return ToolError(error_msg)
-
-        updates["ainvoke"] = new_ainvoke
+        updates["ainvoke"] = ainvoke_wrapper
+    
     if updates:
         return tool.copy(update=updates)
     else:
-        set_system_title("warning")
         log_system(f"Warning: {tool_name} has no invoke or ainvoke method; cannot wrap for logging.")
         return tool
 
 async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
+    state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
+
     # Get the model code from the model name
     if model_name not in MODEL_CODES:
         console.print(f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]")
@@ -231,19 +244,21 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     model_info = LLMFactory.get_model_info(SOLVE_MODEL)
     model_str = f"{model_info.platform}:{model_info.model_name}" if model_info else "Unknown"
 
-    console.print(f"[bold green]Using model: {model_str}[/bold green]")
+    state["solve_llm"] = model_str
+
+    print(f"Using model: {model_str}")
 
     # Get server command and args from command line or use defaults
     if state.get("server_command") and state.get("server_args"):
         # Use server command from command line
         mcp_command = state["server_command"]
         mcp_args = state["server_args"]
-        console.print(f"[bold green]Using custom server command: {mcp_command} {' '.join(mcp_args)}[/bold green]")
+        print(f"Using custom server command: {mcp_command} {' '.join(mcp_args)}")
     else:
         # Use default server command
         mcp_command = DEFAULT_SERVER_COMMAND
         mcp_args = DEFAULT_SERVER_ARGS
-        console.print(f"[bold green]Using default server command: {mcp_command} {' '.join(mcp_args)}[/bold green]")
+        print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}")
 
     try:
         # Set up server parameters for stdio connection
@@ -265,35 +280,15 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                 wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
                 
                 # Print tools for debugging
-                console.print(f"[bold green]Available tools ({len(wrapped_tools)}):[/bold green]")
+                print(f"Available tools ({len(wrapped_tools)}):")
                 for i, tool in enumerate(wrapped_tools):
-                    console.print(f"  {i+1}. {tool.name}")
+                    print(f"  {i+1}. {tool.name}")
 
                 # Custom callback handler for tool tracking
                 class SimpleToolTracker(BaseCallbackHandler):
                     def on_tool_end(self, output, **kwargs):
                         tool_name = kwargs.get("name", "unknown_tool")
-                        
-                        # Log tool output
-                        if tool_name == "get_model":
-                            console.print(f"[bold yellow]Model retrieved: {getattr(output, 'content', str(output))[:100]}...[/bold yellow]")
-                            
-                            if "Empty Model" in str(output) or "Model is empty" in str(output):
-                                console.print("[bold red]WARNING: Model appears to be empty or incomplete[/bold red]")
-
-                        elif tool_name == "solve_model":
-                            console.print(f"[bold yellow]Solve model called: {getattr(output, 'content', str(output))[:100]}...[/bold yellow]")
-                            
-                            # Check for errors and log them
-                            if isinstance(output, dict) and "error" in output:
-                                error_code = output.get("error", {}).get("code", "")
-                                error_msg = output.get("error", {}).get("message", "")
-                                console.print(f"[bold red]Solver error: {error_code} - {error_msg}[/bold red]")
-
-                            elif isinstance(output, dict):
-                                if "status" in output and output["status"] == "SAT":
-                                    if "solution" in output:
-                                        console.print("[bold green]SAT solution found! This solution satisfies all constraints.[/bold green]")
+                        print(f"Tool executed: {tool_name}")
 
                 # Create agent with higher recursion limit and our tool tracker
                 config = RunnableConfig(
@@ -302,27 +297,34 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                 )
 
                 # Initialize the solver LLM and create the agent
-                agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+                solver_llm = SOLVE_MODEL
+                agent = create_react_agent(solver_llm, wrapped_tools)
 
                 try:
-                    console.print("[bold green]Sending request to LLM...[/bold green]")
-                    response = await agent.ainvoke({"messages": state["messages"]}, config=config)
-                    console.print("[bold green]Received response from LLM.[/bold green]")
+                    # Regular invoke method
+                    try:
+                        print("Sending request to LLM...")
+                        response = await agent.ainvoke({"messages": state["messages"]}, config=config)
+                        print("Received response from LLM.")
 
-                    # Extract the agent's response content
-                    if response.get("messages") and len(response["messages"]) > 0:
-                        agent_reply = response["messages"][-1].content
-                        console.print(f"[bold green]Agent reply received, length: {len(agent_reply)}[/bold green]")
-                        console.print(agent_reply)
+                        # Extract the agent's response content
+                        if response.get("messages") and len(response["messages"]) > 0:
+                            agent_reply = response["messages"][-1].content
+                            print("Agent reply received, length:", len(agent_reply))
+                            print(agent_reply)
 
-                        # Add the response to state messages
-                        state["messages"].append({"role": "assistant", "content": agent_reply})
-                    else:
-                        console.print("[bold red]Warning: No message content found in response[/bold red]")
+                            # Add the response to state messages
+                            state["messages"].append({"role": "assistant", "content": agent_reply})
+                        else:
+                            print("Warning: No message content found in response")
+                    except Exception as invoke_error:
+                        print(f"Error during LLM invocation: {str(invoke_error)}")
+                        raise invoke_error
+
                 except Exception as e:
-                    console.print(f"[bold red]Agent error: {str(e)}[/bold red]")
+                    print(f"Agent error: {str(e)}")
                     import traceback
-                    console.print(traceback.format_exc())
+                    print(traceback.format_exc())
 
                     state["messages"].append({
                         "role": "assistant",
@@ -334,30 +336,33 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
 
     return state
 
-def main():
-    """Entry point for the command-line interface."""
+async def main():
+    """Main async function for one-shot execution."""
+    # Parse command line arguments
+    args = parse_arguments()
+    
+    # Load initial state with custom prompt and query
     try:
-        # Simplest approach that works in all contexts
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(main_wrapper())
-        finally:
-            loop.close()
-        return 0
-    except KeyboardInterrupt:
-        console.print("[bold yellow]Interrupted by user[/bold yellow]")
-        return 130
+        state = load_initial_state(args.prompt, args.query)
     except Exception as e:
-        console.print(f"[bold red]Error: {str(e)}[/bold red]")
-        import traceback
-        console.print(traceback.format_exc())
-        return 1
+        console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
+        sys.exit(1)
+    
+    # If server command is provided, parse it into command and args
+    if args.server:
+        command_parts = args.server.split()
+        state["server_command"] = command_parts[0]
+        state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
+    
+    # Run the solver once
+    state = await mcp_solver_node(state, args.model)
 
-# Alias for backward compatibility
-main_cli = main
+def main_cli():
+    """Entry point for the command-line interface."""
+    # Modified to use the main_wrapper for compatibility with previous mcp_react_os.py behavior
+    asyncio.run(main_wrapper())
 
-async def main_wrapper():
+def main_wrapper():
     """
     Wrapper function to provide backward compatibility with mcp_react_os.py.
     This function sets default values for arguments if they're not provided.
@@ -411,24 +416,8 @@ async def main_wrapper():
     # Replace sys.argv with our filtered version
     sys.argv = [sys.argv[0]] + filtered_args
     
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    # Load initial state with custom prompt and query
-    try:
-        state = load_initial_state(args.prompt, args.query)
-    except Exception as e:
-        console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
-        sys.exit(1)
-    
-    # If server command is provided, parse it into command and args
-    if args.server:
-        command_parts = args.server.split()
-        state["server_command"] = command_parts[0]
-        state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
-    
-    # Run the solver once
-    state = await mcp_solver_node(state, args.model)
+    # Call the main function
+    return main()
 
 if __name__ == "__main__":
     main_cli() 

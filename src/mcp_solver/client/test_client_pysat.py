@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from mcp_solver.client.test_client import main
+from mcp_solver.client.client import main_cli as client_main
 
 def main():
     """Run the test client with PySAT defaults."""
@@ -78,7 +78,7 @@ def main():
     sys.argv = [sys.argv[0]] + filtered_args
     
     # Call the main function from test_client.py
-    return main()
+    return client_main()
 
 if __name__ == "__main__":
     main() 
