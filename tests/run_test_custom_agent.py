@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import necessary modules
 from mcp_solver.client.client import mcp_solver_node
-from mcp_solver.client.custom_agent import normalize_state
+from mcp_solver.client.react_agent import normalize_state
 
 # Import test configuration
 from tests.test_config import (
@@ -180,7 +180,6 @@ async def run_test(args):
             return False
         
     except Exception as e:
-        import traceback
         print(f"Error during test execution: {str(e)}")
         print(traceback.format_exc())
         return False
@@ -209,7 +208,6 @@ def save_results(state, problem_name, model_name, duration):
     
     # Save to file
     with open(result_file, "w", encoding="utf-8") as f:
-        import json
         json.dump(results, f, indent=2)
     
     print(f"Results saved to {result_file}")

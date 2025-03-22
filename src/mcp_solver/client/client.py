@@ -30,7 +30,7 @@ except (importlib.metadata.PackageNotFoundError, ValueError):
     USING_NEW_LANGGRAPH = False
 
 # Custom agent implementation
-from mcp_solver.client.custom_agent import create_custom_react_agent, run_agent, normalize_state
+from mcp_solver.client.react_agent import create_custom_react_agent, run_agent, normalize_state
 
 # For testing purposes - force using the custom agent
 USE_CUSTOM_AGENT = True

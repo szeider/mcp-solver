@@ -47,7 +47,7 @@ The MCP Solver includes a custom implementation of a ReAct (Reasoning + Acting) 
 The custom agent can be created and used as follows:
 
 ```python
-from mcp_solver.client.custom_agent import create_custom_react_agent
+from mcp_solver.client.react_agent import create_custom_react_agent
 
 # Create the agent with your LLM and tools
 agent = create_custom_react_agent(

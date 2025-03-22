@@ -13,7 +13,7 @@ import traceback
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import the required functionality
-from mcp_solver.client.custom_agent import test_agent_intermediate_steps, normalize_state
+from mcp_solver.client.react_agent import test_agent_intermediate_steps, normalize_state
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
