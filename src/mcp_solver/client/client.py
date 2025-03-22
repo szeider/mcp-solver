@@ -187,7 +187,7 @@ def wrap_tool(tool):
             try:
                 result = func(call_args, config)
                 formatted = format_tool_output(result)
-                log_system(f"{tool_name} output: {formatted}")
+                log_system(f"◀ {tool_name} output: {formatted}")
                 sys.stdout.flush()  # Force flush again after tool completes
                 return result
             except Exception as e:
@@ -212,7 +212,7 @@ def wrap_tool(tool):
             try:
                 result = await orig_ainvoke(call_args, config)
                 formatted = format_tool_output(result)
-                log_system(f"{tool_name} output: {formatted}")
+                log_system(f"◀ {tool_name} output: {formatted}")
                 sys.stdout.flush()  # Force flush after tool completes
                 return result
             except Exception as e:
