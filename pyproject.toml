@@ -9,7 +9,6 @@ description = "MCP server for constraint solving"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.2.0",
-    "minizinc",
     "tomli",
     "six",
     "langchain>=0.0.335",
@@ -21,6 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mzn = [
+    "minizinc",
+]
 z3 = [
     "z3-solver>=4.12.1",
 ]
@@ -42,7 +44,7 @@ client = [
     "uuid>=1.30",
 ]
 all = [
-    "mcp-solver[z3,pysat,client]",
+    "mcp-solver[mzn,z3,pysat,client]",
 ]
 dev = [
     "coverage",
@@ -50,7 +52,7 @@ dev = [
 ]
 
 [project.scripts]
-test-setup = "mcp_solver.mzn.test_setup:main"
+test-setup-mzn = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
 test-setup-client = "mcp_solver.client.test_setup:main"

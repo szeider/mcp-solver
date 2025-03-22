@@ -55,7 +55,7 @@ MiniZinc mode provides integration with the MiniZinc constraint modeling languag
 - Optimization capabilities
 - Access to solution values via `get_solution`
 
-**Dependencies**: Base installation is sufficient (included in core dependencies)
+**Dependencies**: Requires the `minizinc` package (`uv pip install -e ".[mzn]"`)
 
 **Configuration**: To run in MiniZinc mode, use:
 
