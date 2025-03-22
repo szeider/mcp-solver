@@ -70,7 +70,29 @@ class MCPReactAgent:
         if not self.session:
             raise ValueError("Session not initialized. Call connect() first.")
             
-        raw_tools = self.session.load_mcp_tools()
+        # Access tools directly from the session
+        raw_tools = {}
+        
+        try:
+            # Get available tools from session
+            available_tools = self.session._list_tools()
+            
+            # Convert to tools dict
+            for tool_info in available_tools:
+                name = tool_info.get("name")
+                if name:
+                    # Create a function that will call the tool
+                    def make_tool_fn(tool_name):
+                        def tool_fn(call_args, config=None):
+                            args = call_args.get("args", {})
+                            return self.session._call_tool(tool_name, args)
+                        return tool_fn
+                    
+                    # Wrap as a tool
+                    raw_tools[name] = make_tool_fn(name)
+        except Exception as e:
+            self.log_system(f"Error loading tools: {str(e)}")
+            raise
         
         # Wrap tools with tracking and error handling
         wrapped_tools = {}

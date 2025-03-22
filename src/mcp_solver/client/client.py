@@ -14,10 +14,10 @@ from .llm_factory import LLMFactory, ModelInfo
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langgraph.prebuilt import create_react_agent
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from rich.console import Console
+from .react_agent import create_mcp_react_agent  # Import our custom ReAct agent
 
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
@@ -364,31 +364,104 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
 
     return state
 
-async def main():
-    """Main async function for one-shot execution."""
-    # Parse command line arguments
+def main():
+    """Main function to run the client."""
+    # Parse arguments
     args = parse_arguments()
     
-    # Load initial state with custom prompt and query
-    try:
-        state = load_initial_state(args.prompt, args.query)
-    except Exception as e:
-        console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
-        sys.exit(1)
+    # Apply environment variables (useful for debugging)
+    if args.model:
+        selected_model = args.model
+    else:
+        selected_model = os.getenv("MCP_SOLVER_MODEL", DEFAULT_MODEL)
     
-    # If server command is provided, parse it into command and args
+    # Initialize initial state
+    state = {}
+    
+    # Set the selected model
+    state["model"] = selected_model
+    
+    # Load system prompt and query if provided
+    if args.prompt:
+        state["prompt_path"] = args.prompt
+    if args.query:
+        state["query_path"] = args.query
+    
+    # Set server command and args if provided
     if args.server:
         command_parts = args.server.split()
         state["server_command"] = command_parts[0]
         state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
     
-    # Run the solver once
-    state = await mcp_solver_node(state, args.model)
+    # Check if we have the minimum required args
+    if not state.get("prompt_path") or not state.get("query_path"):
+        print("Error: Custom prompt and query are required")
+        sys.exit(1)
+    
+    # Load prompt and query
+    initial_state = load_initial_state(state["prompt_path"], state["query_path"])
+    state.update(initial_state)
+    
+    # Create LLM from model code
+    model_code = MODEL_CODES.get(state["model"])
+    if not model_code:
+        print(f"Error: Invalid model code {state['model']}")
+        sys.exit(1)
+    
+    # Create model
+    SOLVE_MODEL = LLMFactory.create_model(model_code)
+    model_info = LLMFactory.get_model_info(SOLVE_MODEL)
+    model_str = f"{model_info.platform}:{model_info.model_name}" if model_info else "Unknown"
+
+    state["solve_llm"] = model_str
+
+    print(f"Using model: {model_str}")
+
+    # Get server command and args from command line or use defaults
+    if state.get("server_command") and state.get("server_args"):
+        # Use server command from command line
+        mcp_command = state["server_command"]
+        mcp_args = state["server_args"]
+        server_cmd = f"{mcp_command} {' '.join(mcp_args)}"
+        print(f"Using custom server command: {server_cmd}")
+    else:
+        # Use default server command
+        mcp_command = DEFAULT_SERVER_COMMAND
+        mcp_args = DEFAULT_SERVER_ARGS
+        server_cmd = f"{mcp_command} {' '.join(mcp_args)}"
+        print(f"Using default server command: {server_cmd}")
+
+    # Create ReAct agent with system prompt from the prompt file
+    system_message = state["messages"][0]["content"] if state["messages"] and state["messages"][0]["role"] == "system" else None
+    query = state["messages"][1]["content"] if len(state["messages"]) > 1 else ""
+    
+    # Create and invoke the ReAct agent
+    react_agent = create_mcp_react_agent(
+        llm=SOLVE_MODEL,
+        server_command=server_cmd,
+        system_message=system_message,
+        verbose=True
+    )
+    
+    # Invoke the agent with the query
+    result = react_agent(query)
+    
+    # Print the result
+    print("Agent reply received, length:", len(result) if result else 0)
+    print(result)
+    
+    return 0
 
 def main_cli():
-    """Entry point for the command-line interface."""
-    # Modified to use the main_wrapper for compatibility with previous mcp_react_os.py behavior
-    asyncio.run(main_wrapper())
+    """Command-line entry point."""
+    try:
+        return main()
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        return 1
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return 1
 
 def main_wrapper():
     """
