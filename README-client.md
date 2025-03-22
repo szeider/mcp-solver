@@ -64,17 +64,20 @@ final_state = agent.invoke({"messages": [HumanMessage(content="your question")]}
 
 Currently, the client supports two agent implementations:
 
-- **Built-in Agent**: The default LangChain ReAct agent implementation, which is currently stable and recommended for production use.
-- **Custom Agent**: Our custom LangGraph implementation, which is under development and may have issues with certain tools.
+- **Built-in Agent**: The default LangChain ReAct agent implementation, which is stable and recommended for most users.
+- **Custom Agent**: Our custom LangGraph implementation, which has been improved and is now functioning properly.
 
 **Current Status:**
 - The built-in agent works reliably with all MCP tools
-- The custom agent has issues with asynchronous execution and structured tool invocation
+- The custom agent has been fixed and now works correctly with the MCP tools
+- Both implementations are suitable for solving constraint problems
 
-**Known Issues with Custom Agent:**
+**Previous Issues (Now Resolved):**
 - Event loop conflicts when running in an asynchronous context
 - Compatibility issues with some structured tools that don't support synchronous invocation
 - Problems executing certain MCP tools that require specific invocation patterns
+
+These issues have been addressed in the latest version.
 
 ### Toggling Agent Implementation
 
@@ -82,10 +85,10 @@ To switch between agent implementations, modify the `USE_CUSTOM_AGENT` constant 
 
 ```python
 # Flag to toggle between the built-in React agent and our custom implementation
-USE_CUSTOM_AGENT = False  # Set to True to use the custom agent
+USE_CUSTOM_AGENT = True  # Set to False to use the built-in agent
 ```
 
-For most users, we recommend using the built-in agent (`USE_CUSTOM_AGENT = False`) for stable operation.
+By default, the custom agent is now enabled (`USE_CUSTOM_AGENT = True`) as it provides full functionality with MCP tools.
 
 ### Testing
 
