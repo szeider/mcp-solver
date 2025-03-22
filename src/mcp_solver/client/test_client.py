@@ -117,13 +117,20 @@ def main():
     )
     
     # Invoke the agent
-    result = react_agent(query)
-    
-    # Print the result
-    print("Agent reply received, length:", len(result) if result else 0)
-    print(result)
-    
-    return 0
+    try:
+        result = react_agent(query)
+        
+        # Print the result
+        print("Agent reply received, length:", len(result) if result else 0)
+        print(result)
+        
+        return 0
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        return 1
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main()) 

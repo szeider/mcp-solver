@@ -6,6 +6,7 @@ while maintaining compatibility with MCP error handling requirements.
 """
 
 import json
+import asyncio
 from typing import Any, Dict, List, Optional, Callable
 
 from anthropic import Anthropic
@@ -15,11 +16,13 @@ from mcp.client.stdio import stdio_client
 
 class MCPReactAgent:
     """
-    A ReAct agent implementation optimized for MCP constraint solving.
+    A ReAct agent implementation for MCP tools.
     
-    This agent follows the ReAct pattern (Reasoning + Acting) to solve problems
-    using MCP tools. It manages the interaction loop between the LLM and tools,
-    handling tool calls, error processing, and response formatting.
+    This agent follows the ReAct pattern:
+    1. Observe - Get a query or state
+    2. Think - Process with LLM
+    3. Act - Call tools based on LLM decision
+    4. Repeat until satisfied
     """
     
     def __init__(
@@ -29,27 +32,25 @@ class MCPReactAgent:
         system_message: Optional[str] = None,
         verbose: bool = False
     ):
-        """
-        Initialize the MCP ReAct agent.
-        
-        Args:
-            llm: The language model to use (typically Claude)
-            server_command: The command to start the MCP server
-            system_message: Optional system message to include in prompts
-            verbose: Whether to enable verbose logging
-        """
+        """Initialize the agent with model and session."""
         self.llm = llm
         self.server_command = server_command
-        self.system_message = system_message
-        self.verbose = verbose
         self.session = None
         self.tools = {}
-        
-        # Set up logging functions
-        self.log_system = print if verbose else lambda *args, **kwargs: None
-        self.set_system_title = lambda *args, **kwargs: None
+        self.system_message = system_message or """You are an expert constraint solver, trained to help users solve constraint programming problems.
+Use the available tools to interact with a constraint solver and solve the problem described in the user's query.
+Think step by step and use the tools effectively to build and solve the constraint model."""
+        self.verbose = verbose
+        self.messages = []
+        self._initialize_messages()
     
-    def connect(self):
+    def _initialize_messages(self):
+        """Initialize the message history with system message."""
+        self.messages = [
+            {"role": "system", "content": self.system_message}
+        ]
+    
+    async def connect(self):
         """Establish connection to the MCP server and load tools."""
         if self.session is not None:
             return
@@ -59,40 +60,62 @@ class MCPReactAgent:
         
         # Create client session
         self.log_system(f"Connecting to MCP server with command: {self.server_command}")
-        self.session = stdio_client(server_params)
         
-        # Load available tools
-        self.tools = self._load_and_wrap_tools()
-        self.log_system(f"Loaded {len(self.tools)} tools: {', '.join(self.tools.keys())}")
+        # Set up the async connection
+        try:
+            # Open the stdio connection - this returns a context manager
+            ctx = stdio_client(server_params)
+            # Enter the context manager to get read/write pair
+            read, write = await ctx.__aenter__()
+            # Create a session with the read/write pair
+            session_ctx = ClientSession(read, write)
+            # Enter the session context
+            self.session = await session_ctx.__aenter__()
+            # Initialize the session
+            await self.session.initialize()
+            
+            # Load available tools
+            self.tools = await self._load_and_wrap_tools()
+            self.log_system(f"Loaded {len(self.tools)} tools: {', '.join(self.tools.keys())}")
+        except Exception as e:
+            self.log_system(f"Error connecting to MCP server: {str(e)}")
+            raise
     
-    def _load_and_wrap_tools(self):
+    async def disconnect(self):
+        """Close the connection to the MCP server."""
+        if self.session:
+            await self.session.__aexit__(None, None, None)
+            self.session = None
+    
+    def run_async(self, coro):
+        """Helper method to run async code from sync context."""
+        return asyncio.run(coro)
+    
+    def connect_sync(self):
+        """Synchronous wrapper for connect()."""
+        return self.run_async(self.connect())
+    
+    async def _load_and_wrap_tools(self):
         """Load tools from the MCP session and wrap them with tracking."""
         if not self.session:
             raise ValueError("Session not initialized. Call connect() first.")
-            
-        # Access tools directly from the session
+        
+        # Get available tools from session
+        tools_response = await self.session.list_tools()
         raw_tools = {}
         
-        try:
-            # Get available tools from session
-            available_tools = self.session._list_tools()
+        # Create a function for each tool
+        for tool_info in tools_response.tools:
+            name = tool_info.name
             
-            # Convert to tools dict
-            for tool_info in available_tools:
-                name = tool_info.get("name")
-                if name:
-                    # Create a function that will call the tool
-                    def make_tool_fn(tool_name):
-                        def tool_fn(call_args, config=None):
-                            args = call_args.get("args", {})
-                            return self.session._call_tool(tool_name, args)
-                        return tool_fn
-                    
-                    # Wrap as a tool
-                    raw_tools[name] = make_tool_fn(name)
-        except Exception as e:
-            self.log_system(f"Error loading tools: {str(e)}")
-            raise
+            async def make_tool_fn(tool_name):
+                async def tool_fn(args):
+                    tool_args = args.get("args", {})
+                    result = await self.session.call_tool(tool_name, tool_args)
+                    return result
+                return tool_fn
+            
+            raw_tools[name] = await make_tool_fn(name)
         
         # Wrap tools with tracking and error handling
         wrapped_tools = {}
@@ -101,137 +124,131 @@ class MCPReactAgent:
             
         return wrapped_tools
     
-    def _wrap_tool(self, tool, tool_name):
-        """Wrap a tool with logging and error handling."""
-        orig_invoke = tool.invoke
-        
-        def new_invoke(call_args, config=None):
-            args_only = call_args.get("args", {})
-            
-            args_str = json.dumps(args_only, indent=2).strip()
-            if args_str.startswith("{") and args_str.endswith("}"):
-                args_str = args_str[1:-1].strip()
-            
-            self.set_system_title(f"tool: {tool_name}")
-            self.log_system(f"{tool_name} called with args: {args_str}")
-            
+    def _wrap_tool(self, tool_fn, tool_name: str):
+        """Wrap a tool function with tracking and error handling."""
+        async def wrapped_tool(args):
             try:
-                result = orig_invoke(call_args, config)
-                formatted = self._format_tool_output(result)
-                self.log_system(f"{tool_name} output: {formatted}")
+                # Log the tool call
+                args_str = json.dumps(args) if isinstance(args, dict) else str(args)
+                self.log_system(f"TOOL: {tool_name}: {tool_name} called with args: {args_str}")
+                
+                # Call the tool
+                result = await tool_fn(args)
+                
+                # Log the result
+                result_str = str(result)
+                if len(result_str) > 100:
+                    result_str = result_str[:97] + "..."
+                self.log_system(f"TOOL: {tool_name}: {tool_name} output: {result_str}")
+                
                 return result
             except Exception as e:
-                error_msg = f"Tool execution failed: {str(e)}"
-                self.log_system(f"Error: {error_msg}")
-                
-                # Return MCP-compliant error format
-                return {
-                    "isError": True,
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Error: {error_msg}"
-                        }
-                    ]
-                }
+                error_msg = f"Error calling tool {tool_name}: {str(e)}"
+                self.log_system(error_msg)
+                return {"error": error_msg}
         
-        return new_invoke
+        return wrapped_tool
     
-    def _format_tool_output(self, result):
-        """Format tool output for logging."""
-        if isinstance(result, dict):
-            return json.dumps(result, indent=2)
-        return str(result)
+    def log_system(self, message: str):
+        """Log a system message."""
+        if self.verbose:
+            print(message)
     
-    def _format_as_tool_message(self, result, tool_call_id):
-        """Format a tool result as a message for the LLM."""
-        content = result.get("content", [{"type": "text", "text": str(result)}])
-        is_error = result.get("isError", False)
-        
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": content,
-            "is_error": is_error
-        }
-    
-    def invoke(self, query: str) -> str:
+    async def invoke(self, query: str):
         """
-        Execute the ReAct agent on a user query.
+        Process a query using the ReAct pattern.
         
         Args:
-            query: The user's natural language query
+            query: The user query to process
             
         Returns:
-            The final response from the LLM
+            The final response from the agent
         """
-        self.connect()  # Ensure connection is established
+        # Ensure connection is established
+        await self.connect()
         
-        # Initialize messages with user query
-        messages = []
+        # Reset message history with system message
+        self._initialize_messages()
         
-        # Add system message if provided
-        if self.system_message:
-            messages.append({"role": "system", "content": self.system_message})
+        # Add the user query
+        self.messages.append({"role": "user", "content": query})
         
-        # Add user query
-        messages.append({"role": "user", "content": query})
+        # Begin the ReAct loop
+        max_iterations = 15  # Safety limit
+        iterations = 0
         
-        # Start ReAct loop
-        while True:
-            # Get LLM response
+        while iterations < max_iterations:
+            iterations += 1
+            
+            # Get response from LLM
             self.log_system("Sending request to LLM...")
-            response = self.llm.invoke(messages)
+            llm_response = await self._get_llm_response()
             
-            # Add response to conversation
-            messages.append(response)
+            # Extract potential tool calls
+            tool_calls = llm_response.get("tool_calls", [])
             
-            # Check if response contains tool calls
-            if not hasattr(response, 'tool_calls') or not response.tool_calls:
-                self.log_system("No tool calls, returning final response")
-                return response.content
-                
+            # If no tool calls, we're done
+            if not tool_calls:
+                return llm_response.get("content", "No response generated.")
+            
             # Process each tool call
-            for tool_call in response.tool_calls:
-                tool_name = tool_call["name"]
-                tool_call_id = tool_call["id"]
-                
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("name")
                 if tool_name not in self.tools:
-                    error_message = f"Unknown tool: {tool_name}"
-                    self.log_system(f"Error: {error_message}")
-                    
-                    tool_result = {
-                        "isError": True,
-                        "content": [{"type": "text", "text": f"Error: {error_message}"}]
-                    }
-                else:
-                    # Execute the tool
-                    tool_result = self.tools[tool_name](tool_call)
+                    self.log_system(f"Unknown tool requested: {tool_name}")
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id"),
+                        "name": tool_name,
+                        "content": f"Error: Tool '{tool_name}' not found. Available tools: {', '.join(self.tools.keys())}"
+                    })
+                    continue
                 
-                # Format and add tool result to messages
-                tool_message = self._format_as_tool_message(tool_result, tool_call_id)
-                messages.append(tool_message)
+                # Call the tool
+                tool_result = await self.tools[tool_name](tool_call)
                 
-                self.log_system(f"Tool {tool_name} executed, added result to conversation")
+                # Add the result to the messages
+                self.messages.append({
+                    "role": "tool", 
+                    "tool_call_id": tool_call.get("id"),
+                    "name": tool_name,
+                    "content": str(tool_result)
+                })
         
-        # This point should not be reached as we return when no tool calls are made
-        return "Error: ReAct loop terminated unexpectedly"
+        # If we reach here, we hit the iteration limit
+        return "Maximum number of iterations reached without a final answer."
+    
+    def invoke_sync(self, query: str):
+        """Synchronous wrapper for invoke()."""
+        return self.run_async(self.invoke(query))
+    
+    async def _get_llm_response(self):
+        """Get a response from the LLM."""
+        # Use Anthropic-compatible tool format
+        tools_for_llm = []
+        for name in self.tools:
+            tools_for_llm.append({
+                "name": name,
+                "description": f"Call the {name} tool to interact with the constraint solver."
+            })
+        
+        # Get response from LLM
+        response = await self.llm.bind_tools(tools_for_llm).ainvoke(self.messages)
+        
+        # Add the response to the messages
+        self.messages.append(response)
+        
+        return response
 
-
-def create_mcp_react_agent(
-    llm, 
-    server_command, 
-    system_message=None, 
-    verbose=False
-):
+def create_mcp_react_agent(llm, server_command, system_message=None, verbose=False):
     """
-    Factory function to create an MCP ReAct agent.
+    Create a ReAct agent for MCP tools.
     
     Args:
-        llm: Language model to use
-        server_command: Command to start the MCP server
-        system_message: Optional system message to include
-        verbose: Whether to enable verbose output
+        llm: The language model to use
+        server_command: The command to start the MCP server
+        system_message: Optional system message for the agent
+        verbose: Whether to log verbose output
         
     Returns:
         A function that takes a query and returns a response
@@ -239,6 +256,7 @@ def create_mcp_react_agent(
     agent = MCPReactAgent(llm, server_command, system_message, verbose)
     
     def invoke_agent(query):
-        return agent.invoke(query)
+        """Invoke the agent synchronously."""
+        return agent.invoke_sync(query)
     
     return invoke_agent 

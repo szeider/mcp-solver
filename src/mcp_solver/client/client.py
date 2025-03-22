@@ -435,22 +435,31 @@ def main():
     system_message = state["messages"][0]["content"] if state["messages"] and state["messages"][0]["role"] == "system" else None
     query = state["messages"][1]["content"] if len(state["messages"]) > 1 else ""
     
-    # Create and invoke the ReAct agent
-    react_agent = create_mcp_react_agent(
-        llm=SOLVE_MODEL,
-        server_command=server_cmd,
-        system_message=system_message,
-        verbose=True
-    )
-    
-    # Invoke the agent with the query
-    result = react_agent(query)
-    
-    # Print the result
-    print("Agent reply received, length:", len(result) if result else 0)
-    print(result)
-    
-    return 0
+    try:
+        # Create and invoke the ReAct agent
+        react_agent = create_mcp_react_agent(
+            llm=SOLVE_MODEL,
+            server_command=server_cmd,
+            system_message=system_message,
+            verbose=True
+        )
+        
+        # Invoke the agent with the query
+        result = react_agent(query)
+        
+        # Print the result
+        print("Agent reply received, length:", len(result) if result else 0)
+        print(result)
+        
+        return 0
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        return 1
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
 def main_cli():
     """Command-line entry point."""
