@@ -36,7 +36,7 @@ DEFAULT_SERVER_COMMAND = "uv"
 DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn"]
 
 # Global Rich Console instance with color support
-console = Console(color_system="truecolor", flush=True)
+console = Console(color_system="truecolor")
 _current_title = None  # Stores the current title for system messages
 
 class ToolError:
@@ -72,6 +72,7 @@ def log_system(msg: str, title: str = None) -> None:
     
     # Ensure output is flushed immediately
     sys.stdout.flush()
+    console.file.flush() if hasattr(console, 'file') else None
 
 class ClientError(Exception):
     """Client related errors."""
