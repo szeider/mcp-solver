@@ -105,17 +105,23 @@ Think step by step and use the tools effectively to build and solve the constrai
         raw_tools = {}
         
         # Create a function for each tool
-        for tool_info in tools_response.tools:
-            name = tool_info.name
-            
-            async def make_tool_fn(tool_name):
+        # The list_tools response has a 'tools' field with a list of tools
+        tool_list = tools_response.get("tools", [])
+        for tool_info in tool_list:
+            name = tool_info.get("name")
+            if not name:
+                continue
+                
+            # Define a closure to capture the tool name properly
+            async def create_tool_fn(name=name):
                 async def tool_fn(args):
                     tool_args = args.get("args", {})
-                    result = await self.session.call_tool(tool_name, tool_args)
+                    result = await self.session.call_tool(name, tool_args)
                     return result
                 return tool_fn
             
-            raw_tools[name] = await make_tool_fn(name)
+            # Create the function and add it to our tools
+            raw_tools[name] = await create_tool_fn()
         
         # Wrap tools with tracking and error handling
         wrapped_tools = {}
