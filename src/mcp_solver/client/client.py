@@ -14,18 +14,26 @@ from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
+from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
 
-# Custom agent implementation
+# Check LangGraph version for compatibility
+import importlib
+import importlib.metadata
 try:
-    from .custom_agent import create_custom_react_agent
-except ImportError:
-    # Graceful fallback if the custom agent module is not available
-    def create_custom_react_agent(*args, **kwargs):
-        raise ImportError("Custom React agent implementation not available")
+    langgraph_version = importlib.metadata.version("langgraph")
+    LANGGRAPH_VERSION = tuple(map(int, langgraph_version.split(".")[:3]))
+    USING_NEW_LANGGRAPH = LANGGRAPH_VERSION >= (0, 3, 18)
+except (importlib.metadata.PackageNotFoundError, ValueError):
+    # If we can't determine version, assume older version
+    LANGGRAPH_VERSION = (0, 0, 0)
+    USING_NEW_LANGGRAPH = False
 
-# Flag to toggle between the built-in React agent and our custom implementation
-USE_CUSTOM_AGENT = False
+# Custom agent implementation
+from mcp_solver.client.custom_agent import create_custom_react_agent, run_agent, normalize_state
+
+# For testing purposes - force using the custom agent
+USE_CUSTOM_AGENT = True
 
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
@@ -288,7 +296,18 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     # Initialize the agent with tools
                     if USE_CUSTOM_AGENT:
                         print("Using custom React agent implementation...")
-                        agent = create_custom_react_agent(SOLVE_MODEL, wrapped_tools, None)
+                        # Extract system prompt from the messages list if present
+                        system_prompt = None
+                        for msg in state["messages"]:
+                            if msg.get("role") == "system":
+                                system_prompt = msg.get("content")
+                                print(f"Using system prompt with {len(system_prompt)} characters")
+                                break
+                                
+                        if not system_prompt:
+                            print("Warning: No system prompt found in messages!")
+                            
+                        agent = create_custom_react_agent(SOLVE_MODEL, wrapped_tools, system_prompt)
                     else:
                         print("Using built-in React agent implementation...")
                         agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
@@ -303,19 +322,50 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     
                     try:
                         # Execute the agent
-                        response = await agent.ainvoke({"messages": state["messages"]}, config=config)
-                        print(f"\n{'='*60}")
-                        print("Received response from LLM.")
-                        print(f"{'='*60}\n")
-                        sys.stdout.flush()
-
-                        # Extract and add the agent's response to state
-                        if response.get("messages") and len(response["messages"]) > 0:
-                            agent_reply = response["messages"][-1].content
-                            print(f"Agent reply received, length: {len(agent_reply)}", flush=True)
-                            state["messages"].append({"role": "assistant", "content": agent_reply})
+                        if USE_CUSTOM_AGENT:
+                            print("Executing custom React agent...")
+                            # Create initial state with messages
+                            human_message = HumanMessage(content=state["messages"][-1]["content"])
+                            
+                            try:
+                                # Run the custom agent
+                                final_state = await run_agent(agent, human_message.content, config)
+                                
+                                # Normalize the state for consistent format handling
+                                if USING_NEW_LANGGRAPH:
+                                    final_state = normalize_state(final_state)
+                                
+                                # Extract and add the agent's response to state
+                                if isinstance(final_state, dict) and final_state.get("messages") and len(final_state["messages"]) > 0:
+                                    last_message = final_state["messages"][-1]
+                                    if hasattr(last_message, "content"):
+                                        agent_reply = last_message.content
+                                    else:
+                                        agent_reply = str(last_message)
+                                    print(f"Agent reply received, length: {len(str(agent_reply))}", flush=True)
+                                    state["messages"].append({"role": "assistant", "content": agent_reply})
+                                else:
+                                    print("Warning: No message content found in custom agent response", flush=True)
+                            except Exception as e:
+                                error_msg = f"Error running custom agent: {str(e)}"
+                                print(error_msg, flush=True)
+                                state["messages"].append({"role": "assistant", "content": error_msg})
                         else:
-                            print("Warning: No message content found in response", flush=True)
+                            print("Executing built-in React agent implementation...")
+                            # Execute the built-in agent
+                            response = await agent.ainvoke({"messages": state["messages"]}, config=config)
+                            print(f"\n{'='*60}")
+                            print("Received response from LLM.")
+                            print(f"{'='*60}\n")
+                            sys.stdout.flush()
+
+                            # Extract and add the agent's response to state
+                            if response.get("messages") and len(response["messages"]) > 0:
+                                agent_reply = response["messages"][-1].content
+                                print(f"Agent reply received, length: {len(agent_reply)}", flush=True)
+                                state["messages"].append({"role": "assistant", "content": agent_reply})
+                            else:
+                                print("Warning: No message content found in response", flush=True)
                     except Exception as e:
                         error_msg = f"Error during LLM invocation: {str(e)}"
                         print(error_msg, flush=True)

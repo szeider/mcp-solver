@@ -22,6 +22,7 @@ PROBLEMS_DIR = os.path.join(os.path.dirname(__file__), "problems")
 MZN_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "mzn")
 PYSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "pysat")
 Z3_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "z3")
+RESULTS_DIR = os.path.join(ROOT_DIR, "test_results")
 
 def get_abs_path(rel_path):
     """Convert a path relative to the root directory to an absolute path."""

@@ -30,6 +30,77 @@ This checks:
 - API key for the default LLM model (Anthropic Claude)
 - Basic client functionality
 
+## Custom ReAct Agent
+
+The MCP Solver includes a custom implementation of a ReAct (Reasoning + Acting) agent built from scratch using LangGraph. This implementation offers fine-grained control over the agent's behavior and demonstrates how to create a custom agent that can work with MCP tools.
+
+### Features
+
+- **Custom State Management**: The agent maintains a state with a history of messages.
+- **Flexible Model Interaction**: Calls language models with the current state and system prompt.
+- **Tool Execution**: Processes tool calls in both object and dictionary formats.
+- **Smart Routing**: Determines the next node in the workflow based on message types.
+- **Complete Graph**: Compiles a workflow graph with model and tools nodes.
+
+### Usage
+
+The custom agent can be created and used as follows:
+
+```python
+from mcp_solver.client.custom_agent import create_custom_react_agent
+
+# Create the agent with your LLM and tools
+agent = create_custom_react_agent(
+    llm=your_llm,
+    tools=your_tools,
+    system_prompt="You are a helpful assistant for solving constraint problems."
+)
+
+# Run the agent with a human message
+final_state = agent.invoke({"messages": [HumanMessage(content="your question")]})
+```
+
+### Status and Known Issues
+
+Currently, the client supports two agent implementations:
+
+- **Built-in Agent**: The default LangChain ReAct agent implementation, which is currently stable and recommended for production use.
+- **Custom Agent**: Our custom LangGraph implementation, which is under development and may have issues with certain tools.
+
+**Current Status:**
+- The built-in agent works reliably with all MCP tools
+- The custom agent has issues with asynchronous execution and structured tool invocation
+
+**Known Issues with Custom Agent:**
+- Event loop conflicts when running in an asynchronous context
+- Compatibility issues with some structured tools that don't support synchronous invocation
+- Problems executing certain MCP tools that require specific invocation patterns
+
+### Toggling Agent Implementation
+
+To switch between agent implementations, modify the `USE_CUSTOM_AGENT` constant in `src/mcp_solver/client/client.py`:
+
+```python
+# Flag to toggle between the built-in React agent and our custom implementation
+USE_CUSTOM_AGENT = False  # Set to True to use the custom agent
+```
+
+For most users, we recommend using the built-in agent (`USE_CUSTOM_AGENT = False`) for stable operation.
+
+### Testing
+
+The repository includes several test scripts that demonstrate the custom agent:
+
+- `test_custom_agent.py`: Tests the core functionality of the agent.
+- `test_intermediate_steps.py`: Shows how to observe the intermediate states during agent execution.
+- `test_mcp_tools.py`: Demonstrates integrating MCP tools with the custom agent.
+
+Run tests with:
+
+```bash
+uv run python -m src.mcp_solver.client.test_intermediate_steps
+```
+
 ## Command Line Usage
 
 ### Streamlined Commands
