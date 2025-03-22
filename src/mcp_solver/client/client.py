@@ -51,7 +51,7 @@ class ToolError:
 class SimpleToolTracker(BaseCallbackHandler):
     def on_tool_end(self, output, **kwargs):
         tool_name = kwargs.get("name", "unknown_tool")
-        print(f"Tool executed: {tool_name}", flush=True)
+        print(f"\n▶ TOOL CALL COMPLETED: {tool_name}", flush=True)
 
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
@@ -179,6 +179,7 @@ def wrap_tool(tool):
     def log_and_call(func):
         def wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
+            print(f"\n▶ TOOL CALL: {tool_name}", flush=True)
             log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()  # Force flush to ensure immediate output
             
@@ -191,6 +192,7 @@ def wrap_tool(tool):
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
+                print(f"✖ TOOL ERROR: {tool_name}", flush=True)
                 sys.stdout.flush()  # Force flush error messages too
                 return ToolError(error_msg)
         return wrapper
@@ -203,6 +205,7 @@ def wrap_tool(tool):
         orig_ainvoke = tool.ainvoke
         async def ainvoke_wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
+            print(f"\n▶ TOOL CALL: {tool_name}", flush=True)
             log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()  # Force flush to ensure immediate output
             
@@ -215,6 +218,7 @@ def wrap_tool(tool):
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"Error: {error_msg}")
+                print(f"✖ TOOL ERROR: {tool_name}", flush=True)
                 sys.stdout.flush()  # Force flush error messages
                 return ToolError(error_msg)
         updates["ainvoke"] = ainvoke_wrapper
@@ -299,9 +303,11 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
                     
                     # Print tools for debugging
-                    print(f"Available tools ({len(wrapped_tools)}):", flush=True)
+                    print("\n📋 Available tools:", flush=True)
                     for i, tool in enumerate(wrapped_tools):
                         print(f"  {i+1}. {tool.name}", flush=True)
+                    print("", flush=True)
+                    sys.stdout.flush()
 
                     # Configure the agent with tool tracker
                     config = RunnableConfig(
@@ -313,10 +319,16 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
 
                     # Process the request
-                    print("Sending request to LLM...", flush=True)
+                    print(f"\n{'='*60}")
+                    print("Sending request to LLM...")
+                    print(f"{'='*60}\n")
+                    sys.stdout.flush()
                     try:
                         response = await agent.ainvoke({"messages": state["messages"]}, config=config)
-                        print("Received response from LLM.", flush=True)
+                        print(f"\n{'='*60}")
+                        print("Received response from LLM.")
+                        print(f"{'='*60}\n")
+                        sys.stdout.flush()
 
                         # Extract and add the agent's response to state
                         if response.get("messages") and len(response["messages"]) > 0:
