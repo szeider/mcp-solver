@@ -3,21 +3,17 @@ import os
 import asyncio
 import argparse
 import json
-import re
-import textwrap
 from datetime import datetime
-from typing import Dict, Any, List
-from pathlib import Path
+from typing import Dict, Any
+from rich.console import Console
 
 # Core dependencies
-from .llm_factory import LLMFactory, ModelInfo
+from .llm_factory import LLMFactory
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
-from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
-from rich.console import Console
 
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
@@ -47,13 +43,6 @@ class ToolError:
     def __str__(self) -> str:
         return self.content
 
-# Custom callback handler for tool tracking
-class SimpleToolTracker(BaseCallbackHandler):
-    def on_tool_end(self, output, **kwargs):
-        # We no longer need to output here since we're already showing the output
-        # in the wrapper functions with system: toolname output: result
-        pass
-
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
     global _current_title
@@ -79,46 +68,6 @@ class ClientError(Exception):
     """Client related errors."""
     pass
 
-def load_system_prompt(prompt_file: str = "system_prompt.md") -> str:
-    """Load system prompt from a markdown file located at the project root."""
-    try:
-        if not os.path.exists(prompt_file):
-            raise ClientError(f"System prompt file not found: {prompt_file}")
-        
-        with open(prompt_file, encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception as e:
-        raise ClientError(f"Failed to load system prompt: {e}")
-
-def parse_arguments():
-    """Parse command line arguments focusing on the essential parameters."""
-    parser = argparse.ArgumentParser(description='MCP Solver Client')
-    parser.add_argument(
-        '--query', 
-        type=str,
-        required=True,
-        help='Path to the file containing the problem query'
-    )
-    parser.add_argument(
-        '--prompt',
-        type=str,
-        required=True,
-        help='Path to the file containing the system prompt'
-    )
-    parser.add_argument(
-        '--server',
-        type=str,
-        help='Server command to use. Format: "command arg1 arg2 arg3..."'
-    )
-    parser.add_argument(
-        '--model',
-        type=str,
-        choices=list(MODEL_CODES.keys()),
-        default=DEFAULT_MODEL,
-        help=f'Model to use (default: {DEFAULT_MODEL})'
-    )
-    return parser.parse_args()
-
 def load_file_content(file_path):
     """Load content from a file."""
     try:
@@ -130,17 +79,15 @@ def load_file_content(file_path):
 
 def load_initial_state(custom_prompt_path, query_path) -> dict:
     """Initialize state with the custom system prompt and the query from file."""
-    # Load custom prompt
+    # Load custom prompt and query
     custom_prompt = load_file_content(custom_prompt_path)
-    
-    # Load query
     query = load_file_content(query_path)
     
-    # Create initial messages with only the custom prompt
-    messages = [{"role": "system", "content": custom_prompt}]
-
-    # Add the user query
-    messages.append({"role": "user", "content": query})
+    # Create initial messages
+    messages = [
+        {"role": "system", "content": custom_prompt},
+        {"role": "user", "content": query}
+    ]
 
     return {
         "messages": messages,
@@ -169,7 +116,7 @@ def format_tool_output(result):
 
 def wrap_tool(tool):
     """Wrap a tool for logging with tidier output."""
-    # Remove any "[Tool]" prefix from the tool's name if present.
+    # Clean tool name if needed
     tool_name = tool.name
     if tool_name.startswith("[Tool]"):
         tool_name = tool_name.replace("[Tool]", "").strip()
@@ -180,20 +127,19 @@ def wrap_tool(tool):
     def log_and_call(func):
         def wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            # Use one consolidated message for tool call
             log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
-            sys.stdout.flush()  # Force flush to ensure immediate output
+            sys.stdout.flush()
             
             try:
                 result = func(call_args, config)
                 formatted = format_tool_output(result)
                 log_system(f"◀ {tool_name} output: {formatted}")
-                sys.stdout.flush()  # Force flush again after tool completes
+                sys.stdout.flush()
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"✖ Error: {error_msg}")
-                sys.stdout.flush()  # Force flush error messages too
+                sys.stdout.flush()
                 return ToolError(error_msg)
         return wrapper
     
@@ -205,20 +151,19 @@ def wrap_tool(tool):
         orig_ainvoke = tool.ainvoke
         async def ainvoke_wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            # Use one consolidated message for tool call
             log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
-            sys.stdout.flush()  # Force flush to ensure immediate output
+            sys.stdout.flush()
             
             try:
                 result = await orig_ainvoke(call_args, config)
                 formatted = format_tool_output(result)
                 log_system(f"◀ {tool_name} output: {formatted}")
-                sys.stdout.flush()  # Force flush after tool completes
+                sys.stdout.flush()
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
                 log_system(f"✖ Error: {error_msg}")
-                sys.stdout.flush()  # Force flush error messages
+                sys.stdout.flush()
                 return ToolError(error_msg)
         updates["ainvoke"] = ainvoke_wrapper
     
@@ -227,6 +172,35 @@ def wrap_tool(tool):
     else:
         log_system(f"Warning: {tool_name} has no invoke or ainvoke method; cannot wrap for logging.")
         return tool
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='MCP Solver Client')
+    parser.add_argument(
+        '--query', 
+        type=str,
+        required=True,
+        help='Path to the file containing the problem query'
+    )
+    parser.add_argument(
+        '--prompt',
+        type=str,
+        required=True,
+        help='Path to the file containing the system prompt'
+    )
+    parser.add_argument(
+        '--server',
+        type=str,
+        help='Server command to use. Format: "command arg1 arg2 arg3..."'
+    )
+    parser.add_argument(
+        '--model',
+        type=str,
+        choices=list(MODEL_CODES.keys()),
+        default=DEFAULT_MODEL,
+        help=f'Model to use (default: {DEFAULT_MODEL})'
+    )
+    return parser.parse_args()
 
 async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
@@ -269,36 +243,27 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     state["solve_llm"] = model_str
     print(f"Using model: {model_str}", flush=True)
 
-    # Get server command and args from command line or use defaults
+    # Set up server command and args
     if state.get("server_command") and state.get("server_args"):
-        # Use server command from command line
         mcp_command = state["server_command"]
         mcp_args = state["server_args"]
         print(f"Using custom server command: {mcp_command} {' '.join(mcp_args)}", flush=True)
     else:
-        # Use default server command
         mcp_command = DEFAULT_SERVER_COMMAND
         mcp_args = DEFAULT_SERVER_ARGS
         print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}", flush=True)
 
     # Set up server parameters for stdio connection
-    server_params = StdioServerParameters(
-        command=mcp_command,
-        args=mcp_args
-    )
+    server_params = StdioServerParameters(command=mcp_command, args=mcp_args)
 
     try:
         # Create a direct client session and initialize MCP tools
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 try:
-                    # Initialize the connection
+                    # Initialize the connection and get tools
                     await session.initialize()
-                    
-                    # Get tools directly using the langchain-mcp-adapters
                     raw_tools = await load_mcp_tools(session)
-                    
-                    # Wrap tools for better logging
                     wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
                     
                     # Print tools for debugging
@@ -308,21 +273,18 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     print("", flush=True)
                     sys.stdout.flush()
 
-                    # Configure the agent with tool tracker
-                    config = RunnableConfig(
-                        recursion_limit=100,
-                        callbacks=[SimpleToolTracker()]
-                    )
-
                     # Initialize the agent with tools
                     agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+                    config = RunnableConfig(recursion_limit=100)
 
                     # Process the request
                     print(f"\n{'='*60}")
                     print("Sending request to LLM...")
                     print(f"{'='*60}\n")
                     sys.stdout.flush()
+                    
                     try:
+                        # Execute the agent
                         response = await agent.ainvoke({"messages": state["messages"]}, config=config)
                         print(f"\n{'='*60}")
                         print("Received response from LLM.")
@@ -360,11 +322,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
 
     return state
 
-def main_cli():
-    """Entry point for the command-line interface."""
-    # Run the main async function
-    asyncio.run(main())
-
 async def main():
     """Main async function for one-shot execution."""
     # Parse command line arguments
@@ -385,6 +342,10 @@ async def main():
     
     # Run the solver once
     await mcp_solver_node(state, args.model)
+
+def main_cli():
+    """Entry point for the command-line interface."""
+    asyncio.run(main())
 
 if __name__ == "__main__":
     main_cli() 
