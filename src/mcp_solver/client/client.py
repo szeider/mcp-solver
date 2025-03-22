@@ -47,6 +47,12 @@ class ToolError:
     def __str__(self) -> str:
         return self.content
 
+# Custom callback handler for tool tracking
+class SimpleToolTracker(BaseCallbackHandler):
+    def on_tool_end(self, output, **kwargs):
+        tool_name = kwargs.get("name", "unknown_tool")
+        print(f"Tool executed: {tool_name}")
+
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
     global _current_title
@@ -138,21 +144,23 @@ def load_initial_state(custom_prompt_path, query_path) -> dict:
     }
 
 def format_tool_output(result):
-    """Helper function to format tool outputs."""
+    """Format tool outputs into readable text."""
+    # Handle error objects
     if hasattr(result, "content"):
-        out = result.content
-    elif isinstance(result, dict):
-        # Check if it's an MCP error response
+        return result.content
+    
+    # Handle dictionary responses
+    if isinstance(result, dict):
         if result.get("isError") is True:
-            out = f"ERROR: {result.get('content', 'Unknown error')}"
-        else:
-            out = result.get("content", str(result))
-    elif isinstance(result, str):
-        m = re.search(r"content='([^']*)'", result)
-        out = m.group(1) if m else result
-    else:
-        out = str(result)
-    return out.replace("\\n", "\n")
+            return f"ERROR: {result.get('content', 'Unknown error')}"
+        return result.get("content", str(result))
+    
+    # Handle string responses
+    if isinstance(result, str):
+        return result.replace("\\n", "\n")
+    
+    # Default: convert to string
+    return str(result).replace("\\n", "\n")
 
 def wrap_tool(tool):
     """Wrap a tool for logging with tidier output."""
@@ -240,12 +248,12 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         })
         return state
     
+    # Create model and get model info
     SOLVE_MODEL = LLMFactory.create_model(model_code)
     model_info = LLMFactory.get_model_info(SOLVE_MODEL)
     model_str = f"{model_info.platform}:{model_info.model_name}" if model_info else "Unknown"
-
+    
     state["solve_llm"] = model_str
-
     print(f"Using model: {model_str}")
 
     # Get server command and args from command line or use defaults
@@ -260,81 +268,81 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         mcp_args = DEFAULT_SERVER_ARGS
         print(f"Using default server command: {mcp_command} {' '.join(mcp_args)}")
 
-    try:
-        # Set up server parameters for stdio connection
-        server_params = StdioServerParameters(
-            command=mcp_command,
-            args=mcp_args
-        )
+    # Set up server parameters for stdio connection
+    server_params = StdioServerParameters(
+        command=mcp_command,
+        args=mcp_args
+    )
 
-        # Create a direct client session
+    try:
+        # Create a direct client session and initialize MCP tools
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
-                # Initialize the connection
-                await session.initialize()
-                
-                # Get tools directly using the langchain-mcp-adapters
-                raw_tools = await load_mcp_tools(session)
-                
-                # Wrap tools for better logging
-                wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
-                
-                # Print tools for debugging
-                print(f"Available tools ({len(wrapped_tools)}):")
-                for i, tool in enumerate(wrapped_tools):
-                    print(f"  {i+1}. {tool.name}")
-
-                # Custom callback handler for tool tracking
-                class SimpleToolTracker(BaseCallbackHandler):
-                    def on_tool_end(self, output, **kwargs):
-                        tool_name = kwargs.get("name", "unknown_tool")
-                        print(f"Tool executed: {tool_name}")
-
-                # Create agent with higher recursion limit and our tool tracker
-                config = RunnableConfig(
-                    recursion_limit=100,
-                    callbacks=[SimpleToolTracker()]
-                )
-
-                # Initialize the solver LLM and create the agent
-                solver_llm = SOLVE_MODEL
-                agent = create_react_agent(solver_llm, wrapped_tools)
-
                 try:
-                    # Regular invoke method
+                    # Initialize the connection
+                    await session.initialize()
+                    
+                    # Get tools directly using the langchain-mcp-adapters
+                    raw_tools = await load_mcp_tools(session)
+                    
+                    # Wrap tools for better logging
+                    wrapped_tools = [wrap_tool(tool) for tool in raw_tools]
+                    
+                    # Print tools for debugging
+                    print(f"Available tools ({len(wrapped_tools)}):")
+                    for i, tool in enumerate(wrapped_tools):
+                        print(f"  {i+1}. {tool.name}")
+
+                    # Configure the agent with tool tracker
+                    config = RunnableConfig(
+                        recursion_limit=100,
+                        callbacks=[SimpleToolTracker()]
+                    )
+
+                    # Initialize the agent with tools
+                    agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+
+                    # Process the request
+                    print("Sending request to LLM...")
                     try:
-                        print("Sending request to LLM...")
                         response = await agent.ainvoke({"messages": state["messages"]}, config=config)
                         print("Received response from LLM.")
 
-                        # Extract the agent's response content
+                        # Extract and add the agent's response to state
                         if response.get("messages") and len(response["messages"]) > 0:
                             agent_reply = response["messages"][-1].content
-                            print("Agent reply received, length:", len(agent_reply))
-                            print(agent_reply)
-
-                            # Add the response to state messages
+                            print(f"Agent reply received, length: {len(agent_reply)}")
                             state["messages"].append({"role": "assistant", "content": agent_reply})
                         else:
                             print("Warning: No message content found in response")
-                    except Exception as invoke_error:
-                        print(f"Error during LLM invocation: {str(invoke_error)}")
-                        raise invoke_error
-
+                    except Exception as e:
+                        error_msg = f"Error during LLM invocation: {str(e)}"
+                        print(error_msg)
+                        state["messages"].append({
+                            "role": "assistant", 
+                            "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."
+                        })
                 except Exception as e:
-                    print(f"Agent error: {str(e)}")
-                    import traceback
-                    print(traceback.format_exc())
-
+                    error_msg = f"Error initializing MCP session: {str(e)}"
+                    console.print(f"[bold red]{error_msg}[/bold red]")
                     state["messages"].append({
                         "role": "assistant",
-                        "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model."
+                        "content": error_msg
                     })
     except Exception as e:
-        console.print(f"[bold red]Error connecting to MCP server: {str(e)}[/bold red]")
-        sys.exit(1)
+        error_msg = f"Error connecting to MCP server: {str(e)}"
+        console.print(f"[bold red]{error_msg}[/bold red]")
+        state["messages"].append({
+            "role": "assistant",
+            "content": error_msg
+        })
 
     return state
+
+def main_cli():
+    """Entry point for the command-line interface."""
+    # Run the main async function
+    asyncio.run(main())
 
 async def main():
     """Main async function for one-shot execution."""
@@ -355,69 +363,7 @@ async def main():
         state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
     
     # Run the solver once
-    state = await mcp_solver_node(state, args.model)
-
-def main_cli():
-    """Entry point for the command-line interface."""
-    # Modified to use the main_wrapper for compatibility with previous mcp_react_os.py behavior
-    asyncio.run(main_wrapper())
-
-def main_wrapper():
-    """
-    Wrapper function to provide backward compatibility with mcp_react_os.py.
-    This function sets default values for arguments if they're not provided.
-    """
-    # Modify the arguments to include defaults that mcp_react_os.py provided
-    args = sys.argv[1:]
-    modified_args = list(args)  # Create a copy to modify
-    
-    # Find the standard MiniZinc prompt
-    base_dir = Path(__file__).parent.parent.parent.parent
-    prompt_paths = [
-        base_dir / "docs" / "standard_prompt_mzn.md",  # Try docs directory first
-        base_dir / "instructions_prompt_mzn.md",  # Try root directory
-    ]
-    
-    # Find the first prompt file that exists
-    default_prompt = None
-    for path in prompt_paths:
-        if path.exists():
-            default_prompt = str(path)
-            break
-    
-    # Add --prompt if not specified and we found a default
-    if not any(arg.startswith("--prompt") for arg in args) and default_prompt:
-        modified_args.extend(["--prompt", default_prompt])
-    
-    # Set default server if not specified
-    if not any(arg.startswith("--server") for arg in args):
-        modified_args.extend(["--server", "uv run mcp-solver-mzn"])
-        
-    # Filter out flags that are meant for the test runner but not supported by the client
-    # (We just silently ignore them to maintain compatibility with test scripts)
-    filtered_args = []
-    skip_next = False
-    for i, arg in enumerate(modified_args):
-        if skip_next:
-            skip_next = False
-            continue
-            
-        if arg == "--verbose" or arg == "-v":
-            # Ignore verbose flag
-            continue
-        elif arg.startswith("--timeout") or arg == "-t":
-            # Skip timeout flag and its value
-            if i < len(modified_args) - 1 and not modified_args[i+1].startswith("--"):
-                skip_next = True
-            continue
-        else:
-            filtered_args.append(arg)
-    
-    # Replace sys.argv with our filtered version
-    sys.argv = [sys.argv[0]] + filtered_args
-    
-    # Call the main function
-    return main()
+    await mcp_solver_node(state, args.model)
 
 if __name__ == "__main__":
     main_cli() 

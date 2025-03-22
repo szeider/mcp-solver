@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from mcp_solver.client.client import main_cli as client_main
+import asyncio
 
 def main():
     """Run the test client with PySAT defaults."""
@@ -11,6 +12,7 @@ def main():
     base_dir = Path(__file__).parent.parent.parent.parent
     prompt_paths = [
         base_dir / "docs" / "standard_prompt_pysat.md",  # Try docs directory first
+        base_dir / "docs" / "standard_prompt.md",      # Alternative name
         base_dir / "instructions_prompt_pysat.md",  # Try root directory
     ]
     
@@ -63,8 +65,7 @@ def main():
             continue
             
         if arg == "--verbose" or arg == "-v":
-            # Keep verbose flag for the ReAct agent
-            filtered_args.append(arg)
+            # Just skip verbose flag
             continue
         elif arg.startswith("--timeout") or arg == "-t":
             # Skip timeout flag and its value
@@ -77,7 +78,7 @@ def main():
     # Replace sys.argv with our filtered version
     sys.argv = [sys.argv[0]] + filtered_args
     
-    # Call the main function from test_client.py
+    # Call the main function
     return client_main()
 
 if __name__ == "__main__":
