@@ -17,7 +17,12 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 
 # Custom agent implementation
-from mcp_solver.client.custom_agent import create_custom_react_agent
+try:
+    from .custom_agent import create_custom_react_agent
+except ImportError:
+    # Graceful fallback if the custom agent module is not available
+    def create_custom_react_agent(*args, **kwargs):
+        raise ImportError("Custom React agent implementation not available")
 
 # Flag to toggle between the built-in React agent and our custom implementation
 USE_CUSTOM_AGENT = False
