@@ -180,8 +180,8 @@ def wrap_tool(tool):
     def log_and_call(func):
         def wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            print(f"\n▶ TOOL CALL: {tool_name}", flush=True)
-            log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
+            # Use one consolidated message for tool call
+            log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()  # Force flush to ensure immediate output
             
             try:
@@ -192,8 +192,7 @@ def wrap_tool(tool):
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
-                log_system(f"Error: {error_msg}")
-                print(f"✖ TOOL ERROR: {tool_name}", flush=True)
+                log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()  # Force flush error messages too
                 return ToolError(error_msg)
         return wrapper
@@ -206,8 +205,8 @@ def wrap_tool(tool):
         orig_ainvoke = tool.ainvoke
         async def ainvoke_wrapper(call_args, config=None):
             args_only = call_args.get("args", {})
-            print(f"\n▶ TOOL CALL: {tool_name}", flush=True)
-            log_system(f"{tool_name} called with args: {json.dumps(args_only, indent=2)}")
+            # Use one consolidated message for tool call
+            log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()  # Force flush to ensure immediate output
             
             try:
@@ -218,8 +217,7 @@ def wrap_tool(tool):
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
-                log_system(f"Error: {error_msg}")
-                print(f"✖ TOOL ERROR: {tool_name}", flush=True)
+                log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()  # Force flush error messages
                 return ToolError(error_msg)
         updates["ainvoke"] = ainvoke_wrapper
