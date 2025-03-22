@@ -4,7 +4,7 @@
 
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 
-A Model Context Protocol (MCP) server that exposes SAT and constraint solving capabilities to Large Language Models.
+A Model Context Protocol (MCP) server that exposes SAT, SMT and constraint solving capabilities to Large Language Models.
 
 ------
 
@@ -99,8 +99,7 @@ mcp-solver-z3
 
 ## Installation
 
-1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download) (for testing, you can also use our [internal test client](https://claude.ai/chat/990a5d65-2a47-469f-aceb-f9948d37408c#test-client))
-
+1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download). For testing, you can also use the included test client, see below.
 2. Install the MCP Solver with appropriate dependencies based on the mode(s) you intend to use:
 
    ```bash
