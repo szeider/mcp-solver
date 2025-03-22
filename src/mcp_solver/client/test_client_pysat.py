@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from mcp_solver.client.client import main_cli
+from mcp_solver.client.test_client import main
 
 def main():
     """Run the test client with PySAT defaults."""
@@ -19,6 +19,7 @@ def main():
     for path in prompt_paths:
         if path.exists():
             default_prompt = str(path)
+            print(f"Using PySAT prompt: {path}")
             break
     
     if not default_prompt:
@@ -30,6 +31,19 @@ def main():
     # Insert defaults into sys.argv if not overridden
     args = sys.argv[1:]
     modified_args = list(args)  # Create a copy to modify
+    
+    # Support old --problem syntax
+    for i, arg in enumerate(args):
+        if arg == "--problem" and i + 1 < len(args):
+            # Convert --problem to --query with proper path
+            modified_args[i] = "--query"
+            problem_name = args[i + 1]
+            if not problem_name.endswith('.md'):
+                problem_name += '.md'
+            
+            # Set the full path to the problem
+            problem_path = base_dir / "tests" / "problems" / "pysat" / problem_name
+            modified_args[i + 1] = str(problem_path)
     
     # Add --prompt if not specified and we found a default
     if not any(arg.startswith("--prompt") for arg in args) and default_prompt:
@@ -49,7 +63,8 @@ def main():
             continue
             
         if arg == "--verbose" or arg == "-v":
-            # Ignore verbose flag
+            # Keep verbose flag for the ReAct agent
+            filtered_args.append(arg)
             continue
         elif arg.startswith("--timeout") or arg == "-t":
             # Skip timeout flag and its value
@@ -62,8 +77,8 @@ def main():
     # Replace sys.argv with our filtered version
     sys.argv = [sys.argv[0]] + filtered_args
     
-    # Call the main client function
-    return main_cli()
+    # Call the main function from test_client.py
+    return main()
 
 if __name__ == "__main__":
     main() 
