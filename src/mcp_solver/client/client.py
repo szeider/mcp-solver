@@ -50,8 +50,9 @@ class ToolError:
 # Custom callback handler for tool tracking
 class SimpleToolTracker(BaseCallbackHandler):
     def on_tool_end(self, output, **kwargs):
-        tool_name = kwargs.get("name", "unknown_tool")
-        print(f"\n▶ TOOL CALL COMPLETED: {tool_name}", flush=True)
+        # We no longer need to output here since we're already showing the output
+        # in the wrapper functions with system: toolname output: result
+        pass
 
 def set_system_title(title: str) -> None:
     """Set a title for the system message."""
