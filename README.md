@@ -193,9 +193,9 @@ For Windows:
 	
 	On Claude Desktop, the instructions prompt can be accessed via the electrical plug symbol → Choose andintegration →  MCP Solver → instructions. 
 
-## Test MCP Client
+## MCP Test Client
 
-The MCP Solver includes a test MCP client for development, experimentation, and diagnostic purposes, based on the *ReAct* agent framework. This client functions as an intermediary between an LLM and the MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions. 
+The MCP Solver includes an MCP client for development, experimentation, and diagnostic purposes, based on the *ReAct* agent framework. This client serves as an intermediary between an LLM and the MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions. 
 
 ### Installation
 
