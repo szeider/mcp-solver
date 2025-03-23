@@ -99,7 +99,8 @@ mcp-solver-z3
 
 ## Installation
 
-1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download). For testing, you can also use the included test client, see below.
+1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download). For testing, you can also use the included **test client,** see below.
+
 2. Install the MCP Solver with appropriate dependencies based on the mode(s) you intend to use:
 
    ```bash
@@ -185,12 +186,14 @@ For Windows:
 }
 ```
 
-1. For each mode, the appropriate instructions prompt is loaded from:
+5. For each mode, the appropriate **instructions prompt** is loaded from:
    - MiniZinc mode: `instructions_prompt_mzn.md`
    - PySAT mode: `instructions_prompt_pysat.md`
    - Z3 mode: `instructions_prompt_z3.md`
+	
+	On Claude Desktop, the instructions prompt can be accessed via the electrical plug symbol → Choose andintegration →  MCP Solver → instructions. 
 
-## Test MCP Client 
+## Test MCP Client
 
 The MCP Solver includes a test MCP client for development, experimentation, and diagnostic purposes, based on the *ReAct* agent framework. This client functions as an intermediary between an LLM and the MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions. 
 
@@ -205,8 +208,6 @@ uv run test-setup-client
 ```
 
 The client requires an **API key** from an LLM provider. For Anthropic (the default LLM is Claude Sonnet 3.7), set the `ANTHROPIC_API_KEY` environment variable. This can be set in your environment or included in a `.env` file in the project root.
-
-
 
 ### Usage
 
