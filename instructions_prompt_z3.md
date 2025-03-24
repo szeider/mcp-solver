@@ -107,7 +107,14 @@ export_solution(solver=solver, variables={"verified": verified})  # Works
 
 ## Mathematical Proofs with Z3
 
-Z3 can be used for mathematical proofs in addition to constraint solving. Here are patterns for common proof techniques:
+Z3 can be used for mathematical proofs in addition to constraint solving.
+
+NOTE:
+
+- Use proper Z3 syntax for mathemtics and use strict JSON format.
+- Unusal charactes, even in a comment, can cause the idem you want to add being empty, causing an error.
+
+Here are patterns for common proof techniques:
 
 ### Proving Algebraic Identities
 
@@ -133,60 +140,65 @@ def prove_equality(e1, e2):
         return False
 ```
 
-### Mathematical Induction - Complete Example
+### Mathematical Induction - Recommended Approach
 
-Here's a complete example for proving a formula by induction:
+For mathematical induction proofs, we recommend using a "flat structure" approach with separate items:
 
 ```python
+# Item 1: Setup and imports
 from z3 import *
 from mcp_solver.z3 import export_solution
 
-def prove_sum_of_squares():
-    """Prove that 1² + 2² + ... + n² = n(n+1)(2n+1)/6"""
-    
-    # 1. Verify base case (n=1)
-    base_value = 1
-    base_sum = base_value**2  # 1² = 1
-    base_formula = base_value*(base_value+1)*(2*base_value+1)//6  # 1*2*3/6 = 1
-    
-    print(f"Base case (n=1): {base_sum} = {base_formula}")
-    
-    # 2. Symbolic verification of inductive step
-    k = Int('k')
-    
-    # Inductive hypothesis: formula holds for n=k
-    sum_k = k*(k+1)*(2*k+1)//6
-    
-    # We need to prove it holds for n=k+1
-    next_term = (k+1)**2
-    sum_k_plus_1 = sum_k + next_term
-    formula_k_plus_1 = (k+1)*(k+2)*(2*(k+1)+1)//6
-    
-    # Create solver to check if adding (k+1)² to sum_k equals formula for k+1
-    solver = Solver()
-    solver.add(k > 0)
-    
-    # Try to find a counterexample where the formula doesn't hold
-    solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
-    
-    if solver.check() == unsat:
-        print("Inductive step verified: No counterexample exists")
-        proof_result = True
-    else:
-        print(f"Found counterexample: k = {solver.model()[k]}")
-        proof_result = False
-    
-    # Create a Z3 boolean variable for the result
-    verified = Bool('verified')
-    result_solver = Solver()
-    result_solver.add(verified == proof_result)
-    
-    return result_solver, {"verified": verified}
+# Define the formula to be proven
+print("Proof: 1² + 2² + ... + n² = n(n+1)(2n+1)/6")
+# Item 2: Verify concrete examples
+print("\nVerifying concrete examples:")
+all_examples_correct = True
+for n in range(1, 6):
+    sum_squares = sum(i**2 for i in range(1, n+1))
+    formula = n*(n+1)*(2*n+1)//6
+    print(f"n = {n}: sum = {sum_squares}, formula = {formula}")
+    if sum_squares != formula:
+        print(f"MISMATCH at n = {n}")
+        all_examples_correct = False
+# Item 3: Verify base case
+print("\nVerifying base case (n=1):")
+base_case_verified = (1 == 1*(1+1)*(2*1+1)//6)
+print(f"Base case: 1 = {1*(1+1)*(2*1+1)//6}")
+# Item 4: Verify inductive step
+print("\nVerifying inductive step:")
+k = Int('k')
+sum_k = k*(k+1)*(2*k+1)//6
+next_term = (k+1)**2
+sum_k_plus_1 = sum_k + next_term
+formula_k_plus_1 = (k+1)*(k+2)*(2*(k+1)+1)//6
 
-# Solve and export the proof result
-solver, variables = prove_sum_of_squares()
-export_solution(solver=solver, variables=variables)
+ind_solver = Solver()
+ind_solver.add(k > 0)
+ind_solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
+
+induction_verified = False
+if ind_solver.check() == unsat:
+    print("Inductive step verified: No counterexample exists")
+    induction_verified = True
+else:
+    print(f"Found counterexample: k = {ind_solver.model()[k]}")
+# Item 5: Export results using Z3 boolean variable
+proof_verified = Bool('proof_verified')
+result_solver = Solver()
+result_solver.add(proof_verified == (all_examples_correct and base_case_verified and induction_verified))
+
+# Export the solution
+export_solution(solver=result_solver, variables={"proof_verified": proof_verified})
 ```
+
+This approach:
+
+- Splits the proof into separate items that can be added with individual add_item calls
+- Maintains a flat structure without nested functions
+- Verifies each component of the proof separately
+- Allows for testing and debugging each part independently
+- Uses a single Z3 boolean variable for the final verification result
 
 ### Algebraic Manipulation with Z3
 
@@ -582,6 +594,37 @@ If your solution isn't being properly captured:
        if not isinstance(var, z3.ExprRef):
            print(f"Warning: {var_name} is not a Z3 variable!")
    ```
+
+   7. ✅ If you get "Missing required parameter 'content'" errors:
+
+      - **Problem**: Your content might be too large or contain special characters
+      - **Solution**: Split your code into smaller, logical items using multiple add_item calls
+      
+      ```python
+      # Instead of one large item:
+      # add_item(index=1, content=very_large_code)
+      
+      # Use multiple smaller items:
+      add_item(index=1, content="# Item 1: Setup and imports")
+      add_item(index=2, content="# Item 2: Core logic")
+      add_item(index=3, content="# Item 3: Results and export")
+      ```
+
+7. ✅ If you get "Missing required parameter 'content'" errors:
+
+   - **Problem**: Your content might be too large or contain special characters
+   - **Solution**: Split your code into smaller, logical items using multiple add_item calls
+   
+   ```python
+   # Instead of one large item:
+   # add_item(index=1, content=very_large_code)
+   
+   # Use multiple smaller items:
+   add_item(index=1, content="# Item 1: Setup and imports")
+   add_item(index=2, content="# Item 2: Core logic")
+   add_item(index=3, content="# Item 3: Results and export")
+
+
 
 ## Common Error Patterns and Solutions
 
