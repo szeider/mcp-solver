@@ -202,9 +202,9 @@ async def serve() -> None:
             types.Tool(
                 name="add_item", 
                 description=get_description({
-                    'mzn': "Add new minizinc item to the model at a specific index (indices start at 1).",
-                    'z3': "Add new Python code to the Z3 model at a specific index (indices start at 1).",
-                    'pysat': "Add new Python code to the PySAT model at a specific index (indices start at 1)."
+                    'mzn': "Add new minizinc item to the model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
+                    'z3': "Add new Python code to the Z3 model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
+                    'pysat': "Add new Python code to the PySAT model at a specific index (indices start at 1). Required parameters: 'index' and 'content'."
                 }),
                 inputSchema={
                     "type": "object", 
@@ -218,9 +218,9 @@ async def serve() -> None:
             types.Tool(
                 name="replace_item", 
                 description=get_description({
-                    'mzn': "Replace an existing item in the minizinc model at a specified index with new content.",
-                    'z3': "Replace an existing item in the Z3 Python model at a specified index with new content.",
-                    'pysat': "Replace an existing item in the PySAT Python model at a specified index with new content."
+                    'mzn': "Replace an existing item in the minizinc model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                    'z3': "Replace an existing item in the Z3 Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                    'pysat': "Replace an existing item in the PySAT Python model at a specified index with new content. Required parameters: 'index' and 'content'."
                 }),
                 inputSchema={
                     "type": "object", 
@@ -234,9 +234,9 @@ async def serve() -> None:
             types.Tool(
                 name="delete_item", 
                 description=get_description({
-                    'mzn': "Delete an item from the minizinc model at the specified index.",
-                    'z3': "Delete an item from the Z3 Python model at the specified index.",
-                    'pysat': "Delete an item from the PySAT Python model at the specified index."
+                    'mzn': "Delete an item from the minizinc model at the specified index. Required parameter: 'index'.",
+                    'z3': "Delete an item from the Z3 Python model at the specified index. Required parameter: 'index'.",
+                    'pysat': "Delete an item from the PySAT Python model at the specified index. Required parameter: 'index'."
                 }),
                 inputSchema={
                     "type": "object", 
@@ -258,9 +258,9 @@ async def serve() -> None:
             types.Tool(
                 name="solve_model", 
                 description=get_description({
-                    'mzn': "Solve the current minizinc model with a timeout parameter.",
-                    'z3': "Solve the current Z3 Python model with a timeout parameter.",
-                    'pysat': "Solve the current PySAT Python model with a timeout parameter."
+                    'mzn': "Solve the current minizinc model with a timeout parameter. Required parameter: 'timeout'.",
+                    'z3': "Solve the current Z3 Python model with a timeout parameter. Required parameter: 'timeout'.",
+                    'pysat': "Solve the current PySAT Python model with a timeout parameter. Required parameter: 'timeout'.",
                 }),
                 inputSchema={
                     "type": "object", 
@@ -286,16 +286,31 @@ async def serve() -> None:
                         return [types.TextContent(type="text", text="Model is empty")]
                     return [types.TextContent(type="text", text="\n".join(f"{i} | {content}" for i, content in items))]
                 case "add_item":
+                    # Check if required parameters are provided
+                    if "index" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'index'")]
+                    if "content" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'content'")]
+                    
                     result = await model_mgr.add_item(arguments["index"], arguments["content"])
                     items = model_mgr.get_model()
                     return [types.TextContent(type="text", 
                         text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
                 case "delete_item":
+                    if "index" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'index'")]
+                    
                     result = await model_mgr.delete_item(arguments["index"])
                     items = model_mgr.get_model()
                     return [types.TextContent(type="text", 
                         text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}")]
                 case "replace_item":
+                    # Check if required parameters are provided
+                    if "index" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'index'")]
+                    if "content" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'content'")]
+                    
                     result = await model_mgr.replace_item(arguments["index"], arguments["content"])
                     items = model_mgr.get_model()
                     return [types.TextContent(type="text", 
@@ -304,6 +319,10 @@ async def serve() -> None:
                     result = await model_mgr.clear_model()
                     return [types.TextContent(type="text", text="Model cleared")]
                 case "solve_model":
+                    # Check if required parameter is provided
+                    if "timeout" not in arguments:
+                        return [types.TextContent(type="text", text="Tool execution failed: Missing required parameter 'timeout'")]
+                    
                     timeout_val = None
                     
                     # Parse and validate timeout parameter
