@@ -30,13 +30,6 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-# Import tool stats tracking
-try:
-    from .tool_stats import ToolStats
-except ImportError:
-    # Fallback for when the module is imported directly
-    ToolStats = None
-
 
 # Step 1: Define the agent state
 class AgentState(TypedDict):
@@ -233,11 +226,6 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
     Returns:
         A ToolMessage with the result or error
     """
-    # Record tool usage statistics if ToolStats is available
-    if ToolStats is not None:
-        tool_stats = ToolStats.get_instance()
-        tool_stats.record_tool_call(tool_name)
-        
     # Prepare call arguments for both formats
     call_args = tool_args
     wrapped_args = {"args": tool_args}
