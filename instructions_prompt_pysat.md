@@ -67,7 +67,7 @@ solver.delete()
 | `add_item`     | Add Python code to the model                                 |
 | `replace_item` | Replace code in the model                                    |
 | `delete_item`  | Delete code from the model                                   |
-| `solve_model`  | Solve the current model (requires timeout parameter between 1-10 seconds) |
+| `solve_model`  | Solve the current model (requires timeout parameter between 1-30 seconds) |
 | `get_model`    | Fetch the current content of the PySAT model                 |
 
 > **Note:** MaxSAT optimization functionality is not supported. Only standard SAT solving capabilities are available.

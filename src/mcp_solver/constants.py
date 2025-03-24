@@ -16,7 +16,7 @@ VALIDATE_ON_CHANGE = True
 
 # Timeouts (Note: asyncio.timeout requires Python 3.11+)
 MIN_SOLVE_TIMEOUT = timedelta(seconds=1)
-MAX_SOLVE_TIMEOUT = timedelta(seconds=10)
+MAX_SOLVE_TIMEOUT = timedelta(seconds=30)
 VALIDATION_TIMEOUT = timedelta(seconds=2)
 CLEANUP_TIMEOUT = timedelta(seconds=1)
 
