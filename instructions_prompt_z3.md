@@ -2,6 +2,21 @@
 
 This document provides information about using MCP Solver with the Z3 SMT Solver backend.
 
+## ⚠️ IMPORTANT: Solution Export Requirement ⚠️
+
+All Z3 models MUST call `export_solution(solver=solver, variables=variables)` to properly extract solutions. Without this call, results will not be captured, even if your solver finds a solution!
+
+```python
+# Always include this import
+from mcp_solver.z3 import export_solution
+
+# After solving, always call export_solution with BOTH parameters
+if solver.check() == sat:
+    export_solution(solver=solver, variables=variables)
+else:
+    print("No solution found")
+```
+
 ## Configuration
 
 To run the MCP Solver in Z3 mode:
@@ -16,6 +31,41 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 - **Constraint solving**: Solve complex constraint satisfaction problems
 - **Optimization**: Optimize with respect to objective functions
 - **Quantifiers**: Express constraints with universal and existential quantifiers
+
+## Best Practices for Problem Modeling
+
+1. **Translate all constraints correctly**:
+
+   - Consider edge cases and implicit constraints
+   - Verify that each constraint's logical formulation matches the intended meaning
+   - Be explicit about ranges, domains, and special case handling
+
+2. **Structure your model clearly**:
+
+   - Use descriptive variable names for readability
+   - Group related constraints together
+   - Comment complex constraint logic
+
+3. **Use the correct export_solution call**:
+
+   ```python
+   export_solution(solver=solver, variables=variables)
+   ```
+
+   - Always provide both parameters
+   - Always check if a solution exists before exporting
+
+4. **For complex problems, use incremental development**:
+
+   - Build and test constraints one at a time
+   - Verify each constraint independently before combining them
+   - Use intermediate assertions to check state
+
+5. **For difficult problems, include verification code**:
+
+   - Add checks that verify all constraints are satisfied
+   - Output detailed information for debugging purposes
+   - Test edge cases explicitly
 
 ## Template Library
 
@@ -40,7 +90,7 @@ from mcp_solver.z3.templates import (
 
 ```python
 from z3 import *
-from mcp_solver.z3.templates import all_distinct
+from mcp_solver.z3 import export_solution  # Import the export_solution function
 
 def build_model():
     # Sudoku puzzle (3x3 for simplicity)
@@ -77,30 +127,18 @@ def build_model():
 
 # Solve the model and export the solution
 solver, variables = build_model()
-export_solution(solver=solver, variables=variables)
+
+# Always check if a solution exists before exporting
+if solver.check() == sat:
+    # This line is REQUIRED to extract the solution
+    export_solution(solver=solver, variables=variables)
+else:
+    print("No solution found")
 ```
-
-## Best Practices
-
-1. Always call `export_solution()` at the end of your model to extract the solution
-
-2. Wrap complex models in functions to avoid variable scope issues
-
-3. For optimization problems, use specialized templates:
-
-   ```python
-   from mcp_solver.z3.templates import optimization_template
-   ```
-
-4. Unlike PySAT, Z3 handles memory management automatically (no need to call delete)
-
-5. Use descriptive variable names to make solutions easier to interpret
-
-6. For complex constraints, break them down into smaller, more manageable parts
 
 ## Function Scope and Variable Access
 
-When working with Z3 models, be careful with variable scope and how you call `export_solution()`:
+When working with Z3 models, variable scope is automatically managed to ensure variables are accessible when needed:
 
 ```python
 # RECOMMENDED APPROACH:
@@ -120,50 +158,108 @@ solver, variables = build_model()
 
 # Call export_solution OUTSIDE the function
 if solver.check() == sat:
+    # CORRECT way to call export_solution
     export_solution(solver=solver, variables=variables)
 else:
     print("No solution")
 ```
 
-### Avoiding Common Scope Issues
+### Nested Functions and Complex Scope Management
 
-If you need to call `export_solution()` inside a function, make sure to pass complete context:
+MCP Solver now supports variables defined in nested function scopes. This is particularly useful for complex models:
 
 ```python
-# When calling from inside a function:
-def solve_problem():
-    x = Int('x')
-    y = Int('y')
+def build_complex_model():
+    # Outer function that defines variables
+    def define_variables():
+        x = Int('x')
+        y = Int('y')
+        z = Int('z')
+        return x, y, z
     
-    solver = Solver()
-    solver.add(x > 0, y > 0, x + y == 10)
+    # Inner function that adds constraints
+    def add_constraints(solver, variables):
+        x, y, z = variables
+        solver.add(x > 0)
+        solver.add(y > x)
+        solver.add(z > y)
+        solver.add(x + y + z == 10)
+        return solver
     
-    if solver.check() == sat:
-        # Must pass BOTH solver AND variables to export_solution
-        export_solution(
-            solver=solver,
-            variables={"x": x, "y": y}
-        )
-        return True
-    else:
-        return False
+    # Create solver
+    s = Solver()
+    
+    # Get variables and add constraints using nested functions
+    x, y, z = define_variables()
+    s = add_constraints(s, (x, y, z))
+    
+    # Return solver and variables dictionary
+    return s, {"x": x, "y": y, "z": z}
+
+# Variables from nested functions are properly accessible
+solver, variables = build_complex_model()
+
+if solver.check() == sat:
+    # This call is REQUIRED to extract the solution
+    export_solution(solver=solver, variables=variables)
+else:
+    print("No solution found")
 ```
+
+### Troubleshooting Variable Scope Issues
+
+If you encounter scope-related errors:
+
+1. Always return variables from inner functions to outer scopes
+2. Create a dictionary mapping variable names to Z3 variables
+3. Pass both solver and variables to `export_solution`
+4. Prefer the function-based approach shown above
 
 ## Solution Export
 
 ```python
-# Basic solution export
+# CORRECT way to export a solution - both parameters required
 export_solution(solver=solver, variables=variables)
 
-# With additional structure
-export_solution(
-    solver=solver, 
-    variables=variables,
-    solution_data={
-        "puzzle": puzzle_representation,
-        "statistics": solving_statistics
-    }
-)
+# INCORRECT - missing parameters
+# export_solution()  # This will fail
+# export_solution(solver=solver)  # This will fail
+# export_solution(variables=variables)  # This will fail
+
+# INCORRECT - unsupported parameters
+# export_solution(solver=solver, variables=variables, solution_data={})  # This will fail
 ```
 
-For more information on Z3, visit the [Z3 documentation](https://z3prover.github.io/api/html/namespacez3py.html).
+## Debugging Checklist When Solutions Aren't Properly Extracted
+
+If your solution isn't being properly captured:
+
+1. ✅ Did you import the export_solution function?
+
+   ```python
+   from mcp_solver.z3 import export_solution
+   ```
+
+2. ✅ Did you call export_solution with both required parameters?
+
+   ```python
+   export_solution(solver=solver, variables=variables)
+   ```
+
+3. ✅ Did you check if the solver found a solution before calling export_solution?
+
+   ```python
+   if solver.check() == sat:
+       export_solution(solver=solver, variables=variables)
+   ```
+
+4. ✅ Did you collect all variables in a dictionary and pass them correctly?
+
+   ```python
+   variables = {"x": x, "y": y}
+   ```
+
+5. ✅ Are you using a scope where the variables are still accessible?
+
+   - Variables inside functions without a return may be inaccessible
+
