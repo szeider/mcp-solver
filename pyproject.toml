@@ -84,3 +84,6 @@ warn_unused_configs = true
 
 # Linux: ~/.config/mcp-solver/memo.md
 #memo_file = "~/.config/mcp-solver/memo.md"
+
+[tool.test_client]
+recursion_limit = 200

@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any
 from rich.console import Console
+import traceback
 
 # Core dependencies
 from .llm_factory import LLMFactory
@@ -16,6 +17,9 @@ from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
+
+# Import tool stats tracking
+from .tool_stats import ToolStats
 
 # Check LangGraph version for compatibility
 import importlib
@@ -150,6 +154,10 @@ def wrap_tool(tool):
             log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()
             
+            # Record tool usage statistics
+            tool_stats = ToolStats.get_instance()
+            tool_stats.record_tool_call(tool_name)
+            
             try:
                 result = func(call_args, config)
                 formatted = format_tool_output(result)
@@ -173,6 +181,10 @@ def wrap_tool(tool):
             args_only = call_args.get("args", {})
             log_system(f"▶ {tool_name} called with args: {json.dumps(args_only, indent=2)}")
             sys.stdout.flush()
+            
+            # Record tool usage statistics
+            tool_stats = ToolStats.get_instance()
+            tool_stats.record_tool_call(tool_name)
             
             try:
                 result = await orig_ainvoke(call_args, config)
@@ -220,12 +232,30 @@ def parse_arguments():
         default=DEFAULT_MODEL,
         help=f'Model to use (default: {DEFAULT_MODEL})'
     )
+    parser.add_argument(
+        '--no-stats',
+        action='store_true',
+        help='Disable tool usage statistics'
+    )
+    parser.add_argument(
+        '--recursion-limit',
+        type=int,
+        help='Set the recursion limit for the agent'
+    )
     return parser.parse_args()
 
 async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
 
+    # Get the model name
+    SOLVE_MODEL = model_name.lower()
+    print(f"Using model: {SOLVE_MODEL}")
+    
+    # Extract args from state if available, otherwise use None
+    args = state.get("args")
+    
+    # Set up the connection to the MCP server
     # Get the model code from the model name
     if model_name not in MODEL_CODES:
         console.print(f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]")
@@ -312,7 +342,20 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                         print("Using built-in React agent implementation...")
                         agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
                     
-                    config = RunnableConfig(recursion_limit=100)
+                    # Get recursion_limit from args (if provided), then from config, or default to 200
+                    recursion_limit = args.recursion_limit if args is not None else None
+                    if recursion_limit is None:
+                        # Try to get from config
+                        try:
+                            import tomli
+                            with open(os.path.join(os.path.dirname(__file__), "../../../pyproject.toml"), "rb") as f:
+                                config_data = tomli.load(f)
+                            recursion_limit = config_data.get("tool", {}).get("test_client", {}).get("recursion_limit", 200)
+                        except Exception:
+                            recursion_limit = 200
+                    
+                    print(f"Using recursion limit: {recursion_limit}")
+                    config = RunnableConfig(recursion_limit=recursion_limit)
 
                     # Process the request
                     print(f"\n{'='*60}")
@@ -391,9 +434,14 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     return state
 
 async def main():
-    """Main async function for one-shot execution."""
-    # Parse command line arguments
+    """Main entry point for the client."""
+    # Parse arguments
     args = parse_arguments()
+    
+    # Configure tool stats
+    tool_stats_enabled = not args.no_stats
+    tool_stats = ToolStats.get_instance()
+    tool_stats.enabled = tool_stats_enabled
     
     # Load initial state with custom prompt and query
     try:
@@ -401,6 +449,9 @@ async def main():
     except Exception as e:
         console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
         sys.exit(1)
+    
+    # Store args in state for later use
+    state["args"] = args
     
     # If server command is provided, parse it into command and args
     if args.server:
@@ -412,8 +463,30 @@ async def main():
     await mcp_solver_node(state, args.model)
 
 def main_cli():
-    """Entry point for the command-line interface."""
-    asyncio.run(main())
+    """Command line entrypoint."""
+    try:
+        asyncio.run(main())
+        
+        # After the main function completes, print tool usage statistics
+        tool_stats = ToolStats.get_instance()
+        tool_stats.print_stats()
+        
+        return 0
+    except KeyboardInterrupt:
+        print("\nOperation interrupted by user", file=sys.stderr)
+        
+        # Still try to print statistics in case of interruption
+        try:
+            tool_stats = ToolStats.get_instance()
+            tool_stats.print_stats()
+        except Exception:
+            pass
+            
+        return 130
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        return 1
 
 if __name__ == "__main__":
     main_cli() 
