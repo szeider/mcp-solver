@@ -167,15 +167,11 @@ def wrap_tool(tool):
                 # Capture solve_model result
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
-                    if not hasattr(wrap_tool, "mem_solution"):
-                        wrap_tool.mem_solution = formatted
-                    else:
-                        wrap_tool.mem_solution = formatted
+                    wrap_tool.mem_solution = formatted
                     print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
                     
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
-                    from mcp_solver.client.react_agent import execute_tool_safely
                     for available_tool in getattr(wrap_tool, "available_tools", []):
                         if available_tool.name == "get_model":
                             try:
@@ -185,10 +181,7 @@ def wrap_tool(tool):
                                 get_formatted = format_tool_output(get_result)
                                 
                                 # Store the model
-                                if not hasattr(wrap_tool, "mem_model"):
-                                    wrap_tool.mem_model = get_formatted
-                                else:
-                                    wrap_tool.mem_model = get_formatted
+                                wrap_tool.mem_model = get_formatted
                                     
                                 print(f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...", file=sys.stderr)
                                 
@@ -202,10 +195,7 @@ def wrap_tool(tool):
                 # Capture get_model result
                 if tool_name == "get_model":
                     # Create a global variable to store the model
-                    if not hasattr(wrap_tool, "mem_model"):
-                        wrap_tool.mem_model = formatted
-                    else:
-                        wrap_tool.mem_model = formatted
+                    wrap_tool.mem_model = formatted
                     print(f"DEBUG: Captured get_model result: {formatted[:100]}...", file=sys.stderr)
                 
                 return result
@@ -245,10 +235,7 @@ def wrap_tool(tool):
                 # Capture solve_model result
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
-                    if not hasattr(wrap_tool, "mem_solution"):
-                        wrap_tool.mem_solution = formatted
-                    else:
-                        wrap_tool.mem_solution = formatted
+                    wrap_tool.mem_solution = formatted
                     print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
                     
                     # We also want to capture the model state right after solve_model is called
@@ -266,10 +253,7 @@ def wrap_tool(tool):
                                 get_formatted = format_tool_output(get_result)
                                 
                                 # Store the model
-                                if not hasattr(wrap_tool, "mem_model"):
-                                    wrap_tool.mem_model = get_formatted
-                                else:
-                                    wrap_tool.mem_model = get_formatted
+                                wrap_tool.mem_model = get_formatted
                                     
                                 print(f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...", file=sys.stderr)
                                 
@@ -283,10 +267,7 @@ def wrap_tool(tool):
                 # Capture get_model result
                 if tool_name == "get_model":
                     # Create a global variable to store the model
-                    if not hasattr(wrap_tool, "mem_model"):
-                        wrap_tool.mem_model = formatted
-                    else:
-                        wrap_tool.mem_model = formatted
+                    wrap_tool.mem_model = formatted
                     print(f"DEBUG: Captured get_model result: {formatted[:100]}...", file=sys.stderr)
                 
                 return result
