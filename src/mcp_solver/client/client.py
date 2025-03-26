@@ -116,7 +116,8 @@ def load_initial_state(custom_prompt_path, query_path) -> dict:
     return {
         "messages": messages,
         "is_pure_mode": True,
-        "start_time": datetime.now()
+        "start_time": datetime.now(),
+        "mem_problem": query  # Store the original problem statement
     }
 
 def format_tool_output(result):
@@ -574,12 +575,12 @@ def main_cli():
         tool_stats = ToolStats.get_instance()
         tool_stats.print_stats()
         
-        # Print mem_solution if available
-        if state and isinstance(state, dict) and "mem_solution" in state:
+        # Print mem_problem if available
+        if state and isinstance(state, dict) and "mem_problem" in state:
             print("\n" + "="*60)
-            print("SOLUTION RESULT:")
+            print("PROBLEM STATEMENT:")
             print("="*60)
-            print(state["mem_solution"])
+            print(state["mem_problem"])
             print("="*60 + "\n")
         
         # Print mem_model if available
@@ -588,6 +589,14 @@ def main_cli():
             print("FINAL MODEL:")
             print("="*60)
             print(state["mem_model"])
+            print("="*60 + "\n")
+        
+        # Print mem_solution if available
+        if state and isinstance(state, dict) and "mem_solution" in state:
+            print("\n" + "="*60)
+            print("SOLUTION RESULT:")
+            print("="*60)
+            print(state["mem_solution"])
             print("="*60 + "\n")
         
         return 0
