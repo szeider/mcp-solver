@@ -163,6 +163,16 @@ def wrap_tool(tool):
                 formatted = format_tool_output(result)
                 log_system(f"◀ {tool_name} output: {formatted}")
                 sys.stdout.flush()
+                
+                # Capture solve_model result
+                if tool_name == "solve_model":
+                    # Create a global variable to store the solution
+                    if not hasattr(wrap_tool, "mem_solution"):
+                        wrap_tool.mem_solution = formatted
+                    else:
+                        wrap_tool.mem_solution = formatted
+                    print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
+                
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
@@ -191,6 +201,16 @@ def wrap_tool(tool):
                 formatted = format_tool_output(result)
                 log_system(f"◀ {tool_name} output: {formatted}")
                 sys.stdout.flush()
+                
+                # Capture solve_model result
+                if tool_name == "solve_model":
+                    # Create a global variable to store the solution
+                    if not hasattr(wrap_tool, "mem_solution"):
+                        wrap_tool.mem_solution = formatted
+                    else:
+                        wrap_tool.mem_solution = formatted
+                    print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
+                
                 return result
             except Exception as e:
                 error_msg = f"Tool execution failed: {str(e)}"
@@ -247,6 +267,10 @@ def parse_arguments():
 async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
+    
+    # Initialize mem_solution if it doesn't exist
+    if "mem_solution" not in state:
+        state["mem_solution"] = "No solution generated yet"
 
     # Get the model name
     SOLVE_MODEL = model_name.lower()
@@ -431,6 +455,11 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
             "content": error_msg
         })
 
+    # Check if solve_model was called and update mem_solution
+    if hasattr(wrap_tool, "mem_solution"):
+        state["mem_solution"] = wrap_tool.mem_solution
+        print(f"Updated state mem_solution with solve_model result", file=sys.stderr)
+
     return state
 
 async def main():
@@ -453,6 +482,9 @@ async def main():
     # Store args in state for later use
     state["args"] = args
     
+    # Initialize mem_solution
+    state["mem_solution"] = "No solution generated yet"
+    
     # If server command is provided, parse it into command and args
     if args.server:
         command_parts = args.server.split()
@@ -461,15 +493,26 @@ async def main():
     
     # Run the solver once
     await mcp_solver_node(state, args.model)
+    
+    # Return the state for printing in main_cli
+    return state
 
 def main_cli():
     """Command line entrypoint."""
     try:
-        asyncio.run(main())
+        state = asyncio.run(main())
         
         # After the main function completes, print tool usage statistics
         tool_stats = ToolStats.get_instance()
         tool_stats.print_stats()
+        
+        # Print mem_solution if available
+        if state and isinstance(state, dict) and "mem_solution" in state:
+            print("\n" + "="*60)
+            print("SOLUTION RESULT:")
+            print("="*60)
+            print(state["mem_solution"])
+            print("="*60 + "\n")
         
         return 0
     except KeyboardInterrupt:

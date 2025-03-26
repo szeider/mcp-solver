@@ -274,11 +274,21 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         result_str = str(result) if result is not None else "Task completed successfully."
         
         # Create a tool message with the result
-        return ToolMessage(
+        tool_message = ToolMessage(
             content=result_str,
             tool_call_id=tool_id,
             name=tool_name
         )
+        
+        # Special handling for solve_model tool
+        if tool_name == "solve_model":
+            # Store the result in a static variable for later retrieval
+            if not hasattr(execute_tool_safely, "mem_solution"):
+                execute_tool_safely.mem_solution = {}
+            execute_tool_safely.mem_solution[tool_id] = result_str
+            print(f"DEBUG: Stored solve_model result with ID {tool_id}", file=sys.stderr)
+        
+        return tool_message
         
     except Exception as e:
         # In case of error, create a tool message with error info
@@ -426,14 +436,32 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
         
     # Create the initial state
     initial_state = {
-        "messages": [HumanMessage(content=message)]
+        "messages": [HumanMessage(content=message)],
+        "mem_solution": "No solution generated yet"  # Initialize mem_solution
     }
     
     # Run the agent asynchronously
     final_state = await async_agent.ainvoke(initial_state, config)
     
+    # Update mem_solution if solve_model was called
+    if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
+        # Get the latest solution (using the last tool_id if there were multiple calls)
+        latest_solution = list(execute_tool_safely.mem_solution.values())[-1]
+        
+        # Add to final state, handling different state formats
+        if isinstance(final_state, dict):
+            final_state["mem_solution"] = latest_solution
+        elif hasattr(final_state, "values") and isinstance(final_state.values, dict):
+            final_state.values["mem_solution"] = latest_solution
+    
     # Normalize the state to ensure consistent format
-    return normalize_state(final_state)
+    normalized_state = normalize_state(final_state)
+    
+    # Make sure mem_solution is in the normalized state
+    if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
+        normalized_state["mem_solution"] = list(execute_tool_safely.mem_solution.values())[-1]
+    
+    return normalized_state
 
 
 def normalize_state(state) -> Dict:
