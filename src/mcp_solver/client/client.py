@@ -172,6 +172,41 @@ def wrap_tool(tool):
                     else:
                         wrap_tool.mem_solution = formatted
                     print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
+                    
+                    # We also want to capture the model state right after solve_model is called
+                    # Find the get_model tool in the available tools
+                    from mcp_solver.client.react_agent import execute_tool_safely
+                    for available_tool in getattr(wrap_tool, "available_tools", []):
+                        if available_tool.name == "get_model":
+                            try:
+                                # Call get_model right after solve_model to capture the model state
+                                print("Calling get_model right after solve_model to capture model state", file=sys.stderr)
+                                get_result = available_tool.invoke({})
+                                get_formatted = format_tool_output(get_result)
+                                
+                                # Store the model
+                                if not hasattr(wrap_tool, "mem_model"):
+                                    wrap_tool.mem_model = get_formatted
+                                else:
+                                    wrap_tool.mem_model = get_formatted
+                                    
+                                print(f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...", file=sys.stderr)
+                                
+                                # Record this call in tool stats
+                                tool_stats.record_tool_call("get_model")
+                            except Exception as e:
+                                print(f"Error calling get_model after solve_model: {e}", file=sys.stderr)
+                            
+                            break
+                
+                # Capture get_model result
+                if tool_name == "get_model":
+                    # Create a global variable to store the model
+                    if not hasattr(wrap_tool, "mem_model"):
+                        wrap_tool.mem_model = formatted
+                    else:
+                        wrap_tool.mem_model = formatted
+                    print(f"DEBUG: Captured get_model result: {formatted[:100]}...", file=sys.stderr)
                 
                 return result
             except Exception as e:
@@ -180,6 +215,11 @@ def wrap_tool(tool):
                 sys.stdout.flush()
                 return ToolError(error_msg)
         return wrapper
+    
+    # Store this tool in the available_tools list for cross-tool access
+    if not hasattr(wrap_tool, "available_tools"):
+        wrap_tool.available_tools = []
+    wrap_tool.available_tools.append(tool)
     
     # Apply wrappers to sync and async methods if they exist
     if hasattr(tool, "invoke"):
@@ -210,6 +250,44 @@ def wrap_tool(tool):
                     else:
                         wrap_tool.mem_solution = formatted
                     print(f"DEBUG: Captured solve_model result: {formatted[:100]}...", file=sys.stderr)
+                    
+                    # We also want to capture the model state right after solve_model is called
+                    # Find the get_model tool in the available tools
+                    for available_tool in getattr(wrap_tool, "available_tools", []):
+                        if available_tool.name == "get_model":
+                            try:
+                                # Call get_model right after solve_model to capture the model state
+                                print("Calling get_model right after solve_model to capture model state", file=sys.stderr)
+                                if hasattr(available_tool, "ainvoke"):
+                                    get_result = await available_tool.ainvoke({})
+                                else:
+                                    get_result = available_tool.invoke({})
+                                    
+                                get_formatted = format_tool_output(get_result)
+                                
+                                # Store the model
+                                if not hasattr(wrap_tool, "mem_model"):
+                                    wrap_tool.mem_model = get_formatted
+                                else:
+                                    wrap_tool.mem_model = get_formatted
+                                    
+                                print(f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...", file=sys.stderr)
+                                
+                                # Record this call in tool stats
+                                tool_stats.record_tool_call("get_model")
+                            except Exception as e:
+                                print(f"Error calling get_model after solve_model: {e}", file=sys.stderr)
+                            
+                            break
+                
+                # Capture get_model result
+                if tool_name == "get_model":
+                    # Create a global variable to store the model
+                    if not hasattr(wrap_tool, "mem_model"):
+                        wrap_tool.mem_model = formatted
+                    else:
+                        wrap_tool.mem_model = formatted
+                    print(f"DEBUG: Captured get_model result: {formatted[:100]}...", file=sys.stderr)
                 
                 return result
             except Exception as e:
@@ -268,9 +346,12 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
     
-    # Initialize mem_solution if it doesn't exist
+    # Initialize mem_solution and mem_model if they don't exist
     if "mem_solution" not in state:
         state["mem_solution"] = "No solution generated yet"
+    
+    if "mem_model" not in state:
+        state["mem_model"] = "No model captured yet"
 
     # Get the model name
     SOLVE_MODEL = model_name.lower()
@@ -346,7 +427,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                         print(f"  {i+1}. {tool.name}", flush=True)
                     print("", flush=True)
                     sys.stdout.flush()
-
+                    
                     # Initialize the agent with tools
                     if USE_CUSTOM_AGENT:
                         print("Using custom React agent implementation...")
@@ -460,6 +541,11 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         state["mem_solution"] = wrap_tool.mem_solution
         print(f"Updated state mem_solution with solve_model result", file=sys.stderr)
 
+    # Update state with any get_model results we captured during execution
+    if hasattr(wrap_tool, "mem_model"):
+        state["mem_model"] = wrap_tool.mem_model
+        print(f"Updated state mem_model with get_model result", file=sys.stderr)
+    
     return state
 
 async def main():
@@ -482,8 +568,9 @@ async def main():
     # Store args in state for later use
     state["args"] = args
     
-    # Initialize mem_solution
+    # Initialize mem_solution and mem_model
     state["mem_solution"] = "No solution generated yet"
+    state["mem_model"] = "No model captured yet"
     
     # If server command is provided, parse it into command and args
     if args.server:
@@ -512,6 +599,14 @@ def main_cli():
             print("SOLUTION RESULT:")
             print("="*60)
             print(state["mem_solution"])
+            print("="*60 + "\n")
+        
+        # Print mem_model if available
+        if state and isinstance(state, dict) and "mem_model" in state:
+            print("\n" + "="*60)
+            print("FINAL MODEL:")
+            print("="*60)
+            print(state["mem_model"])
             print("="*60 + "\n")
         
         return 0
