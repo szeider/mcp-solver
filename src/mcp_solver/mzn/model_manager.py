@@ -5,8 +5,8 @@ from minizinc import Model, Instance, Solver, Result, Status
 from minizinc.error import MiniZincError, SyntaxError, TypeError
 import logging
 
-from ..base_manager import SolverManager
-from ..constants import (
+from ..core.base_manager import SolverManager
+from ..core.constants import (
     MIN_SOLVE_TIMEOUT,
     MAX_SOLVE_TIMEOUT,
     VALIDATION_TIMEOUT,

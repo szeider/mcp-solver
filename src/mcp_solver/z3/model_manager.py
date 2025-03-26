@@ -13,10 +13,10 @@ from datetime import timedelta
 # Import z3 for status constant comparison
 import z3
 
-from ..base_manager import SolverManager
-from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
+from ..core.base_manager import SolverManager
+from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_z3_code
-from ..validation import validate_index, validate_content, validate_python_code_safety, validate_timeout, ValidationError, get_standardized_response
+from ..core.validation import validate_index, validate_content, validate_python_code_safety, validate_timeout, ValidationError, get_standardized_response
 
 class Z3ModelManager(SolverManager):
     """

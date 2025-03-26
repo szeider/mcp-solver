@@ -12,11 +12,11 @@ from datetime import timedelta
 import time
 import re
 
-from ..base_manager import SolverManager
-from ..constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
+from ..core.base_manager import SolverManager
+from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_pysat_code
 from .error_handling import PySATError, format_solution_error
-from ..validation import validate_index, validate_content, validate_python_code_safety, ValidationError, get_standardized_response, validate_timeout
+from ..core.validation import validate_index, validate_content, validate_python_code_safety, ValidationError, get_standardized_response, validate_timeout
 
 # Validation constants are now imported from validation module
 

@@ -27,9 +27,6 @@ except Exception:
     version_str = "0.0.0"
     logging.getLogger(__name__).warning("Failed to load version from package, using default: 0.0.0")
 
-# Import after setting up logging and flags
-from .mzn.model_manager import MiniZincModelManager, ModelError
-
 def format_model_items(items: List[Tuple[int, str]], max_chars: Optional[int] = None) -> str:
     """Format model items with optional truncation."""
     if not items:
@@ -46,14 +43,15 @@ async def serve() -> None:
     
     # Initialize the appropriate model manager based on mode
     if Z3_MODE:
-        from .z3.model_manager import Z3ModelManager
+        from ..z3.model_manager import Z3ModelManager
         model_mgr = Z3ModelManager()
         logging.getLogger(__name__).info("Using Z3 model manager")
     elif PYSAT_MODE:
-        from .pysat.model_manager import PySATModelManager
+        from ..pysat.model_manager import PySATModelManager
         model_mgr = PySATModelManager()
         logging.getLogger(__name__).info("Using PySAT model manager")
     else:
+        from ..mzn.model_manager import MiniZincModelManager
         model_mgr = MiniZincModelManager()
         logging.getLogger(__name__).info("Using MiniZinc model manager")
     
