@@ -1,0 +1,1 @@
+Divide the US states excluding Alaska and Hawaii into 4 groups of 12 such that no group contains and adjacent pair of states.

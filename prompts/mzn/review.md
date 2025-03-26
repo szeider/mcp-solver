@@ -1,0 +1,1 @@
+# MiniZinc Review Guidelines
