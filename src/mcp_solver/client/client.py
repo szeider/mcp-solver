@@ -580,7 +580,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             try:
                                 # Run the custom agent
                                 final_state = await run_agent(
-                                    agent, human_message.content, config
+                                    agent, human_message.content, config, state.get("review_prompt")
                                 )
 
                                 # Normalize the state for consistent format handling
@@ -605,6 +605,14 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                     state["messages"].append(
                                         {"role": "assistant", "content": agent_reply}
                                     )
+                                    
+                                    # Check if we have a review result and add it to state
+                                    if "review_result" in final_state:
+                                        state["review_result"] = final_state["review_result"]
+                                        print(
+                                            f"Review result received: {final_state['review_result'].get('correctness', 'unknown')}",
+                                            flush=True,
+                                        )
                                 else:
                                     print(
                                         "Warning: No message content found in custom agent response",
@@ -674,6 +682,38 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
         print(f"Updated state mem_model with get_model result", file=sys.stderr)
+        
+    # Now that we have the updated state, run the reviewer directly
+    # This ensures that the reviewer has access to the current state with the correct model and solution
+    if USE_CUSTOM_AGENT and SOLVE_MODEL and state.get("review_prompt"):
+        try:
+            print("Running reviewer with updated state...", file=sys.stderr)
+            from mcp_solver.client.react_agent import call_reviewer
+            
+            # Create a state object that mimics the AgentState expected by call_reviewer
+            reviewer_state = {
+                "mem_problem": state.get("mem_problem", ""),
+                "mem_model": state.get("mem_model", ""),
+                "mem_solution": state.get("mem_solution", ""),
+                "review_prompt": state.get("review_prompt", ""),
+                "messages": state.get("messages", [])
+            }
+            
+            # Call the reviewer directly
+            review_result = call_reviewer(reviewer_state, SOLVE_MODEL)
+            
+            # Add the review result to the state
+            if isinstance(review_result, dict) and "review_result" in review_result:
+                state["review_result"] = review_result["review_result"]
+                print(f"Review complete: {review_result['review_result'].get('correctness', 'unknown')}", file=sys.stderr)
+            else:
+                print(f"Review returned unexpected format", file=sys.stderr)
+        except Exception as e:
+            print(f"Error running reviewer: {str(e)}", file=sys.stderr)
+            state["review_result"] = {
+                "correctness": "unknown", 
+                "explanation": f"Error running reviewer: {str(e)}"
+            }
 
     return state
 
@@ -763,6 +803,17 @@ def main_cli():
             print("SOLUTION RESULT:")
             print("=" * 60)
             print(state["mem_solution"])
+            print("=" * 60 + "\n")
+            
+        # Print review_result if available
+        if state and isinstance(state, dict) and "review_result" in state:
+            print("\n" + "=" * 60)
+            print("REVIEW RESULT:")
+            print("=" * 60)
+            correctness = state["review_result"].get("correctness", "unknown")
+            explanation = state["review_result"].get("explanation", "No explanation provided")
+            print(f"Correctness: {correctness}")
+            print(f"Explanation: {explanation}")
             print("=" * 60 + "\n")
 
         return 0

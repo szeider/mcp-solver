@@ -12,6 +12,7 @@ import asyncio
 import json
 import traceback
 from copy import deepcopy
+from string import Template
 
 from langchain_core.messages import (
     AIMessage, 
@@ -35,6 +36,12 @@ from langgraph.prebuilt import ToolNode
 class AgentState(TypedDict):
     """The state of the agent."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    # Add these optional fields for the reviewer
+    review_prompt: Optional[str] = None
+    mem_problem: Optional[str] = None
+    mem_model: Optional[str] = None
+    mem_solution: Optional[str] = None
+    review_result: Optional[Dict[str, Any]] = None
 
 
 # Step 2: Define the model node function
@@ -306,13 +313,133 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         )
 
 
+# Step 3.5: Define the reviewer node function
+def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
+    """Review the solution using the review prompt and model/solution memory.
+    
+    Args:
+        state: The current agent state with mem_problem, mem_model, mem_solution
+        model: The language model to use
+        
+    Returns:
+        Updated state with review results
+    """
+    # Get necessary data from state
+    review_prompt = state.get("review_prompt", "")
+    mem_problem = state.get("mem_problem", "")
+    mem_model = state.get("mem_model", "")
+    mem_solution = state.get("mem_solution", "")
+    
+    # Process the solution to make it more readable if it's in JSON format
+    processed_solution = mem_solution
+    try:
+        if isinstance(mem_solution, str) and "solution" in mem_solution:
+            # Try using ast.literal_eval which is safer than eval for parsing Python literals
+            import ast
+            try:
+                # Convert the string representation of a dict to an actual dict
+                solution_dict = ast.literal_eval(mem_solution)
+                
+                if isinstance(solution_dict, dict) and 'solution' in solution_dict:
+                    solution_values = solution_dict['solution']
+                    
+                    processed_solution = "Solution values found:\n"
+                    for var, value in solution_values.items():
+                        processed_solution += f"{var} = {value}\n"
+                    
+                    # Add a clear statement about satisfiability
+                    if solution_dict.get('satisfiable', False):
+                        processed_solution += "\nThe model is satisfiable."
+                    else:
+                        processed_solution += "\nThe model is NOT satisfiable."
+            except (SyntaxError, ValueError) as e:
+                # If literal_eval fails, try regex approach
+                import re
+                import json
+                
+                # Extract the solution part
+                solution_match = re.search(r"'solution'\s*:\s*({[^}]+})", mem_solution)
+                if solution_match:
+                    try:
+                        # Try to parse just the solution part
+                        solution_part = solution_match.group(1).replace("'", '"')
+                        solution_values = json.loads(solution_part)
+                        processed_solution = "Solution values found:\n"
+                        for var, value in solution_values.items():
+                            processed_solution += f"{var} = {value}\n"
+                        
+                        # Check for satisfiability
+                        if "'satisfiable': True" in mem_solution:
+                            processed_solution += "\nThe model is satisfiable."
+                    except json.JSONDecodeError:
+                        # If JSON parsing fails, extract manually
+                        value_matches = re.findall(r"'([^']+)':\s*(\d+)", solution_match.group(1))
+                        if value_matches:
+                            processed_solution = "Solution values found:\n"
+                            for var, value in value_matches:
+                                processed_solution += f"{var} = {value}\n"
+    except Exception as e:
+        print(f"Error processing solution for reviewer: {e}", file=sys.stderr)
+    
+    # Create reviewer prompt using Template
+    reviewer_template = Template(review_prompt)
+    reviewer_prompt = reviewer_template.substitute(
+        PROBLEM=mem_problem,
+        MODEL=mem_model,
+        SOLUTION=processed_solution
+    )
+    
+    # Request structured output
+    structured_prompt = f"{reviewer_prompt}\n\nPlease provide your review in the following JSON format:\n{{\"correctness\": \"[correct|incorrect|unknown]\", \"explanation\": \"Your detailed explanation\"}}"
+    
+    try:
+        # Call the model with a HumanMessage
+        review_message = HumanMessage(content=structured_prompt)
+        response = model.invoke([review_message])
+        
+        # Try to parse JSON from the response
+        review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
+        try:
+            # Look for JSON in the response
+            import re
+            import json
+            
+            # Try to find JSON pattern in the text
+            json_match = re.search(r'({.*})', response.content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict) and "correctness" in parsed:
+                    review_result = parsed
+        except Exception as e:
+            print(f"Error parsing review result: {e}", file=sys.stderr)
+            review_result["explanation"] += f" (Error: {str(e)})"
+        
+        # Return both the review result and keep existing messages
+        return {
+            "review_result": review_result, 
+            "messages": state.get("messages", [])  # Preserve existing messages
+        }
+    except Exception as e:
+        print(f"Error in call_reviewer: {str(e)}", file=sys.stderr)
+        # Return a default review result and keep existing messages
+        return {
+            "review_result": {
+                "correctness": "unknown", 
+                "explanation": f"Error running reviewer: {str(e)}"
+            },
+            "messages": state.get("messages", [])  # Preserve existing messages
+        }
+
+
 # Step 4: Define the routing logic
-def router(state: AgentState) -> Union[Literal["call_model", "call_tools"], Literal[END]]:
+def router(state: AgentState) -> Union[Literal["call_model", "call_tools", "call_reviewer"], Literal[END]]:
     """Determine the next node in the graph based on the current state.
     
     This function examines the current state and decides which node should be executed next:
     - If the last message is from a tool or human, it routes to the model node
     - If the last message is from the AI and contains tool calls, it routes to the tools node
+    - If the agent has completed its task, route to reviewer before ending
     - Otherwise, it ends the execution
     
     Args:
@@ -344,7 +471,11 @@ def router(state: AgentState) -> Union[Literal["call_model", "call_tools"], Lite
         if additional_kwargs and "tool_calls" in additional_kwargs and additional_kwargs["tool_calls"]:
             return "call_tools"
     
-    # If no conditions match or AI message doesn't have tool calls, we're done
+    # If no conditions match or AI message doesn't have tool calls, go to reviewer if we haven't already
+    if not state.get("review_result"):  # Only go to reviewer if we haven't already
+        return "call_reviewer"
+    
+    # If we've already been to the reviewer, end the graph
     return END
 
 
@@ -353,6 +484,7 @@ def create_react_agent(
     llm: BaseChatModel,
     tools: List[BaseTool],
     system_prompt: Optional[str] = None,
+    review_prompt: Optional[str] = None,
 ):
     """
     Create a ReAct agent using LangGraph.
@@ -361,6 +493,7 @@ def create_react_agent(
         llm: The language model to use
         tools: List of tools to provide to the agent
         system_prompt: Optional system prompt
+        review_prompt: Optional review prompt for solution evaluation
         
     Returns:
         A compiled agent with a synchronous interface
@@ -386,12 +519,16 @@ def create_react_agent(
         print("Falling back to custom call_tools implementation")
         workflow.add_node("call_tools", lambda state: call_tools(state, tools_by_name))
     
+    # Add reviewer node (using the same LLM but without tools)
+    workflow.add_node("call_reviewer", lambda state: call_reviewer(state, llm))
+    
     # Add conditional edges with our router
     workflow.add_conditional_edges(
         "call_model",  # from node
         router,        # routing function
         {
             "call_tools": "call_tools",  # route condition -> target node
+            "call_reviewer": "call_reviewer",  # route to reviewer
             END: END                     # end the graph
         }
     )
@@ -401,7 +538,16 @@ def create_react_agent(
         router,        # routing function
         {
             "call_model": "call_model",  # route condition -> target node
+            "call_reviewer": "call_reviewer",  # route to reviewer
             END: END                     # end the graph
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "call_reviewer",  # from node
+        router,           # routing function
+        {
+            END: END      # after reviewer, always end
         }
     )
     
@@ -416,7 +562,7 @@ def create_react_agent(
 
 
 # Function to run the agent on a human input
-async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None):
+async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None, review_prompt: Optional[str] = None):
     """
     Async function for running an agent on a human input message.
     
@@ -424,6 +570,7 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
         agent: The agent to run
         message: The human input message
         config: Optional configuration
+        review_prompt: Optional review prompt for solution evaluation
         
     Returns:
         The final state of the agent
@@ -437,8 +584,14 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     # Create the initial state
     initial_state = {
         "messages": [HumanMessage(content=message)],
-        "mem_solution": "No solution generated yet"  # Initialize mem_solution
+        "mem_solution": "No solution generated yet",  # Initialize mem_solution
+        "mem_model": "No model captured yet",         # Initialize mem_model
+        "mem_problem": message                        # Store the problem statement
     }
+    
+    # Add review_prompt if provided
+    if review_prompt:
+        initial_state["review_prompt"] = review_prompt
     
     # Run the agent asynchronously
     final_state = await async_agent.ainvoke(initial_state, config)
