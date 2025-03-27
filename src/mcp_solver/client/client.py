@@ -18,6 +18,7 @@ from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
+from mcp_solver.core.prompt_loader import load_prompt
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
@@ -115,53 +116,22 @@ def load_file_content(file_path):
         sys.exit(1)
 
 
-def load_prompt(prompt_type, mode):
-    """
-    Load a prompt file based on prompt type and mode.
-
-    Args:
-        prompt_type: The type of prompt ("instructions" or "review")
-        mode: The solver mode ("z3", "pysat", or "mzn")
-
-    Returns:
-        The content of the prompt file
-    """
-    # Determine the base path to prompts
-    base_path = Path(__file__).parent.parent.parent.parent / "prompts"
-    print(f"Prompt base path: {base_path}, exists: {base_path.exists()}")
-
-    # Determine the mode folder
-    if mode == "z3":
-        mode_folder = "z3"
-    elif mode == "pysat":
-        mode_folder = "pysat"
-    else:
-        mode_folder = "mzn"
-
-    print(f"Using mode folder: {mode_folder}")
-
-    # Get the full path to the prompt file
-    prompt_path = base_path / mode_folder / f"{prompt_type}.md"
-    print(f"Full prompt path: {prompt_path}, exists: {prompt_path.exists()}")
-
-    # No fallback, just return file content or raise error
-    with open(prompt_path, "r", encoding="utf-8") as file:
-        content = file.read().strip()
-        print(
-            f"Loaded {prompt_type} prompt for {mode_folder} mode: {len(content)} characters"
-        )
-        print(f"First 100 chars: {content[:100]}")
-        return content
-
-
 def load_initial_state(query_path, mode):
     """Initialize state with the instructions/review prompts and the query."""
     # Load query
     query = load_file_content(query_path)
 
-    # Load both required prompts (no fallbacks)
-    instructions_prompt = load_prompt("instructions", mode)
-    review_prompt = load_prompt("review", mode)
+    try:
+        # Load both required prompts using the centralized loader
+        instructions_prompt = load_prompt(mode, "instructions")
+        review_prompt = load_prompt(mode, "review")
+        
+        print(f"Loaded prompts for {mode} mode:")
+        print(f"- Instructions: {len(instructions_prompt)} characters")
+        print(f"- Review: {len(review_prompt)} characters")
+    except Exception as e:
+        console.print(f"[bold red]Error loading prompts: {str(e)}[/bold red]")
+        sys.exit(1)
 
     # Create initial messages with ONLY the instructions prompt as system message
     messages = [

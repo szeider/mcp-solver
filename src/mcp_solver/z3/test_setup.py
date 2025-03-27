@@ -15,6 +15,9 @@ import sys
 from pathlib import Path
 from typing import List, Tuple, Optional
 
+# Import our centralized prompt loader
+from mcp_solver.core.prompt_loader import load_prompt
+
 class Z3SetupTest:
     def __init__(self):
         self.successes: List[Tuple[str, str]] = []  # (test_name, details)
@@ -49,11 +52,40 @@ class Z3SetupTest:
     def test_configuration_files(self):
         """Test for the presence of required configuration files."""
         print(f"\n{self.BOLD}Configuration Files:{self.RESET}")
-        files = [
-            ("instructions_prompt_z3.md", True),
+        
+        # Test prompt files using the centralized prompt loader
+        prompts_to_test = [
+            ("z3", "instructions"),
+            ("z3", "review")
+        ]
+        
+        for mode, prompt_type in prompts_to_test:
+            try:
+                # Attempt to load the prompt using the prompt loader
+                content = load_prompt(mode, prompt_type)
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    True,
+                    f"Successfully loaded ({len(content)} characters)"
+                )
+            except FileNotFoundError:
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    False,
+                    f"Prompt file not found"
+                )
+            except Exception as e:
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    False,
+                    f"Error loading prompt: {str(e)}"
+                )
+        
+        # Test other required files
+        other_files = [
             ("pyproject.toml", True)
         ]
-        for file, required in files:
+        for file, required in other_files:
             exists = self.check_file(file)
             if required:
                 self.record_test(

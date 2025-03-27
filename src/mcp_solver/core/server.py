@@ -14,7 +14,8 @@ import mcp.server.stdio
 import mcp.types as types
 from mcp.shared.exceptions import McpError
 
-from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT, CLEANUP_TIMEOUT, ITEM_CHARS, INSTRUCTIONS_PROMPT
+from .constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT, VALIDATION_TIMEOUT, CLEANUP_TIMEOUT, ITEM_CHARS
+from .prompt_loader import load_prompt
 
 # Global flags for mode selection
 Z3_MODE = False
@@ -99,26 +100,17 @@ async def serve() -> None:
             # Determine mode subfolder
             mode_folder = "z3" if Z3_MODE else "pysat" if PYSAT_MODE else "mzn"
             
-            # Format the prompt path with the mode
-            prompt_path = INSTRUCTIONS_PROMPT.format(mode=mode_folder)
-            
-            logging.getLogger(__name__).info(f"Using {mode_folder} instructions from: {prompt_path}")
+            logging.getLogger(__name__).info(f"Loading {name} prompt for {mode_folder} mode")
             
             try:
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    
-                    # Add debugging logs
-                    logging.getLogger(__name__).info(f"Prompt loaded from: {prompt_path}")
-                    logging.getLogger(__name__).info(f"Prompt content length: {len(content)}")
-                    logging.getLogger(__name__).info(f"Prompt content first 100 chars: {content[:100]}")
-            except FileNotFoundError:
-                error_msg = f"Critical Error: Prompt file not found at {prompt_path}"
-                logging.getLogger(__name__).error(error_msg)
-                # Raise a McpError instead of returning a gentle error message
-                raise McpError(error_msg)
+                content = load_prompt(mode_folder, "instructions")
+                
+                # Add debugging logs
+                logging.getLogger(__name__).info(f"Prompt loaded successfully")
+                logging.getLogger(__name__).info(f"Prompt content length: {len(content)}")
+                logging.getLogger(__name__).info(f"Prompt content first 100 chars: {content[:100]}")
             except Exception as e:
-                error_msg = f"Critical Error reading prompt file: {str(e)}"
+                error_msg = f"Critical Error: {str(e)}"
                 logging.getLogger(__name__).error(error_msg)
                 raise McpError(error_msg)
             

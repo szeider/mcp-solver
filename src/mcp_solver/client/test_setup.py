@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 import importlib.util
 
+# Import our centralized prompt loader
+from mcp_solver.core.prompt_loader import load_prompt
+
 # Try to import specific client modules
 try:
     from ..client.llm_factory import LLMFactory, ModelInfo
@@ -61,9 +64,40 @@ class SetupTest:
         """Test for the presence of required configuration files."""
         print(f"\n{self.BOLD}Configuration Files:{self.RESET}")
         
-        # Check for system prompt files
+        # Test prompt files using the centralized prompt loader
+        prompts_to_test = [
+            ("mzn", "instructions"),
+            ("mzn", "review"),
+            ("pysat", "instructions"),
+            ("pysat", "review"),
+            ("z3", "instructions"),
+            ("z3", "review")
+        ]
+        
+        for mode, prompt_type in prompts_to_test:
+            try:
+                # Attempt to load the prompt using the prompt loader
+                content = load_prompt(mode, prompt_type)
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    True,
+                    f"Successfully loaded ({len(content)} characters)"
+                )
+            except FileNotFoundError:
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    False,
+                    f"Prompt file not found but not required for client"
+                )
+            except Exception as e:
+                self.record_test(
+                    f"Prompt file: {mode}/{prompt_type}.md",
+                    False,
+                    f"Error loading prompt: {str(e)}"
+                )
+        
+        # Check for other files
         files = [
-            ("system_prompt.md", False),  # Optional, may be passed as arg
             (".env", False)  # Optional but recommended
         ]
         

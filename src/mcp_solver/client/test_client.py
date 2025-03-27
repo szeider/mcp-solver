@@ -76,28 +76,38 @@ def main():
     # Look for default prompts if --prompt is not specified
     prompt_path = args.prompt
     if not prompt_path:
-        base_dir = Path(__file__).parent.parent.parent.parent
-        prompt_paths = [
-            base_dir / "docs" / "standard_prompt_mzn.md",  # Try docs directory first
-            base_dir / "instructions_prompt_mzn.md",       # Try root directory
-        ]
-        
-        # Find the first prompt file that exists
-        for path in prompt_paths:
-            if path.exists():
-                prompt_path = str(path)
-                print(f"Using default prompt: {path}")
-                break
-        
-        if not prompt_path:
-            print("Error: No prompt file specified and could not find a default prompt")
-            sys.exit(1)
+        try:
+            # Try to use our centralized prompt loader (for MiniZinc mode by default)
+            from mcp_solver.core.prompt_loader import load_prompt
+            system_message = load_prompt("mzn", "instructions")
+            prompt_path = None  # Mark that we've already loaded the prompt
+            print("Using default MiniZinc instructions prompt from centralized loader")
+        except Exception as e:
+            # Fall back to looking for physical files if the loader fails
+            base_dir = Path(__file__).parent.parent.parent.parent
+            prompt_paths = [
+                base_dir / "prompts" / "mzn" / "instructions.md",  # Try new location first
+                base_dir / "docs" / "standard_prompt_mzn.md",      # Try docs directory
+                base_dir / "instructions_prompt_mzn.md",           # Try old location as last resort
+            ]
+            
+            # Find the first prompt file that exists
+            for path in prompt_paths:
+                if path.exists():
+                    prompt_path = str(path)
+                    print(f"Using default prompt: {path}")
+                    break
+            
+            if not prompt_path:
+                print("Error: No prompt file specified and could not find a default prompt")
+                sys.exit(1)
     
     # Set default server command if not specified
     server_cmd = args.server or DEFAULT_SERVER_COMMAND
     
     # Load prompt and query
-    system_message = load_file_content(prompt_path)
+    if prompt_path:  # Only load from file if not already loaded
+        system_message = load_file_content(prompt_path)
     query = load_file_content(args.query)
     
     # Create model

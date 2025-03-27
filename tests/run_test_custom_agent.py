@@ -6,6 +6,8 @@ import asyncio
 import argparse
 import os
 import sys
+import json
+import traceback
 from pathlib import Path
 from datetime import datetime
 
@@ -15,11 +17,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Import necessary modules
 from mcp_solver.client.client import mcp_solver_node
 from mcp_solver.client.react_agent import normalize_state
+from mcp_solver.core.prompt_loader import load_prompt  # Import the centralized prompt loader
 
 # Import test configuration
 from tests.test_config import (
     DEFAULT_TIMEOUT,
     RESULTS_DIR,
+    load_prompt_for_test,  # Use our new helper function
 )
 
 # Problem definitions by solver type
@@ -56,6 +60,13 @@ PROBLEM_TO_PROMPT = {
     **{p: "instructions_prompt_mzn.md" for p in MZN_PROBLEMS},
     **{p: "instructions_prompt_pysat.md" for p in PYSAT_PROBLEMS}, 
     **{p: "instructions_prompt_z3.md" for p in Z3_PROBLEMS},
+}
+
+# Mapping from problem to solver mode
+PROBLEM_TO_MODE = {
+    **{p: "mzn" for p in MZN_PROBLEMS},
+    **{p: "pysat" for p in PYSAT_PROBLEMS},
+    **{p: "z3" for p in Z3_PROBLEMS},
 }
 
 def parse_args():
@@ -96,9 +107,9 @@ async def run_test(args):
     problem_name = args.problem
     problem_path = ALL_PROBLEMS.get(problem_name)
     server_name = PROBLEM_TO_SERVER.get(problem_name)
-    prompt_file = PROBLEM_TO_PROMPT.get(problem_name)
+    mode = PROBLEM_TO_MODE.get(problem_name, "mzn")  # Get the mode for the problem
     
-    if not problem_path or not server_name or not prompt_file:
+    if not problem_path or not server_name:
         print(f"Error: Problem '{problem_name}' not found.")
         return False
     
@@ -106,29 +117,31 @@ async def run_test(args):
     base_dir = Path(__file__).parent
     project_root = base_dir.parent  # Root directory of the project
     problem_file = base_dir / "problems" / problem_path
-    prompt_file = project_root / prompt_file  # Look in project root for prompt files
     
     if not problem_file.exists():
         print(f"Error: Problem file '{problem_file}' not found.")
-        return False
-    
-    if not prompt_file.exists():
-        print(f"Error: Prompt file '{prompt_file}' not found.")
         return False
     
     # Print test information
     print(f"\n{'='*60}")
     print(f"Testing improved custom agent with {problem_name} problem")
     print(f"Using server: {server_name}")
+    print(f"Using mode: {mode}")
     print(f"{'='*60}\n")
     
     # Create initial state
     start_time = datetime.now()
     
     try:
-        # Load system prompt
-        with open(prompt_file, "r", encoding="utf-8") as f:
-            system_prompt = f.read().strip()
+        # Load system prompt using the centralized loader
+        try:
+            system_prompt = load_prompt(mode, "instructions")
+            print(f"Loaded instructions prompt for {mode} mode")
+        except Exception as e:
+            print(f"Error loading prompt: {e}")
+            print("Falling back to test config prompt loader")
+            system_prompt = load_prompt_for_test(mode, "instructions")
+            print(f"Loaded instructions prompt using fallback method")
         
         # Load problem definition
         with open(problem_file, "r", encoding="utf-8") as f:
