@@ -8,24 +8,20 @@ import asyncio
 
 def main():
     """Run the test client with Z3 defaults."""
-    # Find the standard Z3 prompt
+    # Get base directory and prompt directory
     base_dir = Path(__file__).parent.parent.parent.parent
-    prompt_paths = [
-        base_dir / "docs" / "standard_prompt_z3.md",     # Try docs directory first
-        base_dir / "docs" / "standard_prompt.md",      # Alternative name
-        base_dir / "instructions_prompt_z3.md",      # Try root directory
-    ]
+    prompt_dir = base_dir / "prompts" / "z3"
     
-    # Find the first prompt file that exists
-    default_prompt = None
-    for path in prompt_paths:
-        if path.exists():
-            default_prompt = str(path)
-            print(f"Using Z3 prompt: {path}", flush=True)
-            break
+    # Check if the required prompt files exist
+    instructions_path = prompt_dir / "instructions.md"
+    review_path = prompt_dir / "review.md"
     
-    if not default_prompt:
-        print("Warning: Could not find default Z3 prompt file", flush=True)
+    # Verify both files exist
+    if not instructions_path.exists() or not review_path.exists():
+        missing = []
+        if not instructions_path.exists(): missing.append("instructions.md")
+        if not review_path.exists(): missing.append("review.md")
+        print(f"Warning: Missing required prompt files in {prompt_dir}: {', '.join(missing)}", flush=True)
     
     # Set default server to Z3
     server_cmd = "uv run mcp-solver-z3"
@@ -46,10 +42,6 @@ def main():
             # Set the full path to the problem
             problem_path = base_dir / "tests" / "problems" / "z3" / problem_name
             modified_args[i + 1] = str(problem_path)
-    
-    # Add --prompt if not specified and we found a default
-    if not any(arg.startswith("--prompt") for arg in args) and default_prompt:
-        modified_args.extend(["--prompt", default_prompt])
     
     # Add --server if not specified
     if not any(arg.startswith("--server") for arg in args):
@@ -82,4 +74,4 @@ def main():
     return client_main()
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 

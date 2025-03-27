@@ -96,17 +96,13 @@ async def serve() -> None:
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
         # Choose the appropriate instruction prompt based on mode
         if name == "instructions":
-            # Z3 and PySAT modes
-            if Z3_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_z3.md")
-                logging.getLogger(__name__).info("Using Z3 instructions")
-            elif PYSAT_MODE:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_pysat.md")
-                logging.getLogger(__name__).info("Using PySAT instructions")
-            # MiniZinc mode
-            else:
-                prompt_path = INSTRUCTIONS_PROMPT.replace(".md", "_mzn.md")
-                logging.getLogger(__name__).info("Using MiniZinc instructions")
+            # Determine mode subfolder
+            mode_folder = "z3" if Z3_MODE else "pysat" if PYSAT_MODE else "mzn"
+            
+            # Format the prompt path with the mode
+            prompt_path = INSTRUCTIONS_PROMPT.format(mode=mode_folder)
+            
+            logging.getLogger(__name__).info(f"Using {mode_folder} instructions from: {prompt_path}")
             
             try:
                 with open(prompt_path, "r", encoding="utf-8") as f:
@@ -117,31 +113,14 @@ async def serve() -> None:
                     logging.getLogger(__name__).info(f"Prompt content length: {len(content)}")
                     logging.getLogger(__name__).info(f"Prompt content first 100 chars: {content[:100]}")
             except FileNotFoundError:
-                logging.getLogger(__name__).error(f"Prompt file not found: {prompt_path}")
-                return types.GetPromptResult(
-                    messages=[
-                        types.PromptMessage(
-                            role="user",
-                            content=types.TextContent(
-                                type="text",
-                                text="Error: Prompt file not found"
-                            )
-                        )
-                    ]
-                )
+                error_msg = f"Critical Error: Prompt file not found at {prompt_path}"
+                logging.getLogger(__name__).error(error_msg)
+                # Raise a McpError instead of returning a gentle error message
+                raise McpError(error_msg)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Error reading prompt file: {str(e)}")
-                return types.GetPromptResult(
-                    messages=[
-                        types.PromptMessage(
-                            role="user",
-                            content=types.TextContent(
-                                type="text",
-                                text=f"Error reading prompt file: {str(e)}"
-                            )
-                        )
-                    ]
-                )
+                error_msg = f"Critical Error reading prompt file: {str(e)}"
+                logging.getLogger(__name__).error(error_msg)
+                raise McpError(error_msg)
             
             # Return with the new format
             return types.GetPromptResult(
@@ -156,18 +135,9 @@ async def serve() -> None:
                 ]
             )
         else:
-            logging.getLogger(__name__).error(f"Unknown prompt: {name}")
-            return types.GetPromptResult(
-                messages=[
-                    types.PromptMessage(
-                        role="user",
-                        content=types.TextContent(
-                            type="text",
-                            text="Error: Unknown prompt"
-                        )
-                    )
-                ]
-            )
+            error_msg = f"Unknown prompt: {name}"
+            logging.getLogger(__name__).error(error_msg)
+            raise McpError(error_msg)
 
     def format_array_access(variable_name: str, indices: List[int]) -> str:
         return variable_name if not indices else f"{variable_name}[{','.join(str(i) for i in indices)}]"

@@ -20,6 +20,9 @@ MAX_SOLVE_TIMEOUT = timedelta(seconds=30)
 VALIDATION_TIMEOUT = timedelta(seconds=2)
 CLEANUP_TIMEOUT = timedelta(seconds=1)
 
-# Store the path to the instructions prompt file
-instructions_path = Path(__file__).resolve().parents[2] / "instructions_prompt.md"
-INSTRUCTIONS_PROMPT = str(instructions_path)
+# Get the project root directory (where the prompts folder is located)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+
+# Set the path to the prompts directory and instruction file format
+PROMPTS_DIR = PROJECT_ROOT / "prompts"
+INSTRUCTIONS_PROMPT = str(PROMPTS_DIR / "{mode}" / "instructions.md")
