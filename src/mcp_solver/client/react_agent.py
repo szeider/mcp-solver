@@ -352,7 +352,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                         processed_solution += "\nThe model is satisfiable."
                     else:
                         processed_solution += "\nThe model is NOT satisfiable."
-            except (SyntaxError, ValueError) as e:
+            except (SyntaxError, ValueError):
                 # If literal_eval fails, try regex approach
                 import re
                 import json
@@ -378,8 +378,9 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                             processed_solution = "Solution values found:\n"
                             for var, value in value_matches:
                                 processed_solution += f"{var} = {value}\n"
-    except Exception as e:
-        print(f"Error processing solution for reviewer: {e}", file=sys.stderr)
+    except Exception:
+        # Silently handle errors in solution processing
+        pass
     
     # Create reviewer prompt using Template
     reviewer_template = Template(review_prompt)
@@ -411,9 +412,9 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                 parsed = json.loads(json_str)
                 if isinstance(parsed, dict) and "correctness" in parsed:
                     review_result = parsed
-        except Exception as e:
-            print(f"Error parsing review result: {e}", file=sys.stderr)
-            review_result["explanation"] += f" (Error: {str(e)})"
+        except Exception:
+            # Silently handle parsing errors
+            pass
         
         # Return both the review result and keep existing messages
         return {
@@ -421,7 +422,6 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
             "messages": state.get("messages", [])  # Preserve existing messages
         }
     except Exception as e:
-        print(f"Error in call_reviewer: {str(e)}", file=sys.stderr)
         # Return a default review result and keep existing messages
         return {
             "review_result": {
@@ -780,18 +780,7 @@ class SyncCompatWrapper:
 
 def debug_mcp_tools(name, args, result):
     """Print debug information for MCP tool calls."""
-    print(f"MCP Tool Debug - {name}:", file=sys.stderr)
-    print(f"  Input: {json.dumps(args, indent=2)}", file=sys.stderr)
-    print(f"  Result: {result}", file=sys.stderr)
-    
-    # Special checks for MCP tools
-    if name == "add_item" and result and "Model is empty" in str(result):
-        print(f"  WARNING: Item added but model still showing as empty!", file=sys.stderr)
-        print(f"  Content was: {args.get('content', '')[:50]}...", file=sys.stderr)
-    
-    if name == "get_model" and result and "Model is empty" in str(result):
-        print(f"  WARNING: Model appears to be empty after adding items!", file=sys.stderr)
-    
+    # We're removing the debug output entirely
     return result
 
 
@@ -853,7 +842,6 @@ async def test_agent_intermediate_steps(
     intermediate_states = []
     
     # Create a test graph execution
-    print("Starting test execution...")
     
     # Hack: Add a simple callback to the agent
     original_invoke = agent.async_agent.ainvoke
@@ -875,9 +863,7 @@ async def test_agent_intermediate_steps(
     
     # Run the agent
     try:
-        print("Running agent...")
         final_state = await agent.async_agent.ainvoke(initial_state)
-        print("Test execution completed successfully.")
     except Exception as e:
         print(f"Error during test execution: {str(e)}")
         traceback.print_exc()

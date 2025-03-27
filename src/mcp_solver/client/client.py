@@ -200,10 +200,6 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
-                    print(
-                        f"DEBUG: Captured solve_model result: {formatted[:100]}...",
-                        file=sys.stderr,
-                    )
 
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
@@ -211,28 +207,16 @@ def wrap_tool(tool):
                         if available_tool.name == "get_model":
                             try:
                                 # Call get_model right after solve_model to capture the model state
-                                print(
-                                    "Calling get_model right after solve_model to capture model state",
-                                    file=sys.stderr,
-                                )
                                 get_result = available_tool.invoke({})
                                 get_formatted = format_tool_output(get_result)
 
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
 
-                                print(
-                                    f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...",
-                                    file=sys.stderr,
-                                )
-
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
-                            except Exception as e:
-                                print(
-                                    f"Error calling get_model after solve_model: {e}",
-                                    file=sys.stderr,
-                                )
+                            except Exception:
+                                pass  # Silently handle errors in get_model
 
                             break
 
@@ -240,10 +224,6 @@ def wrap_tool(tool):
                 if tool_name == "get_model":
                     # Create a global variable to store the model
                     wrap_tool.mem_model = formatted
-                    print(
-                        f"DEBUG: Captured get_model result: {formatted[:100]}...",
-                        file=sys.stderr,
-                    )
 
                 return result
             except Exception as e:
@@ -287,10 +267,6 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
-                    print(
-                        f"DEBUG: Captured solve_model result: {formatted[:100]}...",
-                        file=sys.stderr,
-                    )
 
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
@@ -298,10 +274,6 @@ def wrap_tool(tool):
                         if available_tool.name == "get_model":
                             try:
                                 # Call get_model right after solve_model to capture the model state
-                                print(
-                                    "Calling get_model right after solve_model to capture model state",
-                                    file=sys.stderr,
-                                )
                                 if hasattr(available_tool, "ainvoke"):
                                     get_result = await available_tool.ainvoke({})
                                 else:
@@ -312,18 +284,10 @@ def wrap_tool(tool):
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
 
-                                print(
-                                    f"DEBUG: Captured model after solve_model: {get_formatted[:100]}...",
-                                    file=sys.stderr,
-                                )
-
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
-                            except Exception as e:
-                                print(
-                                    f"Error calling get_model after solve_model: {e}",
-                                    file=sys.stderr,
-                                )
+                            except Exception:
+                                pass  # Silently handle errors in get_model
 
                             break
 
@@ -331,10 +295,6 @@ def wrap_tool(tool):
                 if tool_name == "get_model":
                     # Create a global variable to store the model
                     wrap_tool.mem_model = formatted
-                    print(
-                        f"DEBUG: Captured get_model result: {formatted[:100]}...",
-                        file=sys.stderr,
-                    )
 
                 return result
             except Exception as e:
@@ -476,9 +436,8 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     print("", flush=True)
                     sys.stdout.flush()
 
-                    # Initialize the agent with tools
+                    # Initialize the agent with tools - with simplified output
                     if USE_CUSTOM_AGENT:
-                        print("Using custom React agent implementation...")
                         # Extract system prompt from the messages list if present
                         system_prompt = None
                         system_messages = [
@@ -486,16 +445,8 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             for msg in state["messages"]
                             if msg.get("role") == "system"
                         ]
-                        print(f"Found {len(system_messages)} system messages")
-
                         if system_messages:
                             system_prompt = system_messages[0].get("content")
-                            print(
-                                f"Using system prompt with {len(system_prompt)} characters"
-                            )
-                            print(
-                                f"System prompt first 100 chars: {system_prompt[:100]}"
-                            )
 
                         if not system_prompt:
                             print("Warning: No system prompt found in messages!")
@@ -504,11 +455,10 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             SOLVE_MODEL, wrapped_tools, system_prompt
                         )
                     else:
-                        print("Using built-in React agent implementation...")
                         agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
 
                     # Get recursion_limit from args (if provided), then from config, or default to 200
-                    recursion_limit = args.recursion_limit if args is not None else None
+                    recursion_limit = args.recursion_limit if args is not None and hasattr(args, 'recursion_limit') else None
                     if recursion_limit is None:
                         # Try to get from config
                         try:
@@ -529,19 +479,16 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                         except Exception:
                             recursion_limit = 200
 
-                    print(f"Using recursion limit: {recursion_limit}")
+                    print(f"Using recursion limit: {recursion_limit}", flush=True)
                     config = RunnableConfig(recursion_limit=recursion_limit)
 
-                    # Process the request
-                    print(f"\n{'='*60}")
-                    print("Sending request to LLM...")
-                    print(f"{'='*60}\n")
+                    # Simplified agent start message
+                    log_system("Entering ReAct agent")
                     sys.stdout.flush()
 
                     try:
                         # Execute the agent
                         if USE_CUSTOM_AGENT:
-                            print("Executing custom React agent...")
                             # Create initial state with messages
                             human_message = HumanMessage(
                                 content=state["messages"][-1]["content"]
@@ -579,10 +526,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                     # Check if we have a review result and add it to state
                                     if "review_result" in final_state:
                                         state["review_result"] = final_state["review_result"]
-                                        print(
-                                            f"Review result received: {final_state['review_result'].get('correctness', 'unknown')}",
-                                            flush=True,
-                                        )
                                 else:
                                     print(
                                         "Warning: No message content found in custom agent response",
@@ -595,15 +538,10 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                     {"role": "assistant", "content": error_msg}
                                 )
                         else:
-                            print("Executing built-in React agent implementation...")
                             # Execute the built-in agent
                             response = await agent.ainvoke(
                                 {"messages": state["messages"]}, config=config
                             )
-                            print(f"\n{'='*60}")
-                            print("Received response from LLM.")
-                            print(f"{'='*60}\n")
-                            sys.stdout.flush()
 
                             # Extract and add the agent's response to state
                             if (
@@ -646,18 +584,18 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     # Check if solve_model was called and update mem_solution
     if hasattr(wrap_tool, "mem_solution"):
         state["mem_solution"] = wrap_tool.mem_solution
-        print(f"Updated state mem_solution with solve_model result", file=sys.stderr)
 
     # Update state with any get_model results we captured during execution
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
-        print(f"Updated state mem_model with get_model result", file=sys.stderr)
         
     # Now that we have the updated state, run the reviewer directly
     # This ensures that the reviewer has access to the current state with the correct model and solution
     if USE_CUSTOM_AGENT and SOLVE_MODEL and state.get("review_prompt"):
         try:
-            print("Running reviewer with updated state...", file=sys.stderr)
+            # Simplified reviewer start message
+            log_system("Entering Review agent")
+            
             from mcp_solver.client.react_agent import call_reviewer
             
             # Create a state object that mimics the AgentState expected by call_reviewer
@@ -675,11 +613,20 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
             # Add the review result to the state
             if isinstance(review_result, dict) and "review_result" in review_result:
                 state["review_result"] = review_result["review_result"]
-                print(f"Review complete: {review_result['review_result'].get('correctness', 'unknown')}", file=sys.stderr)
+                correctness = review_result["review_result"].get("correctness", "unknown")
+                # Add symbols based on correctness status
+                if correctness == "correct":
+                    symbol = "✅"  # Green checkmark
+                elif correctness == "incorrect":
+                    symbol = "❌"  # Red X
+                else:
+                    symbol = "❓"  # Question mark
+                
+                print(f"Review complete: {symbol} {correctness}", flush=True)
             else:
-                print(f"Review returned unexpected format", file=sys.stderr)
+                print(f"Review result: ❓ Unknown format", flush=True)
         except Exception as e:
-            print(f"Error running reviewer: {str(e)}", file=sys.stderr)
+            print(f"Error running reviewer: {str(e)}", flush=True)
             state["review_result"] = {
                 "correctness": "unknown", 
                 "explanation": f"Error running reviewer: {str(e)}"
@@ -747,10 +694,8 @@ def main_cli():
     try:
         state = asyncio.run(main())
 
-        # After the main function completes, print tool usage statistics
-        tool_stats = ToolStats.get_instance()
-        tool_stats.print_stats()
-
+        # Print results in a specific order
+        
         # Print mem_problem if available
         if state and isinstance(state, dict) and "mem_problem" in state:
             print("\n" + "=" * 60)
@@ -774,6 +719,10 @@ def main_cli():
             print("=" * 60)
             print(state["mem_solution"])
             print("=" * 60 + "\n")
+        
+        # Print tool usage statistics after the solution display
+        tool_stats = ToolStats.get_instance()
+        tool_stats.print_stats()
             
         # Print review_result if available
         if state and isinstance(state, dict) and "review_result" in state:
@@ -782,7 +731,16 @@ def main_cli():
             print("=" * 60)
             correctness = state["review_result"].get("correctness", "unknown")
             explanation = state["review_result"].get("explanation", "No explanation provided")
-            print(f"Correctness: {correctness}")
+            
+            # Add symbols based on correctness status
+            if correctness == "correct":
+                symbol = "✅"  # Green checkmark
+            elif correctness == "incorrect":
+                symbol = "❌"  # Red X
+            else:
+                symbol = "❓"  # Question mark
+                
+            print(f"Correctness: {symbol} {correctness}")
             print(f"Explanation: {explanation}")
             print("=" * 60 + "\n")
 
