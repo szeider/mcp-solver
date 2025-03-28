@@ -112,10 +112,15 @@ class LLMFactory:
                 **model_kwargs
             )
         elif model_info.platform == "AT":
+            # Set default max_tokens for Anthropic models if not specified in kwargs
+            anthropic_kwargs = kwargs.copy()
+            if 'max_tokens' not in anthropic_kwargs:
+                anthropic_kwargs['max_tokens'] = 4096
+            
             model = ChatAnthropic(
                 model=model_info.model_string,
                 anthropic_api_key=api_key,
-                **kwargs
+                **anthropic_kwargs
             )
         elif model_info.platform == "GO":
             model = ChatGoogleGenerativeAI(
