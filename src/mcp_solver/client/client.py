@@ -13,7 +13,7 @@ from pathlib import Path
 from .llm_factory import LLMFactory
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage

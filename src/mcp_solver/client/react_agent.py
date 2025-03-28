@@ -914,7 +914,7 @@ def create_mcp_react_agent(llm, server_command, system_message, verbose=False):
     import asyncio
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    from langchain_mcp_adapters.tools import load_mcp_tools
+    from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
     
     async def _run_agent_with_mcp(query):
         # Parse the server command
