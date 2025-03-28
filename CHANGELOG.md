@@ -1,21 +1,26 @@
 # Changelog
 
-All notable changes to this project are documented here.
 
-Here's a suggestion for the new version number and a corresponding changelog entry:
 
 ---
+
+### [3.0.0] - 2025-03-28
+
+- **Major Change:** Added PySAT mode and Z3 mode, expanding the supported constraint programming paradigms.
+- **Major Change:** Added a standalone test client for easier testing and demonstration.
+- **Major Change:** Lite mode is now the default mode. The additional tools have been removed from the default configuration.
+- **Update:** The server now advertises only a reduced set of tools by default (clear_model, add_item, replace_item, delete_item, and solve_model).
 
 ### [2.3.0] - 2025-02-28
 
 - **New Feature:** Introduced Lite Mode for the MCP Solver. When run with the `--lite` flag, the server advertises only a reduced set of tools (clear_model, add_item, replace_item, delete_item, and solve_model).
 - **New Feature:** In Lite Mode, the `solve_model` tool returns only the status (and the solution if SAT) without additional metadata.
-- **New Feature:** The instructions prompt in Lite Mode is loaded from `instructions_prompt_lite.md` instead of `instructions_prompt.md`.
+- **New Feature:** Mode-specific instruction prompts are used: `instructions_prompt_mzn.md` for MiniZinc, `instructions_prompt_pysat.md` for PySAT, and `instructions_prompt_z3.md` for Z3.
 
 ### [2.2.0] - 2025-02-15
 
 - **New Feature:** Integrated static prompt endpoints (`prompts/list` and `prompts/get`) to advertise MCP prompt templates ("quick_prompt" and "detailed_prompt") without requiring any arguments.
-- **New Feature:** Advertised detailed tool capabilities by adding descriptive metadata for each tool in the server’s capabilities declaration.
+- **New Feature:** Advertised detailed tool capabilities by adding descriptive metadata for each tool in the server's capabilities declaration.
 - **Improvement:** Enhanced error reporting for tool endpoints with improved logging and standardized error responses.
 - **Update:** Refactored server initialization to explicitly log the declared capabilities for greater transparency and easier debugging.
 

@@ -2,21 +2,65 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_solver"]
+
 [project]
 name = "mcp-solver"
-version = "2.3.0"
+version = "3.0.0"
 description = "MCP server for constraint solving"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=1.2.0",
-    "minizinc",
-    "tomli;python_version<'3.11'"
+    "mcp>=1.4.1,<1.5",
+    "tomli>=2.2.1",
+    "six>=1.17.0",
+    "nest_asyncio>=1.6.0",
+]
+
+[project.optional-dependencies]
+mzn = [
+    "minizinc<=0.10.0",
+]
+z3 = [
+    "z3-solver>=4.14.1.0",
+]
+pysat = [
+    "python-sat>=1.8.dev16",
+]
+client = [
+    "langchain>=0.3.21",
+    "langchain-core>=0.3.49",
+    "langchain-mcp-adapters>=0.0.5",
+    "langgraph>=0.3.21",
+    "langchain-openai>=0.3.11",
+    "langchain-anthropic>=0.3.10",
+    "openai>=1.69.0",
+    "python-dotenv>=1.1.0",
+    "rich>=13.9.4",
+    "uuid>=1.30",
+]
+all = [
+    "mcp-solver[mzn,z3,pysat,client]",
+]
+dev = [
+    "coverage>=7.7.1",
+    "pytest>=8.3.5",
 ]
 
 [project.scripts]
-mcp-solver = "mcp_solver.server:main"
-test-setup = "mcp_solver.test_setup:main"
-
+test-setup-mzn = "mcp_solver.mzn.test_setup:main"
+test-setup-z3 = "mcp_solver.z3.test_setup:main"
+test-setup-pysat = "mcp_solver.pysat.test_setup:main"
+test-setup-client = "mcp_solver.client.test_setup:main"
+mcp-solver = "mcp_solver.core.__main__:main"
+mcp-solver-mzn = "mcp_solver.core.__main__:main_mzn"
+mcp-solver-z3 = "mcp_solver.core.__main__:main_z3"
+mcp-solver-pysat = "mcp_solver.core.__main__:main_pysat"
+test-client = "mcp_solver.client.client:main_cli"
+test-client-react = "mcp_solver.client.client:main_cli"
+test-client-mzn = "mcp_solver.client.test_client_mzn:main"
+test-client-pysat = "mcp_solver.client.test_client_pysat:main"
+test-client-z3 = "mcp_solver.client.test_client_z3:main"
 
 [tool.black]
 line-length = 88
@@ -26,13 +70,5 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 
-# Override default memo file location by uncommenting and modifying one of these:
-
-# Windows: %APPDATA%\mcp-solver\memo.md
-#memo_file = "%APPDATA%\\mcp-solver\\memo.md"
-
-# macOS: ~/Library/Application Support/mcp-solver/memo.md
-#memo_file = "~/Library/Application Support/mcp-solver/memo.md"
-
-# Linux: ~/.config/mcp-solver/memo.md
-#memo_file = "~/.config/mcp-solver/memo.md"
+[tool.test_client]
+recursion_limit = 200
