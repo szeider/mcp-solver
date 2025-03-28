@@ -42,6 +42,23 @@ In the following, *item* refers to some part of the (MinZinc/Pysat/Z3) code, and
 
 ------
 
+## Installation
+
+MCP Solver requires Python 3.11+, the `uv` package manager, and solver-specific dependencies (MiniZinc, Z3, or PySAT).
+
+For detailed installation instructions for Windows, macOS, and Linux, see [INSTALL.md](INSTALL.md).
+
+Quick start:
+```bash
+git clone https://github.com/szeider/mcp-solver.git
+cd mcp-solver
+uv venv
+source .venv/bin/activate
+uv pip install -e ".[all]"  # Install all solvers
+```
+
+------
+
 ## Available Modes / Solving Backends
 
 The MCP Solver provides three distinct operational modes, each integrating with a different constraint solving backend. Each mode requires specific dependencies and offers unique capabilities for addressing different classes of problems.
@@ -96,102 +113,6 @@ Z3 mode provides access to Z3 SMT (Satisfiability Modulo Theories) solving capab
 ```
 mcp-solver-z3
 ```
-
-## Installation
-
-1. Install an MCP-compatible client e.g., [Claude Desktop app](https://claude.ai/download). For testing, you can also use the included **test client,** see below.
-
-2. Install the MCP Solver with appropriate dependencies based on the mode(s) you intend to use:
-
-   ```bash
-   git clone https://github.com/szeider/mcp-solver.git
-   cd mcp-solver
-   uv venv
-   source .venv/bin/activate 
-   
-   # For MiniZinc mode
-   uv pip install -e ".[mzn]"
-   
-   # For Z3 mode
-   uv pip install -e ".[z3]"
-   
-   # For PySAT mode
-   uv pip install -e ".[pysat]"
-   
-   # For all modes
-   uv pip install -e ".[all]"
-   
-   # For development and testing
-   uv pip install -e ".[dev]"
-   ```
-
-3. The setup can be tested for each mode:
-
-   ```bash
-   # For MiniZinc mode
-   uv run test-setup-mzn
-   
-   # For PySAT mode
-   uv run test-setup-pysat
-   
-   # For Z3 mode
-   uv run test-setup-z3
-   ```
-
-4. Create the configuration file:
-
-   For macOS/Linux:
-
-```
-   ~/Library/Application/Support/Claude/claude_desktop_config.json
-```
-
-For Windows:
-
-```
-   %APPDATA%\Claude\claude_desktop_config.json
-```
-
-Add the following content for MiniZinc mode (similar for PySAT or Z3):
-
-```json
-{
-  "mcpServers": {
-    "MCP Solver": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/mcp-solver/",
-        "run",
-        "mcp-solver-mzn"
-      ]
-    }
-  }
-}
-```
-
-For Windows:
-
-```json
-{
-  "mcpServers": {
-    "MCP Solver": {
-      "command": "cmd.exe",
-      "args": [
-        "/C",
-        "cd C:\\absolute\\path\\to\\mcp-solver && uv run mcp-solver-mzn"
-      ]
-    }
-  }
-}
-```
-
-5. For each mode, the appropriate **instructions prompt** is loaded from:
-   - MiniZinc mode: `instructions_prompt_mzn.md`
-   - PySAT mode: `instructions_prompt_pysat.md`
-   - Z3 mode: `instructions_prompt_z3.md`
-	
-	On Claude Desktop, the instructions prompt can be accessed via the electrical plug symbol → Choose andintegration →  MCP Solver → instructions. 
 
 ## MCP Test Client
 
