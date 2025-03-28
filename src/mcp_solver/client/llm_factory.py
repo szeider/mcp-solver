@@ -25,7 +25,11 @@ class ModelInfo:
     @property
     def model_string(self) -> str:
         if self.platform == "OR":
-            return f"{self.provider}/{self.model_name}"
+            base_string = f"{self.provider}/{self.model_name}"
+            # Add tier if present
+            if hasattr(self, 'tier'):
+                return f"{base_string}:{self.tier}"
+            return base_string
         return self.model_name
 
     @property
@@ -53,6 +57,15 @@ class LLMFactory:
             remaining = model_code[3:]
             if platform == "OR":
                 provider, model_name = remaining.split("/", 1)
+                # Handle any additional parameters after the model name (e.g., :free)
+                if ":" in model_name:
+                    model_parts = model_name.split(":", 1)
+                    model_name = model_parts[0]
+                    # Store additional parameter as an attribute
+                    tier = model_parts[1]
+                    model_info = ModelInfo(platform=platform, provider=provider, model_name=model_name)
+                    setattr(model_info, 'tier', tier)
+                    return model_info
             else:
                 provider = "openai" if platform == "OA" else "anthropic" if platform == "AT" else "google"
                 # Handle reasoning_effort parameter in model code (format: OA:o3-mini:high)

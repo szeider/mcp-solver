@@ -70,6 +70,13 @@ These tools let you construct your model incrementally and solve it using the Ch
 
 ## Model Modification Guidelines
 
+- **Comments**:
+  A comment is not an item by itself. Always combine a comment with the constraint or declaration it belongs to.
+
+- **Combining similar parts:**
+  
+  If you have a long list of similar parts like constant definitions, you can put them into the same item.
+  
 - **Incremental Changes:**  
   Use `add_item`, `replace_item`, and `delete_item` to modify your model incrementally. This allows you to maintain consistency in item numbering without needing to clear the entire model.
 

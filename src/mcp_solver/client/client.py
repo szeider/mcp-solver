@@ -75,6 +75,10 @@ MODEL_CODES = {
     "MC5": "OA:o3-mini",  # OpenAI o3-mini with default (medium) reasoning effort
     "MC6": "OA:gpt-4o",  # OpenAI GPT-4o direct via OpenAI API
     "MC7": "OR:openai/gpt-4o",  # OpenAI GPT-4o via OpenRouter
+    "MC8": "GO:gemini-2.5-pro-exp-03-25",  # Google Gemini Pro via Google API
+    "MC9": "OR:google/gemini-2.5-pro-exp-03-25:free",  # Google Gemini via OpenRouter
+    "MC10": "OR:anthropic/claude-3-7-sonnet:free",  # Claude 3.7 Sonnet via OpenRouter free tier
+    "MC11": "GO:gemini-1.5-pro",  # Google Gemini 1.5 Pro with function calling support
 }
 DEFAULT_MODEL = "MC1"  # Default model to use
 

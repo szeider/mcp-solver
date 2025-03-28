@@ -34,6 +34,7 @@ client = [
     "langgraph>=0.3.21",
     "langchain-openai>=0.3.11",
     "langchain-anthropic>=0.3.10",
+    "langchain-google-genai>=2.0.0",
     "openai>=1.69.0",
     "python-dotenv>=1.1.0",
     "rich>=13.9.4",
