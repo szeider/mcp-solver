@@ -24,10 +24,6 @@ from mcp_solver.core.prompt_loader import load_prompt
 from .tool_stats import ToolStats
 from .token_counter import TokenCounter
 
-# Check LangGraph version for compatibility
-import importlib
-import importlib.metadata
-
 def format_token_count(count):
     """
     Format token count with compact magnitude representation using perceptually 
@@ -59,16 +55,6 @@ def format_token_count(count):
         else:
             # For ≥10M, use integer representation
             return f"{int(scaled)}M"
-
-# Try to determine LangGraph version for compatibility
-try:
-    langgraph_version = importlib.metadata.version("langgraph")
-    LANGGRAPH_VERSION = tuple(map(int, langgraph_version.split(".")[:3]))
-    USING_NEW_LANGGRAPH = LANGGRAPH_VERSION >= (0, 3, 18)
-except (importlib.metadata.PackageNotFoundError, ValueError):
-    # If we can't determine version, assume older version
-    LANGGRAPH_VERSION = (0, 0, 0)
-    USING_NEW_LANGGRAPH = False
 
 # Custom agent implementation
 from mcp_solver.client.react_agent import (
@@ -535,8 +521,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                 )
 
                                 # Normalize the state for consistent format handling
-                                if USING_NEW_LANGGRAPH:
-                                    final_state = normalize_state(final_state)
+                                final_state = normalize_state(final_state)
 
                                 # Extract and add the agent's response to state
                                 if (
