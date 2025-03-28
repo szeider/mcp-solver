@@ -1,10 +1,15 @@
 # Changelog
 
-All notable changes to this project are documented here.
 
-Here's a suggestion for the new version number and a corresponding changelog entry:
 
 ---
+
+### [3.0.0] - 2025-03-28
+
+- **Major Change:** Added PySAT mode and Z3 mode, expanding the supported constraint programming paradigms.
+- **Major Change:** Added a standalone test client for easier testing and demonstration.
+- **Major Change:** Lite mode is now the default mode. The additional tools have been removed from the default configuration.
+- **Update:** The server now advertises only a reduced set of tools by default (clear_model, add_item, replace_item, delete_item, and solve_model).
 
 ### [2.3.0] - 2025-02-28
 
