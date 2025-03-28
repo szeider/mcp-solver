@@ -7,7 +7,7 @@ packages = ["src/mcp_solver"]
 
 [project]
 name = "mcp-solver"
-version = "2.3.0"
+version = "3.0.0"
 description = "MCP server for constraint solving"
 requires-python = ">=3.11"
 dependencies = [
