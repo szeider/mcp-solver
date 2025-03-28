@@ -70,16 +70,5 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 
-# Override default memo file location by uncommenting and modifying one of these:
-
-# Windows: %APPDATA%\mcp-solver\memo.md
-#memo_file = "%APPDATA%\\mcp-solver\\memo.md"
-
-# macOS: ~/Library/Application Support/mcp-solver/memo.md
-#memo_file = "~/Library/Application Support/mcp-solver/memo.md"
-
-# Linux: ~/.config/mcp-solver/memo.md
-#memo_file = "~/.config/mcp-solver/memo.md"
-
 [tool.test_client]
 recursion_limit = 200
