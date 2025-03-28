@@ -31,6 +31,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+# Import token counter
+from mcp_solver.client.token_counter import TokenCounter
+
 
 # Step 1: Define the agent state
 class AgentState(TypedDict):
@@ -66,8 +69,15 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     if system_prompt and not any(isinstance(msg, SystemMessage) for msg in messages):
         messages.insert(0, SystemMessage(content=system_prompt))
     
+    # Track input tokens using the TokenCounter
+    token_counter = TokenCounter.get_instance()
+    token_counter.count_main_input(messages)
+    
     # Call the model with the messages
     response = model.invoke(messages)
+    
+    # Track output tokens using the TokenCounter
+    token_counter.count_main_output(response.content)
     
     # Return updated state with model response added
     return {"messages": [response]}
@@ -394,9 +404,16 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
     structured_prompt = f"{reviewer_prompt}\n\nPlease provide your review in the following JSON format:\n{{\"correctness\": \"[correct|incorrect|unknown]\", \"explanation\": \"Your detailed explanation\"}}"
     
     try:
+        # Track reviewer input tokens using the TokenCounter
+        token_counter = TokenCounter.get_instance()
+        token_counter.count_reviewer_input(structured_prompt)
+        
         # Call the model with a HumanMessage
         review_message = HumanMessage(content=structured_prompt)
         response = model.invoke([review_message])
+        
+        # Track reviewer output tokens using the TokenCounter
+        token_counter.count_reviewer_output(response.content)
         
         # Try to parse JSON from the response
         review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}

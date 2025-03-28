@@ -22,11 +22,45 @@ from mcp_solver.core.prompt_loader import load_prompt
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
+from .token_counter import TokenCounter
 
 # Check LangGraph version for compatibility
 import importlib
 import importlib.metadata
 
+def format_token_count(count):
+    """
+    Format token count with compact magnitude representation using perceptually 
+    significant digits.
+    
+    Parameters:
+        count (int): The token count to format
+        
+    Returns:
+        str: Formatted representation with appropriate magnitude suffix
+    """
+    if count < 1000:
+        return str(count)
+    elif count < 1000000:
+        # Scale to thousands with conditional precision
+        scaled = count / 1000
+        if scaled < 10:
+            # For 1k-9.9k, maintain single decimal precision
+            return f"{scaled:.1f}".rstrip('0').rstrip('.') + 'k'
+        else:
+            # For ≥10k, use integer representation
+            return f"{int(scaled)}k"
+    else:
+        # Scale to millions with conditional precision
+        scaled = count / 1000000
+        if scaled < 10:
+            # For 1M-9.9M, maintain single decimal precision
+            return f"{scaled:.1f}".rstrip('0').rstrip('.') + 'M'
+        else:
+            # For ≥10M, use integer representation
+            return f"{int(scaled)}M"
+
+# Try to determine LangGraph version for compatibility
 try:
     langgraph_version = importlib.metadata.version("langgraph")
     LANGGRAPH_VERSION = tuple(map(int, langgraph_version.split(".")[:3]))
@@ -588,6 +622,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     # Update state with any get_model results we captured during execution
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
+    
+    # Display problem, model, and result before reviewing
+    display_problem_model_result(state)
         
     # Now that we have the updated state, run the reviewer directly
     # This ensures that the reviewer has access to the current state with the correct model and solution
@@ -623,6 +660,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     symbol = "❓"  # Question mark
                 
                 print(f"Review complete: {symbol} {correctness}", flush=True)
+                
+                # Display review results immediately after completion
+                display_review_result(state)
             else:
                 print(f"Review result: ❓ Unknown format", flush=True)
         except Exception as e:
@@ -631,9 +671,155 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                 "correctness": "unknown", 
                 "explanation": f"Error running reviewer: {str(e)}"
             }
+            
+            # Display review results even if there was an error
+            display_review_result(state)
 
     return state
 
+def display_problem_model_result(state):
+    """Display problem, model, and result output."""
+    # Print mem_problem if available
+    if isinstance(state, dict) and "mem_problem" in state:
+        print("\n" + "=" * 60)
+        print("PROBLEM STATEMENT:")
+        print("=" * 60)
+        print(state["mem_problem"])
+        print("=" * 60 + "\n")
+
+    # Print mem_model if available
+    if isinstance(state, dict) and "mem_model" in state:
+        print("\n" + "=" * 60)
+        print("FINAL MODEL:")
+        print("=" * 60)
+        print(state["mem_model"])
+        print("=" * 60 + "\n")
+
+    # Print mem_solution if available
+    if isinstance(state, dict) and "mem_solution" in state:
+        print("\n" + "=" * 60)
+        print("SOLUTION RESULT:")
+        print("=" * 60)
+        print(state["mem_solution"])
+        print("=" * 60 + "\n")
+
+def display_review_result(state):
+    """Display review result output."""
+    # Print review_result if available
+    if isinstance(state, dict) and "review_result" in state:
+        print("\n" + "=" * 60)
+        print("REVIEW RESULT:")
+        print("=" * 60)
+        correctness = state["review_result"].get("correctness", "unknown")
+        explanation = state["review_result"].get("explanation", "No explanation provided")
+        
+        # Add symbols based on correctness status
+        if correctness == "correct":
+            symbol = "✅"  # Green checkmark
+        elif correctness == "incorrect":
+            symbol = "❌"  # Red X
+        else:
+            symbol = "❓"  # Question mark
+            
+        print(f"Correctness: {symbol} {correctness}")
+        print(f"Explanation: {explanation}")
+        print("=" * 60 + "\n")
+
+def display_combined_stats():
+    """Display combined tool usage and token usage statistics."""
+    from rich.console import Console
+    from rich.table import Table
+    
+    console = Console()
+    
+    # Get tool statistics
+    tool_stats = ToolStats.get_instance()
+    if tool_stats.enabled and tool_stats.total_calls > 0:
+        tool_table = Table(title="Tool Usage and Token Statistics")
+        
+        # Add tool usage section
+        tool_table.add_column("Category", style="cyan")
+        tool_table.add_column("Item", style="green")
+        tool_table.add_column("Count/Value", style="yellow")
+        
+        # Add a header row for tool usage
+        tool_table.add_row("TOOL USAGE", "", "", style="bold")
+        
+        # List of all standard tools
+        standard_tools = ["clear_model", "add_item", "replace_item", "delete_item", "get_model", "solve_model"]
+        
+        # Make sure all standard tools are represented in tool_calls
+        for tool_name in standard_tools:
+            if tool_name not in tool_stats.tool_calls:
+                tool_stats.tool_calls[tool_name] = 0
+        
+        # Sort tools by number of calls (descending)
+        sorted_tools = sorted(tool_stats.tool_calls.items(), key=lambda x: x[1], reverse=True)
+        
+        for tool_name, count in sorted_tools:
+            tool_table.add_row("Tool", tool_name, str(count))
+        
+        # Add a total row for tools
+        tool_table.add_row("Tool", "TOTAL", str(tool_stats.total_calls), style="bold")
+        
+        # Get token statistics
+        token_counter = TokenCounter.get_instance()
+        
+        # Add a header row for token usage
+        tool_table.add_row("TOKEN USAGE", "", "", style="bold")
+        
+        # Main agent tokens
+        main_total = token_counter.main_input_tokens + token_counter.main_output_tokens
+        tool_table.add_row(
+            "Token", 
+            "ReAct Agent Input", 
+            format_token_count(token_counter.main_input_tokens)
+        )
+        tool_table.add_row(
+            "Token", 
+            "ReAct Agent Output", 
+            format_token_count(token_counter.main_output_tokens)
+        )
+        tool_table.add_row(
+            "Token", 
+            "ReAct Agent Total", 
+            format_token_count(main_total),
+            style="bold"
+        )
+        
+        # Reviewer agent tokens
+        reviewer_total = token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
+        if reviewer_total > 0:
+            tool_table.add_row(
+                "Token", 
+                "Reviewer Input", 
+                format_token_count(token_counter.reviewer_input_tokens)
+            )
+            tool_table.add_row(
+                "Token", 
+                "Reviewer Output", 
+                format_token_count(token_counter.reviewer_output_tokens)
+            )
+            tool_table.add_row(
+                "Token", 
+                "Reviewer Total", 
+                format_token_count(reviewer_total),
+                style="bold"
+            )
+        
+        # Grand total
+        grand_total = main_total + reviewer_total
+        tool_table.add_row(
+            "Token", 
+            "COMBINED TOTAL", 
+            format_token_count(grand_total),
+            style="bold"
+        )
+        
+        console.print("\n")
+        console.print(tool_table)
+    else:
+        console.print("[yellow]No tool usage or token statistics available for this run.[/yellow]")
 
 async def main():
     """Main entry point for the client."""
@@ -644,6 +830,9 @@ async def main():
     tool_stats_enabled = not args.no_stats
     tool_stats = ToolStats.get_instance()
     tool_stats.enabled = tool_stats_enabled
+    
+    # Initialize token counter (always enabled regardless of --no-stats flag)
+    _ = TokenCounter.get_instance()
 
     # Determine mode from the server command, not from the model code
     mode = "mzn"  # Default to MiniZinc
@@ -693,56 +882,9 @@ def main_cli():
     """Command line entrypoint."""
     try:
         state = asyncio.run(main())
-
-        # Print results in a specific order
         
-        # Print mem_problem if available
-        if state and isinstance(state, dict) and "mem_problem" in state:
-            print("\n" + "=" * 60)
-            print("PROBLEM STATEMENT:")
-            print("=" * 60)
-            print(state["mem_problem"])
-            print("=" * 60 + "\n")
-
-        # Print mem_model if available
-        if state and isinstance(state, dict) and "mem_model" in state:
-            print("\n" + "=" * 60)
-            print("FINAL MODEL:")
-            print("=" * 60)
-            print(state["mem_model"])
-            print("=" * 60 + "\n")
-
-        # Print mem_solution if available
-        if state and isinstance(state, dict) and "mem_solution" in state:
-            print("\n" + "=" * 60)
-            print("SOLUTION RESULT:")
-            print("=" * 60)
-            print(state["mem_solution"])
-            print("=" * 60 + "\n")
-        
-        # Print tool usage statistics after the solution display
-        tool_stats = ToolStats.get_instance()
-        tool_stats.print_stats()
-            
-        # Print review_result if available
-        if state and isinstance(state, dict) and "review_result" in state:
-            print("\n" + "=" * 60)
-            print("REVIEW RESULT:")
-            print("=" * 60)
-            correctness = state["review_result"].get("correctness", "unknown")
-            explanation = state["review_result"].get("explanation", "No explanation provided")
-            
-            # Add symbols based on correctness status
-            if correctness == "correct":
-                symbol = "✅"  # Green checkmark
-            elif correctness == "incorrect":
-                symbol = "❌"  # Red X
-            else:
-                symbol = "❓"  # Question mark
-                
-            print(f"Correctness: {symbol} {correctness}")
-            print(f"Explanation: {explanation}")
-            print("=" * 60 + "\n")
+        # Display statistics at the end
+        display_combined_stats()
 
         return 0
     except KeyboardInterrupt:
@@ -750,8 +892,7 @@ def main_cli():
 
         # Still try to print statistics in case of interruption
         try:
-            tool_stats = ToolStats.get_instance()
-            tool_stats.print_stats()
+            display_combined_stats()
         except Exception:
             pass
 
