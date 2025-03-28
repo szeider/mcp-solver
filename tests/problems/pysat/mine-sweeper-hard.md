@@ -1,1 +1,0 @@
-In the following a 4x5 board of Minesweeper is given. The letter x represents undiscovered fields. Solve this instance of Minesweeper by uncovering all mines and replacing the corresponding x with the letter M: line 1: (3,x,x,2), line 2: (x,x,x,x), line 3: (x,x,x,2), line 4: (3,x,3,x), line 4: (x,2,2,1)

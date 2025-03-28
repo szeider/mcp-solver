@@ -1,1 +1,0 @@
-There are three people, Alice, Bob and Charly. The person standing left is named Bob. The favourite color of Alice is blue. Bob owns a dog. The favourite color of the person owning a bird is red. The person standing right owns a cat. Now, what is the name of the person standing in the middle and who owns the cat? 
