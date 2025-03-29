@@ -35,6 +35,10 @@ from langgraph.prebuilt import ToolNode
 from mcp_solver.client.token_counter import TokenCounter
 
 
+# Module-level variables for solution tracking
+mem_solution = "No solution generated yet"
+
+
 # Step 1: Define the agent state
 class AgentState(TypedDict):
     """The state of the agent."""
@@ -272,6 +276,9 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
     Returns:
         A ToolMessage with the result or error
     """
+    # Global declaration at the beginning of the function
+    global mem_solution
+    
     # Prepare call arguments for both formats
     call_args = tool_args
     wrapped_args = {"args": tool_args}
@@ -319,6 +326,16 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         # Format result for uniformity
         result_str = str(result) if result is not None else "Task completed successfully."
         
+        # Special handling for Z3 results
+        if "'values':" in result_str:
+            # Try to extract and save the values directly
+            import re
+            values_match = re.search(r"'values':\s*(\{[^\}]+\})", result_str)
+            if values_match:
+                extracted_values = values_match.group(1)
+                # Update the global mem_solution directly 
+                mem_solution = extracted_values
+        
         # Create a tool message with the result
         tool_message = ToolMessage(
             content=result_str,
@@ -328,11 +345,33 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         
         # Special handling for solve_model tool
         if tool_name == "solve_model":
-            # Store the result in a static variable for later retrieval
+            # For solve_model, directly set the mem_solution right after the function returns
+            # This will make it available immediately rather than waiting for the next tool call
+            
+            # Try to extract Z3 solution if it looks like one
+            if "'values':" in result_str:
+                import re
+                values_match = re.search(r"'values':\s*(\{[^\}]+\})", result_str)
+                if values_match:
+                    mem_solution = values_match.group(1)
+                else:
+                    mem_solution = result_str
+            else:
+                mem_solution = result_str
+        
+        # Special handling for get_model tool - store the raw model
+        elif tool_name == "get_model":
+            # Store the raw model result directly
             if not hasattr(execute_tool_safely, "mem_solution"):
                 execute_tool_safely.mem_solution = {}
-            execute_tool_safely.mem_solution[tool_id] = result_str
-            print(f"DEBUG: Stored solve_model result with ID {tool_id}", file=sys.stderr)
+            # This is the raw, unformatted Python model/solution
+            execute_tool_safely.mem_solution[tool_id] = result
+        
+        # Store in the static variable too
+        if not hasattr(execute_tool_safely, "mem_solution"):
+            execute_tool_safely.mem_solution = {}
+            
+        execute_tool_safely.mem_solution[tool_id] = result_str
         
         return tool_message
         
@@ -630,6 +669,12 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     Returns:
         The final state of the agent
     """
+    # Global declaration at the beginning of the function
+    global mem_solution
+    
+    # Reset global mem_solution at the start of each run
+    mem_solution = "No solution generated yet"
+    
     # If it's our wrapped agent, unwrap it first to use the async version
     if isinstance(agent, SyncCompatWrapper):
         async_agent = agent.async_agent
@@ -654,11 +699,38 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     # Normalize the state to ensure consistent format
     normalized_state = normalize_state(final_state)
     
-    # Update mem_solution if solve_model was called
-    if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
+    # Try to extract Z3 solution from messages directly
+    for message in normalized_state.get("messages", []):
+        if isinstance(message, ToolMessage) and "solve_model" in message.name and "'values':" in message.content:
+            try:
+                import re
+                values_match = re.search(r"'values':\s*(\{[^\}]+\})", message.content)
+                if values_match:
+                    extracted_solution = values_match.group(1)
+                    mem_solution = extracted_solution
+                    normalized_state["mem_solution"] = extracted_solution
+            except Exception:
+                pass
+    
+    # If the module-level solution has been updated, use it
+    if mem_solution != "No solution generated yet":
+        normalized_state["mem_solution"] = mem_solution
+    # Otherwise fall back to the execute_tool_safely.mem_solution
+    elif hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
         # Get the latest solution (using the last tool_id if there were multiple calls)
-        latest_solution = list(execute_tool_safely.mem_solution.values())[-1]
-        normalized_state["mem_solution"] = latest_solution
+        latest_solution = None
+        
+        # Check if we have a specifically extracted values field for Z3
+        if "values" in execute_tool_safely.mem_solution:
+            latest_solution = execute_tool_safely.mem_solution["values"]
+        else:
+            # Otherwise get the last solution added by a tool call
+            tool_ids = [k for k in execute_tool_safely.mem_solution.keys() if k != "values"]
+            if tool_ids:
+                latest_solution = execute_tool_safely.mem_solution[tool_ids[-1]]
+        
+        if latest_solution:
+            normalized_state["mem_solution"] = latest_solution
     
     # Ensure token usage is in the normalized state
     if "mem_tokens_used" not in normalized_state:
@@ -683,7 +755,7 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
             if isinstance(normalized_state["review_result"], dict):
                 # Store the explanation as review text
                 normalized_state["mem_review_text"] = normalized_state["review_result"].get("explanation", 
-                                                     json.dumps(normalized_state["review_result"]))
+                                                   json.dumps(normalized_state["review_result"]))
             else:
                 # Store the entire review result
                 normalized_state["mem_review_text"] = str(normalized_state["review_result"])
@@ -895,16 +967,15 @@ class SyncCompatWrapper:
 
 
 def debug_mcp_tools(name, args, result):
-    """Print debug information for MCP tool calls."""
-    # We're removing the debug output entirely
+    """Pass-through function for MCP tool calls (previously used for debugging)."""
     return result
 
 
 def create_debug_wrapper(tool_name, orig_func):
-    """Create a debug wrapper for a tool function."""
+    """Create a simple wrapper for a tool function."""
     async def wrapped_func(args, **kwargs):
         result = await orig_func(args, **kwargs)
-        return debug_mcp_tools(tool_name, args, result)
+        return result
     return wrapped_func
 
 
