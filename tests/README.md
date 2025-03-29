@@ -84,10 +84,11 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 - `--verbose` or `-v`: Enable verbose output
 - `--timeout` or `-t`: Set timeout in seconds (default: 300)
 - `--save` or `-s`: Save test results to the results directory
+- `--result`: Save detailed JSON results to the specified directory
 
 Example:
 ```bash
-run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save
+run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save --result ./json_results
 ```
 
 ## Troubleshooting Common Issues

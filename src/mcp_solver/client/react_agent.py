@@ -651,23 +651,22 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     # Run the agent asynchronously
     final_state = await async_agent.ainvoke(initial_state, config)
     
+    # Normalize the state to ensure consistent format
+    normalized_state = normalize_state(final_state)
+    
     # Update mem_solution if solve_model was called
     if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
         # Get the latest solution (using the last tool_id if there were multiple calls)
         latest_solution = list(execute_tool_safely.mem_solution.values())[-1]
-        
-        # Add to final state, handling different state formats
-        if isinstance(final_state, dict):
-            final_state["mem_solution"] = latest_solution
-        elif hasattr(final_state, "values") and isinstance(final_state.values, dict):
-            final_state.values["mem_solution"] = latest_solution
+        normalized_state["mem_solution"] = latest_solution
     
-    # Normalize the state to ensure consistent format
-    normalized_state = normalize_state(final_state)
-    
-    # Make sure mem_solution is in the normalized state
-    if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
-        normalized_state["mem_solution"] = list(execute_tool_safely.mem_solution.values())[-1]
+    # Ensure token usage is in the normalized state
+    if "mem_tokens_used" not in normalized_state:
+        try:
+            token_counter = TokenCounter.get_instance()
+            normalized_state["mem_tokens_used"] = token_counter.get_total_tokens()
+        except Exception as e:
+            print(f"Warning: Could not access TokenCounter: {e}", file=sys.stderr)
     
     # Ensure tool usage is in the normalized state
     try:
@@ -678,23 +677,37 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     except Exception as e:
         print(f"Warning: Could not access ToolStats in run_agent: {e}", file=sys.stderr)
     
-    # If review_result exists, store it in mem_review_text
+    # If review_result exists but mem_review_text doesn't, store review_result explanation in mem_review_text
     if "review_result" in normalized_state and normalized_state["review_result"]:
-        normalized_state["mem_review_text"] = normalized_state["review_result"]
+        if "mem_review_text" not in normalized_state or not normalized_state["mem_review_text"]:
+            if isinstance(normalized_state["review_result"], dict):
+                # Store the explanation as review text
+                normalized_state["mem_review_text"] = normalized_state["review_result"].get("explanation", 
+                                                     json.dumps(normalized_state["review_result"]))
+            else:
+                # Store the entire review result
+                normalized_state["mem_review_text"] = str(normalized_state["review_result"])
     
-    # Print token usage so run_test.py can capture it
+    # Ensure review verdict is in the normalized state
+    if "mem_review_verdict" not in normalized_state and "review_result" in normalized_state:
+        if isinstance(normalized_state["review_result"], dict) and "correctness" in normalized_state["review_result"]:
+            normalized_state["mem_review_verdict"] = normalized_state["review_result"]["correctness"]
+    
+    # Print all state variables consistently for run_test.py to capture
+    # These prints should be the single source of truth for run_test.py
     if "mem_tokens_used" in normalized_state:
         print(f"mem_tokens_used: {normalized_state['mem_tokens_used']}")
     
-    # Print review verdict so run_test.py can capture it
     if "mem_review_verdict" in normalized_state:
         print(f"mem_review_verdict: {normalized_state['mem_review_verdict']}")
     
-    # Print review text so run_test.py can capture it
     if "mem_review_text" in normalized_state and normalized_state["mem_review_text"]:
         print(f"mem_review_text: {normalized_state['mem_review_text']}")
     
-    # Print tool usage so run_test.py can capture it
+    if "mem_solution" in normalized_state and normalized_state["mem_solution"]:
+        # Print solution to allow run_test.py to determine satisfiability
+        print(f"mem_solution: {normalized_state['mem_solution']}")
+    
     if "mem_tool_usage" in normalized_state and normalized_state["mem_tool_usage"]:
         print(f"mem_tool_usage: {json.dumps(normalized_state['mem_tool_usage'])}")
     
