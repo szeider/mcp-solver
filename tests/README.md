@@ -8,13 +8,13 @@ For a quick end-to-end test after code changes, run any of these commands:
 
 ```bash
 # MiniZinc test - N-Queens problem
-uv run test-client-mzn --problem nqueens
+run-test mzn --problem tests/problems/mzn/nqueens.md
 
 # PySAT test - Graph Coloring problem
-uv run test-client-pysat --problem graph_coloring
+run-test pysat --problem tests/problems/pysat/graph_coloring.md
 
 # Z3 test - Cryptarithmetic puzzle
-uv run test-client-z3 --problem cryptarithmetic
+run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 ```
 
 ## Test Structure
@@ -22,8 +22,8 @@ uv run test-client-z3 --problem cryptarithmetic
 ```
 ├── tests/
 │   ├── __init__.py                # Package marker
-│   ├── conftest.py                # Shared test fixtures and configuration
 │   ├── test_config.py             # Configuration values for tests
+│   ├── run_test.py                # Unified test runner for all solvers
 │   ├── problems/                  # All problem definitions in one place
 │   │   ├── mzn/                   # MiniZinc problem definitions
 │   │   │   ├── nqueens.md         # N-Queens problem
@@ -37,46 +37,27 @@ uv run test-client-z3 --problem cryptarithmetic
 │   │   └── z3/                    # Z3 problem definitions
 │   │       ├── bounded_sum.md     # Bounded sum problem
 │   │       └── cryptarithmetic.md # Cryptarithmetic problem
-│   ├── run_all_tests.py           # Main runner for all tests
-│   ├── run_test_mzn.py            # Runner for MiniZinc tests
-│   ├── run_test_pysat.py          # Runner for PySAT tests
-│   ├── run_test_z3.py             # Runner for Z3 tests
 │   └── results/                   # Directory for test results (optional)
 ```
 
 ## Running Tests
 
-### Running All Tests
-
-```bash
-cd /path/to/mcp-solver
-uv run python tests/run_all_tests.py
-```
-
 ### Running Tests for a Specific Solver
 
 ```bash
 cd /path/to/mcp-solver
-uv run python tests/run_all_tests.py --mzn   # Run only MiniZinc tests
-uv run python tests/run_all_tests.py --pysat # Run only PySAT tests
-uv run python tests/run_all_tests.py --z3    # Run only Z3 tests
+run-test mzn    # Run all MiniZinc tests
+run-test pysat  # Run all PySAT tests
+run-test z3     # Run all Z3 tests
 ```
 
 ### Running a Specific Problem
 
 ```bash
 cd /path/to/mcp-solver
-uv run python tests/run_test_mzn.py --problem nqueens
-uv run python tests/run_test_pysat.py --problem graph_coloring
-uv run python tests/run_test_z3.py --problem cryptarithmetic
-```
-
-You can also use the client directly:
-
-```bash
-uv run test-client-mzn --problem nqueens
-uv run test-client-pysat --problem graph_coloring
-uv run test-client-z3 --problem cryptarithmetic
+run-test mzn --problem tests/problems/mzn/nqueens.md
+run-test pysat --problem tests/problems/pysat/graph_coloring.md
+run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 ```
 
 ### Available Problems
@@ -104,7 +85,7 @@ uv run test-client-z3 --problem cryptarithmetic
 
 Example:
 ```bash
-uv run python tests/run_test_mzn.py --problem nqueens --verbose --timeout 120 --save
+run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save
 ```
 
 ## Troubleshooting Common Issues
@@ -144,4 +125,4 @@ If you add new helper functions, make sure to include them in:
    - MiniZinc: `tests/problems/mzn/`
    - PySAT: `tests/problems/pysat/`
    - Z3: `tests/problems/z3/`
-2. Run the test with the corresponding test runner or client command 
+2. Run the test with the run-test command 
