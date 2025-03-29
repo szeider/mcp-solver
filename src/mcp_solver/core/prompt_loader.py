@@ -1,12 +1,42 @@
 from pathlib import Path
 import logging
-from typing import Literal
+from typing import Literal, Union
 
 # Type definitions for better type checking
 PromptMode = Literal["mzn", "pysat", "z3"]
 PromptType = Literal["instructions", "review"]
 
 logger = logging.getLogger(__name__)
+
+def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") -> Path:
+    """
+    Get the path to a prompt file based on mode and type, without loading its content.
+    
+    Args:
+        mode: The solver mode ("mzn", "pysat", or "z3")
+        prompt_type: The type of prompt ("instructions" or "review"), defaults to "instructions"
+    
+    Returns:
+        Path object pointing to the prompt file
+    
+    Raises:
+        ValueError: If invalid mode or prompt type is provided
+    """
+    # Validate inputs
+    if mode not in ("mzn", "pysat", "z3"):
+        raise ValueError(f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3")
+    
+    if prompt_type not in ("instructions", "review"):
+        raise ValueError(f"Invalid prompt type: {prompt_type}. Must be one of: instructions, review")
+    
+    # Get the base prompts directory path
+    base_path = Path(__file__).parent.parent.parent.parent / "prompts"
+    
+    # Construct the full path to the prompt file
+    prompt_path = base_path / mode / f"{prompt_type}.md"
+    
+    logger.debug(f"Prompt path for {prompt_type} in {mode} mode: {prompt_path}")
+    return prompt_path
 
 def load_prompt(mode: PromptMode, prompt_type: PromptType) -> str:
     """
@@ -23,21 +53,11 @@ def load_prompt(mode: PromptMode, prompt_type: PromptType) -> str:
         FileNotFoundError: If the prompt file doesn't exist
         ValueError: If invalid mode or prompt type is provided
     """
-    # Validate inputs
-    if mode not in ("mzn", "pysat", "z3"):
-        raise ValueError(f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3")
+    # Get the prompt path
+    prompt_path = get_prompt_path(mode, prompt_type)
     
-    if prompt_type not in ("instructions", "review"):
-        raise ValueError(f"Invalid prompt type: {prompt_type}. Must be one of: instructions, review")
-    
-    # Get the base prompts directory path
-    base_path = Path(__file__).parent.parent.parent.parent / "prompts"
-    
-    if not base_path.exists():
-        raise FileNotFoundError(f"Prompts directory not found at: {base_path}")
-    
-    # Construct the full path to the prompt file
-    prompt_path = base_path / mode / f"{prompt_type}.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Prompts directory not found at: {prompt_path.parent}")
     
     logger.debug(f"Loading {prompt_type} prompt for {mode} mode from: {prompt_path}")
     
