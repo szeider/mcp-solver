@@ -6,7 +6,7 @@ The implementation follows the canonical pattern for ReAct agents but is customi
 MCP Solver's specific use case.
 """
 
-from typing import Annotated, Dict, List, Optional, Sequence, TypedDict, Any, Union, Literal, Callable
+from typing import Annotated, Dict, List, Optional, Sequence, TypedDict, Any, Union, Literal, Callable, Tuple
 import sys
 import asyncio
 import json
@@ -160,6 +160,8 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
     
     # Process each tool call
     tool_results = []
+    combined_state_updates = {}
+    
     for tool_call in tool_calls:
         # Extract tool information using a normalized approach
         tool_info = extract_tool_info(tool_call)
@@ -188,8 +190,13 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         
         # Get the tool and execute it
         tool = tools_by_name[tool_name]
-        result = execute_tool_safely(tool, tool_name, tool_id, tool_args, loop)
-        tool_results.append(result)
+        
+        # Execute the tool and get both the message and state updates
+        tool_message, state_updates = execute_tool_safely(tool, tool_name, tool_id, tool_args, loop)
+        tool_results.append(tool_message)
+        
+        # Merge any state updates
+        combined_state_updates.update(state_updates)
     
     # Update tool usage again after execution
     try:
@@ -199,8 +206,14 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
     except Exception:
         pass
     
-    # Return updated state with tool messages and tool usage added
-    return {"messages": tool_results, "mem_tool_usage": tool_usage}
+    # Return updated state with tool messages, tool usage, and any other state updates
+    result = {"messages": tool_results, "mem_tool_usage": tool_usage}
+    
+    # Add any state updates from tools
+    if combined_state_updates:
+        result.update(combined_state_updates)
+        
+    return result
 
 
 def extract_tool_info(tool_call: Any) -> Dict[str, Any]:
@@ -263,7 +276,7 @@ def extract_tool_info(tool_call: Any) -> Dict[str, Any]:
     }
 
 
-def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args: Dict[str, Any], loop: asyncio.AbstractEventLoop) -> ToolMessage:
+def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args: Dict[str, Any], loop: asyncio.AbstractEventLoop) -> Tuple[ToolMessage, Dict[str, Any]]:
     """Execute a tool safely, handling errors and timeouts.
     
     Args:
@@ -274,10 +287,15 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         loop: The event loop to use for async execution
         
     Returns:
-        A ToolMessage with the result or error
+        A tuple containing:
+        - ToolMessage with the result or error
+        - Dictionary with state updates
     """
     # Global declaration at the beginning of the function
     global mem_solution
+    
+    # Dictionary for state updates
+    state_updates = {}
     
     # Prepare call arguments for both formats
     call_args = tool_args
@@ -335,6 +353,8 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
                 extracted_values = values_match.group(1)
                 # Update the global mem_solution directly 
                 mem_solution = extracted_values
+                # Also add to state updates
+                state_updates["mem_solution"] = extracted_values
         
         # Create a tool message with the result
         tool_message = ToolMessage(
@@ -354,26 +374,32 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
                 values_match = re.search(r"'values':\s*(\{[^\}]+\})", result_str)
                 if values_match:
                     mem_solution = values_match.group(1)
+                    state_updates["mem_solution"] = values_match.group(1)
                 else:
                     mem_solution = result_str
+                    state_updates["mem_solution"] = result_str
             else:
                 mem_solution = result_str
+                state_updates["mem_solution"] = result_str
         
         # Special handling for get_model tool - store the raw model
         elif tool_name == "get_model":
-            # Store the raw model result directly
+            # Store the raw model result directly in state_updates
+            state_updates["mem_model"] = result_str
+            
+            # Keep function attribute for backward compatibility
             if not hasattr(execute_tool_safely, "mem_solution"):
                 execute_tool_safely.mem_solution = {}
             # This is the raw, unformatted Python model/solution
             execute_tool_safely.mem_solution[tool_id] = result
         
-        # Store in the static variable too
+        # Store in the static variable too for backward compatibility
         if not hasattr(execute_tool_safely, "mem_solution"):
             execute_tool_safely.mem_solution = {}
             
         execute_tool_safely.mem_solution[tool_id] = result_str
         
-        return tool_message
+        return tool_message, state_updates
         
     except Exception as e:
         # In case of error, create a tool message with error info
@@ -384,11 +410,13 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
         tb_str = traceback.format_exc()
         print(f"Traceback: {tb_str}", file=sys.stderr)
         
-        return ToolMessage(
+        tool_message = ToolMessage(
             content=error_msg,
             tool_call_id=tool_id,
             name=tool_name
         )
+        
+        return tool_message, state_updates
 
 
 # Step 3.5: Define the reviewer node function
@@ -798,64 +826,137 @@ def normalize_state(state) -> Dict:
     Returns:
         A normalized dictionary representation of the state
     """
-    # Check if it's already a dict with the expected structure
+    # First convert the state to a normalized dictionary format
     if isinstance(state, dict) and "messages" in state:
         # Copy all keys from the original state
-        normalized = dict(state)
-        return normalized
-    
-    # Handle object-style state (newer LangGraph versions)
-    if hasattr(state, "messages"):
+        normalized_state = dict(state)
+    elif hasattr(state, "messages"):
         # Try to convert all attributes to a dict
-        result = {"messages": state.messages}
+        normalized_state = {"messages": state.messages}
         # Copy other fields if they exist
         for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
                      "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
             if hasattr(state, field):
-                result[field] = getattr(state, field)
-        return result
-    
-    # Handle nested values dict pattern
-    if hasattr(state, "values") and isinstance(state.values, dict):
+                normalized_state[field] = getattr(state, field)
+    elif hasattr(state, "values") and isinstance(state.values, dict):
         # Start with messages
-        result = {}
+        normalized_state = {}
         if "messages" in state.values:
-            result["messages"] = state.values["messages"]
+            normalized_state["messages"] = state.values["messages"]
         
         # Copy other fields if they exist
         for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
                      "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
             if field in state.values:
-                result[field] = state.values[field]
-        
-        return result
-    
-    # Handle the case where state itself might be the messages
-    if isinstance(state, list) and all(isinstance(msg, BaseMessage) for msg in state):
-        return {"messages": state}
-    
-    # Handle the ToolNode output style from langgraph 0.3.18+
-    if isinstance(state, dict) and len(state) > 0:
+                normalized_state[field] = state.values[field]
+    elif isinstance(state, list) and all(isinstance(msg, BaseMessage) for msg in state):
+        normalized_state = {"messages": state}
+    elif isinstance(state, dict) and len(state) > 0:
         # Look for any node output that contains messages
+        normalized_state = {"messages": []}
         for node_name, node_output in state.items():
             if isinstance(node_output, dict) and "messages" in node_output:
-                return {"messages": node_output["messages"]}
-            elif isinstance(node_output, list) and all(isinstance(msg, BaseMessage) for msg in node_output):
-                return {"messages": node_output}
-    
-    # Fallback: If we can't determine the format, log warning and return empty dict with messages
-    print(f"Warning: Unrecognized state format: {type(state)}", file=sys.stderr)
-    
-    # Try to extract any messages if possible, otherwise return empty list
-    messages = []
-    if isinstance(state, dict):
-        # Look for any key that might contain messages
-        for key, value in state.items():
-            if isinstance(value, list) and value and isinstance(value[0], BaseMessage):
-                messages = value
+                normalized_state = {"messages": node_output["messages"]}
                 break
+            elif isinstance(node_output, list) and all(isinstance(msg, BaseMessage) for msg in node_output):
+                normalized_state = {"messages": node_output}
+                break
+    else:
+        # Fallback: If we can't determine the format, log warning and return empty dict with messages
+        print(f"Warning: Unrecognized state format: {type(state)}", file=sys.stderr)
+        
+        # Try to extract any messages if possible, otherwise return empty list
+        messages = []
+        if isinstance(state, dict):
+            # Look for any key that might contain messages
+            for key, value in state.items():
+                if isinstance(value, list) and value and isinstance(value[0], BaseMessage):
+                    messages = value
+                    break
+        
+        normalized_state = {"messages": messages}
     
-    return {"messages": messages}
+    # Now ensure all required fields have default values if missing
+    
+    # Handle solution - prefer state value, but fall back to global if needed
+    if "mem_solution" not in normalized_state or not normalized_state.get("mem_solution"):
+        # Get the global mem_solution variable
+        global mem_solution
+        
+        # If the global solution has been set, use it
+        if mem_solution != "No solution generated yet":
+            normalized_state["mem_solution"] = mem_solution
+        # Otherwise check if the function attribute has been set
+        elif hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
+            # Get the latest solution (using the last tool_id if there were multiple calls)
+            latest_solution = None
+            
+            # Check if we have a specifically extracted values field for Z3
+            if "values" in execute_tool_safely.mem_solution:
+                latest_solution = execute_tool_safely.mem_solution["values"]
+            else:
+                # Otherwise get the last solution added by a tool call
+                tool_ids = [k for k in execute_tool_safely.mem_solution.keys() if k != "values"]
+                if tool_ids:
+                    latest_solution = execute_tool_safely.mem_solution[tool_ids[-1]]
+            
+            if latest_solution:
+                normalized_state["mem_solution"] = latest_solution
+        else:
+            # Default value if no solution is found anywhere
+            normalized_state["mem_solution"] = "No solution generated yet"
+    
+    # Ensure token usage is in the normalized state
+    if "mem_tokens_used" not in normalized_state:
+        try:
+            token_counter = TokenCounter.get_instance()
+            normalized_state["mem_tokens_used"] = token_counter.get_total_tokens()
+        except Exception as e:
+            print(f"Warning: Could not access TokenCounter: {e}", file=sys.stderr)
+    
+    # Ensure tool usage is in the normalized state
+    try:
+        from mcp_solver.client.tool_stats import ToolStats
+        tool_stats = ToolStats.get_instance()
+        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
+            normalized_state["mem_tool_usage"] = dict(tool_stats.tool_calls)
+    except Exception as e:
+        print(f"Warning: Could not access ToolStats in run_agent: {e}", file=sys.stderr)
+    
+    # If review_result exists but mem_review_text doesn't, store review_result explanation in mem_review_text
+    if normalized_state.get("review_result") and "mem_review_text" not in normalized_state:
+        if isinstance(normalized_state["review_result"], dict):
+            # Store the explanation as review text
+            normalized_state["mem_review_text"] = normalized_state["review_result"].get("explanation", 
+                                               json.dumps(normalized_state["review_result"]))
+        else:
+            # Store the entire review result
+            normalized_state["mem_review_text"] = str(normalized_state["review_result"])
+    
+    # Ensure review verdict is in the normalized state
+    if "mem_review_verdict" not in normalized_state and normalized_state.get("review_result"):
+        if isinstance(normalized_state["review_result"], dict) and "correctness" in normalized_state["review_result"]:
+            normalized_state["mem_review_verdict"] = normalized_state["review_result"]["correctness"]
+    
+    # Print all state variables consistently for run_test.py to capture
+    # These prints should be the single source of truth for run_test.py
+    if "mem_tokens_used" in normalized_state:
+        print(f"mem_tokens_used: {normalized_state['mem_tokens_used']}")
+    
+    if "mem_review_verdict" in normalized_state:
+        print(f"mem_review_verdict: {normalized_state['mem_review_verdict']}")
+    
+    if normalized_state.get("mem_review_text"):
+        print(f"mem_review_text: {normalized_state['mem_review_text']}")
+    
+    if normalized_state.get("mem_solution"):
+        # Print solution to allow run_test.py to determine satisfiability
+        print(f"mem_solution: {normalized_state['mem_solution']}")
+    
+    if normalized_state.get("mem_tool_usage"):
+        print(f"mem_tool_usage: {json.dumps(normalized_state['mem_tool_usage'])}")
+    
+    return normalized_state
 
 
 class SyncCompatWrapper:
