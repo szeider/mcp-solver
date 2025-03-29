@@ -540,7 +540,14 @@ def main():
             return 1
         problem_files = [problem_path]
     else:
-        problem_files = glob.glob(os.path.join(problems_dir, "*.md"))
+        # Check if test.md exists in the problem directory, use it as default
+        default_test_path = os.path.join(problems_dir, "test.md")
+        if os.path.exists(default_test_path):
+            print(f"No problem specified, using default test: {default_test_path}")
+            problem_files = [default_test_path]
+        else:
+            # Fall back to all problems if test.md doesn't exist
+            problem_files = glob.glob(os.path.join(problems_dir, "*.md"))
     
     if not problem_files:
          # Construct absolute path for clarity in error message

@@ -46,9 +46,9 @@ run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 
 ```bash
 cd /path/to/mcp-solver
-run-test mzn    # Run all MiniZinc tests
-run-test pysat  # Run all PySAT tests
-run-test z3     # Run all Z3 tests
+run-test mzn    # Run MiniZinc test.md by default if present, otherwise all MiniZinc tests
+run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
+run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
 ```
 
 ### Running a Specific Problem
@@ -59,6 +59,8 @@ run-test mzn --problem tests/problems/mzn/nqueens.md
 run-test pysat --problem tests/problems/pysat/graph_coloring.md
 run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 ```
+
+Note: If no problem is specified, the system will look for a `test.md` file in the respective solver's problems directory and run that as a default test.
 
 ### Available Problems
 
