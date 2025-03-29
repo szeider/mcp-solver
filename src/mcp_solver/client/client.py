@@ -391,6 +391,11 @@ def parse_arguments():
     parser.add_argument(
         "--recursion-limit", type=int, help="Set the recursion limit for the agent"
     )
+    parser.add_argument(
+        "--result-path",
+        type=str,
+        help="Path to save JSON results file (includes directory and filename)",
+    )
     return parser.parse_args()
 
 
@@ -842,6 +847,44 @@ def display_combined_stats():
     else:
         console.print("[yellow]No tool usage or token statistics available for this run.[/yellow]")
 
+def generate_result_json(state, json_path):
+    """Generate and save JSON results file from state."""
+    # Create directories if they don't exist
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
+    
+    # Get token statistics
+    token_counter = TokenCounter.get_instance()
+    tokens = {
+        "react_input": token_counter.main_input_tokens,
+        "react_output": token_counter.main_output_tokens,
+        "reviewer_input": token_counter.reviewer_input_tokens,
+        "reviewer_output": token_counter.reviewer_output_tokens
+    }
+    
+    # Get tool usage statistics
+    tool_stats = ToolStats.get_instance()
+    tool_calls = tool_stats.tool_calls if tool_stats.enabled else {}
+    
+    # Prepare JSON data
+    json_data = {
+        "problem": state.get("mem_problem", ""),
+        "model": state.get("mem_model", "No model captured"),
+        "solution": state.get("mem_solution", "No solution generated"),
+        "review_text": state.get("review_result", {}).get("explanation", ""),
+        "review_verdict": state.get("review_result", {}).get("correctness", "unknown"),
+        "result": "correct" if state.get("review_result", {}).get("correctness") == "correct" else "incorrect",
+        "tool_calls": tool_calls,
+        "tokens": tokens
+    }
+    
+    # Save to file
+    try:
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, indent=4, ensure_ascii=False)
+        print(f"\nSaved JSON result to: {json_path}")
+    except Exception as e:
+        print(f"\nError saving JSON result: {str(e)}")
+
 async def main():
     """Main entry point for the client."""
     # Parse arguments
@@ -904,9 +947,16 @@ def main_cli():
     try:
         state = asyncio.run(main())
         
+        # Get the parsed arguments to access result_path
+        args = parse_arguments()
+        
         # Display statistics at the end
         display_combined_stats()
-
+        
+        # Generate and save JSON if result path provided
+        if args.result_path:
+            generate_result_json(state, args.result_path)
+            
         return 0
     except KeyboardInterrupt:
         print("\nOperation interrupted by user", file=sys.stderr)

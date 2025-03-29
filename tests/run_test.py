@@ -281,6 +281,14 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     if timeout and timeout != DEFAULT_TIMEOUT:
         # Assume test-client and test-client-mzn accept --timeout
         cmd += f" --timeout {timeout}"
+    
+    # If result path provided, forward it to client.py
+    if result_path:
+        # Create a standardized filename for the JSON output
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs(result_path, exist_ok=True)
+        json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
+        cmd += f" --result-path {json_filename}"
         
     # --- Setup for saving results ---
     output_dir = None
@@ -296,7 +304,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     review_content = ""
     tokens_used = 0
     review_verdict = "unknown"
-    mem_tool_usage = {}
     
     # Create a thread-safe dictionary to store output from the threads
     from threading import Lock
@@ -306,8 +313,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         "solution_content": "",
         "review_content": "",
         "tools_called": 0,
-        "review_verdict": "unknown",
-        "mem_tool_usage": {}
+        "review_verdict": "unknown"
     }
     
     # Define a closure for read_stream to access variables from run_test
@@ -324,7 +330,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         local_review_content = ""
         local_tools_called = 0
         local_review_verdict = "unknown"
-        local_mem_tool_usage = {}
         
         # Headers that should be formatted as boxes
         section_headers = {
@@ -361,16 +366,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                     local_review_verdict = verdict_match.group(1)
                     with output_lock:
                         shared_output["review_verdict"] = local_review_verdict
-            
-            if "mem_tool_usage:" in line:
-                try:
-                    tool_json = re.search(r'mem_tool_usage: (\{.+\})', line)
-                    if tool_json:
-                        local_mem_tool_usage = json.loads(tool_json.group(1))
-                        with output_lock:
-                            shared_output["mem_tool_usage"] = local_mem_tool_usage
-                except Exception as e:
-                    print(f"Error parsing mem_tool_usage: {e}")
             
             # Look for token usage information - need to correctly identify the line with COMBINED TOTAL
             if "Token" in line and "COMBINED TOTAL" in line:
@@ -573,7 +568,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         review_content = shared_output["review_content"]
         tools_called = shared_output["tools_called"]
         review_verdict = shared_output["review_verdict"]
-        mem_tool_usage = shared_output["mem_tool_usage"]
 
         # --- Process results --- 
         end_time = datetime.now()
@@ -583,9 +577,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         if save_results and output_dir:
              save_text_files(output_dir, problem_name, model_content, agent_response, config['model_ext'])
 
-        # If mem_tool_usage is populated, use it instead of scraped tool calls
-        tools_for_json = mem_tool_usage if mem_tool_usage else {k: v for k, v in tool_calls.items()}
-        
         # Map review verdict to a more standard result status if it exists
         if review_verdict and review_verdict != "unknown":
             if review_verdict == "correct":
@@ -593,51 +584,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             elif review_verdict == "incorrect":
                 result_status = "incorrect"
         
-        # Save JSON result if path provided (always save, regardless of success/fail/timeout)
-        if result_path:
-            # Get solution directly from mem_solution if available
-            mem_solution = "No solution generated yet"
-            mem_model = "No model captured yet"
-            
-            # Look for mem_solution and mem_model in output
-            for line in stdout_lines + stderr_lines:
-                if "mem_solution:" in line:
-                    solution_match = re.search(r'mem_solution: (.+)', line)
-                    if solution_match:
-                        mem_solution = solution_match.group(1).strip()
-                
-                if "mem_model:" in line:
-                    model_match = re.search(r'mem_model: (.+)', line)
-                    if model_match:
-                        mem_model = model_match.group(1).strip()
-            
-            # No fallback mechanism needed anymore since we're explicitly printing mem_solution
-            # in client.py when solve_model is called
-            
-            json_data = {
-                "problem": problem_content,
-                "model": mem_model if mem_model != "No model captured yet" else model_content,
-                "solution": mem_solution,
-                "review_text": review_content,
-                "review_verdict": review_verdict,
-                "result": result_status,
-                "tool_calls": tools_for_json if 'tools_for_json' in locals() else {},
-                "tokens_used": tokens_used
-            }
-            
-            # Create the filename with the required format
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            os.makedirs(result_path, exist_ok=True)
-            json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
-            
-            try:
-                with open(json_filename, 'w') as f:
-                    # Use a larger indentation for better readability and ensure_ascii=False for proper characters
-                    json.dump(json_data, f, indent=4, ensure_ascii=False)
-                print(f"\nSaved JSON result to: {json_filename}")
-            except Exception as e:
-                print(f"\nError saving JSON result to {json_filename}: {str(e)}")
-
         # Display tool usage statistics
         print_tool_stats(tool_calls, problem_name)
 
@@ -654,49 +600,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         # Catch potential errors during process setup or unexpected issues
         print(f"\n❌ An unexpected error occurred while testing {problem_name}: {str(e)}")
         result_status = "error"
-        # Attempt to save JSON even on error
-        if result_path:
-            # Get solution directly from mem_solution if available
-            mem_solution = "No solution generated yet"
-            mem_model = "No model captured yet"
-            
-            # Look for mem_solution and mem_model in output
-            for line in stdout_lines + stderr_lines:
-                if "mem_solution:" in line:
-                    solution_match = re.search(r'mem_solution: (.+)', line)
-                    if solution_match:
-                        mem_solution = solution_match.group(1).strip()
-                
-                if "mem_model:" in line:
-                    model_match = re.search(r'mem_model: (.+)', line)
-                    if model_match:
-                        mem_model = model_match.group(1).strip()
-            
-            # No fallback mechanism needed anymore
-            
-            json_data = {
-                "problem": problem_content,
-                "model": mem_model if mem_model != "No model captured yet" else model_content,
-                "solution": mem_solution,
-                "review_text": review_content,
-                "review_verdict": review_verdict,
-                "result": result_status,
-                "tool_calls": tools_for_json if 'tools_for_json' in locals() else {},
-                "tokens_used": tokens_used
-            }
-            
-            # Create the filename with the required format
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            os.makedirs(result_path, exist_ok=True)
-            json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
-            
-            try:
-                with open(json_filename, 'w') as f:
-                    # Use a larger indentation for better readability and ensure_ascii=False for proper characters
-                    json.dump(json_data, f, indent=4, ensure_ascii=False)
-                print(f"\nSaved JSON result to: {json_filename}")
-            except Exception as e:
-                print(f"\nError saving JSON result to {json_filename}: {str(e)}")
                 
         return False, Counter()
 
