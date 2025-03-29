@@ -24,9 +24,8 @@ import json
 # Now import the get_prompt_path function from the module
 from src.mcp_solver.core.prompt_loader import get_prompt_path
 
-# Import tool statistics and token counter
+# Import tool statistics
 from src.mcp_solver.client.tool_stats import ToolStats
-from src.mcp_solver.client.token_counter import TokenCounter
 
 # Import test configuration constants (excluding prompt files)
 from tests.test_config import (
