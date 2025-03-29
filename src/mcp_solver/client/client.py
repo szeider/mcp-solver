@@ -56,16 +56,6 @@ def format_token_count(count):
             # For ≥10M, use integer representation
             return f"{int(scaled)}M"
 
-# Custom agent implementation
-from mcp_solver.client.react_agent import (
-    create_custom_react_agent,
-    run_agent,
-    normalize_state,
-)
-
-# For testing purposes - force using the custom agent
-USE_CUSTOM_AGENT = True
-
 # Model codes mapping - single source of truth for available models
 MODEL_CODES = {
     "MC1": "AT:claude-3-7-sonnet-20250219",  # Anthropic Claude 3.7 direct
@@ -492,25 +482,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     sys.stdout.flush()
 
                     # Initialize the agent with tools - with simplified output
-                    if USE_CUSTOM_AGENT:
-                        # Extract system prompt from the messages list if present
-                        system_prompt = None
-                        system_messages = [
-                            msg
-                            for msg in state["messages"]
-                            if msg.get("role") == "system"
-                        ]
-                        if system_messages:
-                            system_prompt = system_messages[0].get("content")
-
-                        if not system_prompt:
-                            print("Warning: No system prompt found in messages!")
-
-                        agent = create_custom_react_agent(
-                            SOLVE_MODEL, wrapped_tools, system_prompt
-                        )
-                    else:
-                        agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
+                    agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
 
                     # Get recursion_limit from args (if provided), then from config, or default to 200
                     recursion_limit = args.recursion_limit if args is not None and hasattr(args, 'recursion_limit') else None
@@ -543,78 +515,28 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
 
                     try:
                         # Execute the agent
-                        if USE_CUSTOM_AGENT:
-                            # Create initial state with messages
-                            human_message = HumanMessage(
-                                content=state["messages"][-1]["content"]
+                        response = await agent.ainvoke(
+                            {"messages": state["messages"]}, config=config
+                        )
+
+                        # Extract and add the agent's response to state
+                        if (
+                            response.get("messages")
+                            and len(response["messages"]) > 0
+                        ):
+                            agent_reply = response["messages"][-1].content
+                            print(
+                                f"Agent reply received, length: {len(agent_reply)}",
+                                flush=True,
                             )
-
-                            try:
-                                # Run the custom agent
-                                final_state = await run_agent(
-                                    agent, human_message.content, config, state.get("review_prompt")
-                                )
-
-                                # Normalize the state for consistent format handling
-                                final_state = normalize_state(final_state)
-
-                                # Extract and add the agent's response to state
-                                if (
-                                    isinstance(final_state, dict)
-                                    and final_state.get("messages")
-                                    and len(final_state["messages"]) > 0
-                                ):
-                                    last_message = final_state["messages"][-1]
-                                    if hasattr(last_message, "content"):
-                                        agent_reply = last_message.content
-                                    else:
-                                        agent_reply = str(last_message)
-                                    print(
-                                        f"Agent reply received, length: {len(str(agent_reply))}",
-                                        flush=True,
-                                    )
-                                    state["messages"].append(
-                                        {"role": "assistant", "content": agent_reply}
-                                    )
-                                    
-                                    # Check if we have a review result and add it to state
-                                    if "review_result" in final_state:
-                                        state["review_result"] = final_state["review_result"]
-                                else:
-                                    print(
-                                        "Warning: No message content found in custom agent response",
-                                        flush=True,
-                                    )
-                            except Exception as e:
-                                error_msg = f"Error running custom agent: {str(e)}"
-                                print(error_msg, flush=True)
-                                state["messages"].append(
-                                    {"role": "assistant", "content": error_msg}
-                                )
+                            state["messages"].append(
+                                {"role": "assistant", "content": agent_reply}
+                            )
                         else:
-                            # Execute the built-in agent
-                            response = await agent.ainvoke(
-                                {"messages": state["messages"]}, config=config
+                            print(
+                                "Warning: No message content found in response",
+                                flush=True,
                             )
-
-                            # Extract and add the agent's response to state
-                            if (
-                                response.get("messages")
-                                and len(response["messages"]) > 0
-                            ):
-                                agent_reply = response["messages"][-1].content
-                                print(
-                                    f"Agent reply received, length: {len(agent_reply)}",
-                                    flush=True,
-                                )
-                                state["messages"].append(
-                                    {"role": "assistant", "content": agent_reply}
-                                )
-                            else:
-                                print(
-                                    "Warning: No message content found in response",
-                                    flush=True,
-                                )
                     except Exception as e:
                         error_msg = f"Error during LLM invocation: {str(e)}"
                         print(error_msg, flush=True)
@@ -654,7 +576,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         
     # Now that we have the updated state, run the reviewer directly
     # This ensures that the reviewer has access to the current state with the correct model and solution
-    if USE_CUSTOM_AGENT and SOLVE_MODEL and state.get("review_prompt"):
+    if SOLVE_MODEL and state.get("review_prompt"):
         try:
             # Simplified reviewer start message
             log_system("Entering Review agent")
