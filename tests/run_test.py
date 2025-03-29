@@ -279,7 +279,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
          print("Verbose flag enabled: Output will be printed in real-time.")
     
     if timeout and timeout != DEFAULT_TIMEOUT:
-        # Assume test-client and test-client-mzn accept --timeout
+        # Assume test-client accepts --timeout
         cmd += f" --timeout {timeout}"
     
     # If result path provided, forward it to client.py

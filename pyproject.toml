@@ -60,7 +60,6 @@ mcp-solver-mzn = "mcp_solver.core.__main__:main_mzn"
 mcp-solver-z3 = "mcp_solver.core.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.core.__main__:main_pysat"
 test-client = "mcp_solver.client.client:main_cli"
-test-client-react = "mcp_solver.client.client:main_cli"
 run-test = "tests.run_test:main"
 
 [tool.black]
