@@ -595,13 +595,40 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         
         # Save JSON result if path provided (always save, regardless of success/fail/timeout)
         if result_path:
+            # Get solution directly from mem_solution if available
+            mem_solution = "No solution generated yet"
+            # Look for mem_solution in output
+            for line in stdout_lines + stderr_lines:
+                if "mem_solution:" in line:
+                    solution_match = re.search(r'mem_solution: (.+)', line)
+                    if solution_match:
+                        mem_solution = solution_match.group(1).strip()
+                        break
+            
+            # If the value is still the default, extract from solve_model output
+            # This is a fallback for when mem_solution isn't properly updated
+            if mem_solution == "No solution generated yet":
+                for line in stdout_lines + stderr_lines:
+                    if "solve_model output:" in line and "'values':" in line:
+                        # This specifically handles the Z3 output format
+                        solution_values_match = re.search(r"'values':\s*(\{[^\}]+\})", line)
+                        if solution_values_match:
+                            mem_solution = solution_values_match.group(1)
+                            # Update stdout_lines to include the corrected mem_solution
+                            # This ensures it's available for the next time it's needed
+                            updated_line = f"mem_solution: {mem_solution}"
+                            stdout_lines.append(updated_line)
+                            print(updated_line)  # Also print it for immediate visibility
+                            break
+            
             json_data = {
                 "problem": problem_content,
                 "model": model_content,
-                "solution": solution_content,
-                "review": review_content,
+                "solution": mem_solution,
+                "review_text": review_content,
+                "review_verdict": review_verdict,
                 "result": result_status,
-                "tools_called": tools_for_json,
+                "tool_calls": tools_for_json if 'tools_for_json' in locals() else {},
                 "tokens_used": tokens_used
             }
             
@@ -612,7 +639,8 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             
             try:
                 with open(json_filename, 'w') as f:
-                    json.dump(json_data, f, indent=2)
+                    # Use a larger indentation for better readability and ensure_ascii=False for proper characters
+                    json.dump(json_data, f, indent=4, ensure_ascii=False)
                 print(f"\nSaved JSON result to: {json_filename}")
             except Exception as e:
                 print(f"\nError saving JSON result to {json_filename}: {str(e)}")
@@ -635,13 +663,40 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         result_status = "error"
         # Attempt to save JSON even on error
         if result_path:
+            # Get solution directly from mem_solution if available
+            mem_solution = "No solution generated yet"
+            # Look for mem_solution in output
+            for line in stdout_lines + stderr_lines:
+                if "mem_solution:" in line:
+                    solution_match = re.search(r'mem_solution: (.+)', line)
+                    if solution_match:
+                        mem_solution = solution_match.group(1).strip()
+                        break
+            
+            # If the value is still the default, extract from solve_model output
+            # This is a fallback for when mem_solution isn't properly updated
+            if mem_solution == "No solution generated yet":
+                for line in stdout_lines + stderr_lines:
+                    if "solve_model output:" in line and "'values':" in line:
+                        # This specifically handles the Z3 output format
+                        solution_values_match = re.search(r"'values':\s*(\{[^\}]+\})", line)
+                        if solution_values_match:
+                            mem_solution = solution_values_match.group(1)
+                            # Update stdout_lines to include the corrected mem_solution
+                            # This ensures it's available for the next time it's needed
+                            updated_line = f"mem_solution: {mem_solution}"
+                            stdout_lines.append(updated_line)
+                            print(updated_line)  # Also print it for immediate visibility
+                            break
+            
             json_data = {
                 "problem": problem_content,
                 "model": model_content,
-                "solution": solution_content,
-                "review": review_content,
+                "solution": mem_solution,
+                "review_text": review_content,
+                "review_verdict": review_verdict,
                 "result": result_status,
-                "tools_called": tools_called,
+                "tool_calls": tools_for_json if 'tools_for_json' in locals() else {},
                 "tokens_used": tokens_used
             }
             
@@ -652,10 +707,11 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             
             try:
                 with open(json_filename, 'w') as f:
-                    json.dump(json_data, f, indent=2)
+                    # Use a larger indentation for better readability and ensure_ascii=False for proper characters
+                    json.dump(json_data, f, indent=4, ensure_ascii=False)
                 print(f"\nSaved JSON result to: {json_filename}")
-            except Exception as json_err:
-                print(f"\nError saving JSON result to {json_filename}: {str(json_err)}")
+            except Exception as e:
+                print(f"\nError saving JSON result to {json_filename}: {str(e)}")
                 
         return False, Counter()
 
