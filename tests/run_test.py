@@ -7,6 +7,7 @@ import os
 import subprocess
 import glob
 import sys
+import re
 from pathlib import Path
 
 # Add the project root to the Python path to enable imports from mcp_solver
@@ -79,30 +80,6 @@ def read_problem_file(file_path):
     except Exception as e:
         print(f"Error reading problem file: {str(e)}")
         return ""
-
-def save_json_result(result_path, solver_type, problem_name, problem_content, 
-                    model_content, solution_content, result_status):
-    """Save test results to a JSON file"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    os.makedirs(result_path, exist_ok=True)
-    
-    json_filename = os.path.join(result_path, f"{solver_type}_{problem_name}_{timestamp}.json")
-    
-    result_data = {
-        "problem": problem_content,
-        "model": model_content,
-        "solution": solution_content,
-        "result": result_status
-    }
-    
-    try:
-        with open(json_filename, 'w') as f:
-            json.dump(result_data, f, indent=2)
-        print(f"\nSaved JSON result to: {json_filename}")
-    except Exception as e:
-        print(f"\nError saving JSON result to {json_filename}: {str(e)}")
-        
-    return json_filename
 
 def save_text_files(output_dir, problem_name, model_content, agent_response, model_ext=".txt"):
     """Save model and response to text files"""
@@ -204,6 +181,13 @@ def track_tool_usage(line):
             if " " in tool_name:
                 tool_name = tool_name.split(" ")[0]
             return tool_name
+    
+    # Also look for tool calls in the format "system: ▶ clear_model called with args: {}"
+    if "system:" in line and "called with args" in line:
+        match = re.search(r'system: ▶ (\w+) called with args', line)
+        if match:
+            return match.group(1)
+    
     return None
 
 # ====================
@@ -305,15 +289,32 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     model_content = ""
     agent_response = ""
     solution_content = ""
+    review_content = ""
+    tokens_used = 0
+    
+    # Create a thread-safe dictionary to store output from the threads
+    from threading import Lock
+    output_lock = Lock()
+    shared_output = {
+        "tokens_used": 0,
+        "solution_content": "",
+        "review_content": "",
+        "tools_called": 0
+    }
     
     # Define a closure for read_stream to access variables from run_test
     def read_stream(stream, prefix, line_list):
         """Process output stream and format section headers appropriately."""
-        nonlocal model_content, agent_response, solution_content, tool_calls
+        nonlocal model_content, agent_response, tool_calls
         
         capture_model = False
         capture_response = False
         capture_solution = False
+        capture_review = False
+        local_tokens_used = 0
+        local_solution_content = ""
+        local_review_content = ""
+        local_tools_called = 0
         
         # Headers that should be formatted as boxes
         section_headers = {
@@ -336,6 +337,46 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             # Store in line_list for processing
             line_list.append(line)
             
+            # Look for token usage information - need to correctly identify the line with COMBINED TOTAL
+            if "Token" in line and "COMBINED TOTAL" in line:
+                # The token count should be in the last column, which is typically right-aligned
+                # Use a regex to extract numeric value with potential 'k' suffix
+                token_match = re.search(r'(\d+\.?\d*)k?', line)
+                if token_match:
+                    token_value = token_match.group(0)
+                    
+                    if token_value.endswith("k"):
+                        # Handle counts like "15k" by converting to thousands
+                        try:
+                            if "." in token_value:
+                                local_tokens_used = int(float(token_value.replace("k", "")) * 1000)
+                            else:
+                                local_tokens_used = int(token_value.replace("k", "")) * 1000
+                        except ValueError:
+                            pass  # Keep as 0 if conversion fails
+                    else:
+                        # Handle numeric counts
+                        try:
+                            local_tokens_used = int(token_value)
+                        except ValueError:
+                            pass  # Keep as 0 if conversion fails
+                    
+                    # Store in the shared dictionary
+                    with output_lock:
+                        shared_output["tokens_used"] = local_tokens_used
+            
+            # Look for the total tool count in the statistics table
+            if "Tool" in line and "TOTAL" in line and "│" in line:
+                # Extract the total tool count from the line
+                tool_match = re.search(r'TOTAL\s+\│\s+(\d+)', line)
+                if tool_match:
+                    try:
+                        local_tools_called = int(tool_match.group(1))
+                        with output_lock:
+                            shared_output["tools_called"] = local_tools_called
+                    except ValueError:
+                        pass  # Keep as 0 if conversion fails
+            
             # Direct match for agent entry lines (special case)
             if line.strip() == "system: Entering ReAct agent":
                 print(format_box("REACT AGENT"))
@@ -351,6 +392,15 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             # First check for exact matches
             if line_stripped in section_headers:
                 print(format_box(section_headers[line_stripped]))
+                
+                # Start capturing solution or review based on the header
+                if section_headers[line_stripped] == "SOLUTION RESULT":
+                    capture_solution = True
+                    local_solution_content = ""
+                elif section_headers[line_stripped] == "REVIEW RESULT":
+                    capture_review = True
+                    local_review_content = ""
+                
                 continue
             
             # Then check for equals-sign wrapped headers
@@ -371,6 +421,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             # Track tool usage
             tool_name = track_tool_usage(line)
             if tool_name:
+                print(f"DEBUG - Detected tool usage: {tool_name}")
                 tool_calls[tool_name] += 1
             
             # --- Content Capture Logic --- 
@@ -381,7 +432,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 continue
             elif capture_model:
                 # Stop capturing model if a tool call appears
-                if line_stripped.startswith("TOOL:"):
+                if line_stripped.startswith("TOOL:") or line_stripped.startswith("system:"):
                     capture_model = False
                 else:
                     model_content += line
@@ -400,17 +451,31 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 else:
                     agent_response += line
     
-            # Capture solution
-            if "=== SOLUTION ===" in line:
-                capture_solution = True
-                solution_content = ""
-                continue
-            elif capture_solution:
-                if "=== END SOLUTION ===" in line:
+            # Capture solution content
+            if capture_solution:
+                # Check for end of solution section - usually a newline or next section header
+                if line_stripped == "" or line_stripped.startswith("system:") or \
+                  (line_stripped.startswith("=") and "=" * 5 in line_stripped):
                     capture_solution = False
+                    # Store in shared dictionary
+                    with output_lock:
+                        shared_output["solution_content"] = local_solution_content
                 else:
-                    solution_content += line
-    
+                    local_solution_content += line
+            
+            # Capture review content
+            if capture_review:
+                # Check for end of review section - usually ends with a blank line or
+                # starts a new section
+                if line_stripped == "" or line_stripped.startswith("system:") or \
+                  (line_stripped.startswith("=") and "=" * 5 in line_stripped):
+                    capture_review = False
+                    # Store in shared dictionary
+                    with output_lock:
+                        shared_output["review_content"] = local_review_content
+                else:
+                    local_review_content += line
+
     # --- Execute the command ---
     print(f"Running command: {cmd}")
     start_time = datetime.now()
@@ -454,6 +519,12 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         # Wait for reading threads to finish processing remaining output
         stdout_thread.join()
         stderr_thread.join()
+        
+        # Retrieve collected data from the shared dictionary
+        tokens_used = shared_output["tokens_used"]
+        solution_content = shared_output["solution_content"]
+        review_content = shared_output["review_content"]
+        tools_called = shared_output["tools_called"]
 
         # --- Process results --- 
         end_time = datetime.now()
@@ -465,15 +536,27 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
 
         # Save JSON result if path provided (always save, regardless of success/fail/timeout)
         if result_path:
-            save_json_result(
-                result_path, 
-                solver_name, 
-                problem_name, 
-                problem_content, 
-                model_content, 
-                solution_content, 
-                result_status # Use the determined status
-            )
+            json_data = {
+                "problem": problem_content,
+                "model": model_content,
+                "solution": solution_content,
+                "review": review_content,
+                "result": result_status,
+                "tools_called": tools_called,
+                "tokens_used": tokens_used
+            }
+            
+            # Create the filename with the required format
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            os.makedirs(result_path, exist_ok=True)
+            json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
+            
+            try:
+                with open(json_filename, 'w') as f:
+                    json.dump(json_data, f, indent=2)
+                print(f"\nSaved JSON result to: {json_filename}")
+            except Exception as e:
+                print(f"\nError saving JSON result to {json_filename}: {str(e)}")
 
         # Display tool usage statistics
         print_tool_stats(tool_calls, problem_name)
@@ -493,15 +576,28 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         result_status = "error"
         # Attempt to save JSON even on error
         if result_path:
-             save_json_result(
-                 result_path, 
-                 solver_name, 
-                 problem_name, 
-                 problem_content, 
-                 model_content, 
-                 solution_content, 
-                 result_status
-             )
+            json_data = {
+                "problem": problem_content,
+                "model": model_content,
+                "solution": solution_content,
+                "review": review_content,
+                "result": result_status,
+                "tools_called": tools_called,
+                "tokens_used": tokens_used
+            }
+            
+            # Create the filename with the required format
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            os.makedirs(result_path, exist_ok=True)
+            json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
+            
+            try:
+                with open(json_filename, 'w') as f:
+                    json.dump(json_data, f, indent=2)
+                print(f"\nSaved JSON result to: {json_filename}")
+            except Exception as json_err:
+                print(f"\nError saving JSON result to {json_filename}: {str(json_err)}")
+                
         return False, Counter()
 
 def main():
@@ -515,7 +611,7 @@ def main():
                        help=f"Timeout in seconds per problem (default: {DEFAULT_TIMEOUT})")
     parser.add_argument("--save", "-s", action="store_true", 
                         help="Save model and response text files to default results directory")
-    parser.add_argument("--resultpath", help="Path to save JSON results for each problem (enables JSON saving)")
+    parser.add_argument("--result", help="Path to folder where JSON results should be saved")
     args = parser.parse_args()
 
     solver_config = SOLVER_CONFIGS[args.solver]
@@ -571,7 +667,7 @@ def main():
             verbose=args.verbose, 
             timeout=args.timeout, 
             save_results=args.save,
-            result_path=args.resultpath
+            result_path=args.result
         )
         if success:
             success_count += 1
