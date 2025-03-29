@@ -224,6 +224,10 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
+                    
+                    # Explicitly print mem_solution for test runner to capture
+                    print(f"mem_solution: {wrap_tool.mem_solution}")
+                    sys.stdout.flush()
 
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
@@ -236,18 +240,27 @@ def wrap_tool(tool):
 
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
+                                
+                                # Explicitly print mem_model for test runner to capture
+                                print(f"mem_model: {wrap_tool.mem_model}")
+                                sys.stdout.flush()
 
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
-                            except Exception:
-                                pass  # Silently handle errors in get_model
+                            except Exception as e:
+                                log_system(f"Warning: Failed to capture model after solve: {str(e)}")
+                                pass  # Handle errors in get_model capture
 
                             break
 
-                # Capture get_model result
-                if tool_name == "get_model":
-                    # Create a global variable to store the model
-                    wrap_tool.mem_model = formatted
+                    # Capture get_model result
+                    if tool_name == "get_model":
+                        # Create a global variable to store the model
+                        wrap_tool.mem_model = formatted
+                        
+                        # Explicitly print mem_model for test runner to capture
+                        print(f"mem_model: {wrap_tool.mem_model}")
+                        sys.stdout.flush()
 
                 return result
             except Exception as e:
@@ -291,6 +304,10 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
+                    
+                    # Explicitly print mem_solution for test runner to capture
+                    print(f"mem_solution: {wrap_tool.mem_solution}")
+                    sys.stdout.flush()
 
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
@@ -307,18 +324,27 @@ def wrap_tool(tool):
 
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
+                                
+                                # Explicitly print mem_model for test runner to capture
+                                print(f"mem_model: {wrap_tool.mem_model}")
+                                sys.stdout.flush()
 
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
-                            except Exception:
-                                pass  # Silently handle errors in get_model
+                            except Exception as e:
+                                log_system(f"Warning: Failed to capture model after solve: {str(e)}")
+                                pass  # Handle errors in get_model capture
 
                             break
 
-                # Capture get_model result
-                if tool_name == "get_model":
-                    # Create a global variable to store the model
-                    wrap_tool.mem_model = formatted
+                    # Capture get_model result
+                    if tool_name == "get_model":
+                        # Create a global variable to store the model
+                        wrap_tool.mem_model = formatted
+                        
+                        # Explicitly print mem_model for test runner to capture
+                        print(f"mem_model: {wrap_tool.mem_model}")
+                        sys.stdout.flush()
 
                 return result
             except Exception as e:
@@ -611,6 +637,12 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     # Update state with any get_model results we captured during execution
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
+    
+    # Always print the current state's mem_solution and mem_model before review
+    # This ensures these values are available in the logs even if tools were never called
+    print(f"mem_solution: {state.get('mem_solution', 'No solution generated yet')}")
+    print(f"mem_model: {state.get('mem_model', 'No model captured yet')}")
+    sys.stdout.flush()
     
     # Display problem, model, and result before reviewing
     display_problem_model_result(state)

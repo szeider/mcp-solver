@@ -597,33 +597,26 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         if result_path:
             # Get solution directly from mem_solution if available
             mem_solution = "No solution generated yet"
-            # Look for mem_solution in output
+            mem_model = "No model captured yet"
+            
+            # Look for mem_solution and mem_model in output
             for line in stdout_lines + stderr_lines:
                 if "mem_solution:" in line:
                     solution_match = re.search(r'mem_solution: (.+)', line)
                     if solution_match:
                         mem_solution = solution_match.group(1).strip()
-                        break
+                
+                if "mem_model:" in line:
+                    model_match = re.search(r'mem_model: (.+)', line)
+                    if model_match:
+                        mem_model = model_match.group(1).strip()
             
-            # If the value is still the default, extract from solve_model output
-            # This is a fallback for when mem_solution isn't properly updated
-            if mem_solution == "No solution generated yet":
-                for line in stdout_lines + stderr_lines:
-                    if "solve_model output:" in line and "'values':" in line:
-                        # This specifically handles the Z3 output format
-                        solution_values_match = re.search(r"'values':\s*(\{[^\}]+\})", line)
-                        if solution_values_match:
-                            mem_solution = solution_values_match.group(1)
-                            # Update stdout_lines to include the corrected mem_solution
-                            # This ensures it's available for the next time it's needed
-                            updated_line = f"mem_solution: {mem_solution}"
-                            stdout_lines.append(updated_line)
-                            print(updated_line)  # Also print it for immediate visibility
-                            break
+            # No fallback mechanism needed anymore since we're explicitly printing mem_solution
+            # in client.py when solve_model is called
             
             json_data = {
                 "problem": problem_content,
-                "model": model_content,
+                "model": mem_model if mem_model != "No model captured yet" else model_content,
                 "solution": mem_solution,
                 "review_text": review_content,
                 "review_verdict": review_verdict,
@@ -665,33 +658,25 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         if result_path:
             # Get solution directly from mem_solution if available
             mem_solution = "No solution generated yet"
-            # Look for mem_solution in output
+            mem_model = "No model captured yet"
+            
+            # Look for mem_solution and mem_model in output
             for line in stdout_lines + stderr_lines:
                 if "mem_solution:" in line:
                     solution_match = re.search(r'mem_solution: (.+)', line)
                     if solution_match:
                         mem_solution = solution_match.group(1).strip()
-                        break
+                
+                if "mem_model:" in line:
+                    model_match = re.search(r'mem_model: (.+)', line)
+                    if model_match:
+                        mem_model = model_match.group(1).strip()
             
-            # If the value is still the default, extract from solve_model output
-            # This is a fallback for when mem_solution isn't properly updated
-            if mem_solution == "No solution generated yet":
-                for line in stdout_lines + stderr_lines:
-                    if "solve_model output:" in line and "'values':" in line:
-                        # This specifically handles the Z3 output format
-                        solution_values_match = re.search(r"'values':\s*(\{[^\}]+\})", line)
-                        if solution_values_match:
-                            mem_solution = solution_values_match.group(1)
-                            # Update stdout_lines to include the corrected mem_solution
-                            # This ensures it's available for the next time it's needed
-                            updated_line = f"mem_solution: {mem_solution}"
-                            stdout_lines.append(updated_line)
-                            print(updated_line)  # Also print it for immediate visibility
-                            break
+            # No fallback mechanism needed anymore
             
             json_data = {
                 "problem": problem_content,
-                "model": model_content,
+                "model": mem_model if mem_model != "No model captured yet" else model_content,
                 "solution": mem_solution,
                 "review_text": review_content,
                 "review_verdict": review_verdict,
