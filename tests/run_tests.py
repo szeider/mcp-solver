@@ -36,6 +36,41 @@ from test_config import (
 # Shared Utility Functions
 # ====================
 
+def format_box(text, width=None, style="single"):
+    """Format text in a box with unified styling.
+    
+    Args:
+        text (str): Text to display in box
+        width (int, optional): Fixed width for the box. If None, auto-calculate from text length
+        style (str): Box style - 'single', 'double', 'header', or 'section'
+    
+    Returns:
+        str: Formatted box as string
+    """
+    if width is None:
+        width = len(text) + 4  # Default padding
+    
+    padded_text = text.center(width - 4)
+    
+    if style == "header":
+        # Simple header style for major sections
+        return f"\n{'=' * width}\n{padded_text.center(width)}\n{'=' * width}"
+    elif style == "section":
+        # Simple section marker
+        return f"\n{'-' * width}\n{padded_text.center(width)}\n{'-' * width}"
+    elif style == "double":
+        # Double-line box style
+        top = f"╔{'═' * (width - 2)}╗"
+        middle = f"║ {padded_text} ║"
+        bottom = f"╚{'═' * (width - 2)}╝"
+        return f"\n{top}\n{middle}\n{bottom}"
+    else:
+        # Single-line box style (default)
+        top = f"┌{'─' * (width - 2)}┐"
+        middle = f"│ {padded_text} │"
+        bottom = f"└{'─' * (width - 2)}┘"
+        return f"\n{top}\n{middle}\n{bottom}"
+
 def read_problem_file(file_path):
     """Read content from a problem file"""
     try:
@@ -75,7 +110,6 @@ def save_text_files(output_dir, problem_name, model_content, agent_response, mod
     os.makedirs(output_dir, exist_ok=True)
     
     response_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_response.txt")
-    # Use the provided model extension
     model_file = os.path.join(output_dir, f"{problem_name}_{timestamp}_model{model_ext}")
     
     # Save model content
@@ -87,7 +121,6 @@ def save_text_files(output_dir, problem_name, model_content, agent_response, mod
         except Exception as e:
              print(f"\nError saving model file to {model_file}: {str(e)}")
 
-    
     # Save agent response
     if agent_response:
         try:
@@ -106,35 +139,60 @@ def print_tool_stats(tool_calls, problem_name=None):
 
     title = f"Tool Usage Statistics for {problem_name}" if problem_name else "Overall Tool Usage Statistics"
     max_tool_len = max(len(tool) for tool in tool_calls.keys()) if tool_calls else 0
-    max_len = max(len(title), max_tool_len + 10) # Adjust 10 for count formatting
-
-    print(f"\n┌{'─' * (max_len + 2)}┐")
-    print(f"│ {title.center(max_len)} │")
-    print(f"├{'─' * (max_tool_len + 2)}┬{'─' * (max_len - max_tool_len - 1)}┐")
-    print(f"│ {'Tool'.ljust(max_tool_len)} │ {'Calls'.rjust(max_len - max_tool_len - 2)} │") # Adjusted alignment
-    print(f"├{'─' * (max_tool_len + 2)}┼{'─' * (max_len - max_tool_len - 1)}┤")
+    box_width = max(len(title) + 6, max_tool_len + 15)
+    
+    print(f"\n┌{'─' * (box_width - 2)}┐")
+    print(f"│ {title.center(box_width - 4)} │")
+    print(f"├{'─' * (max_tool_len + 2)}┬{'─' * (box_width - max_tool_len - 5)}┤")
+    print(f"│ {'Tool'.ljust(max_tool_len)} │ {'Calls'.rjust(box_width - max_tool_len - 7)} │")
+    print(f"├{'─' * (max_tool_len + 2)}┼{'─' * (box_width - max_tool_len - 5)}┤")
 
     # Sort by most frequently used tools
     for tool, count in sorted(tool_calls.items(), key=lambda x: x[1], reverse=True):
-        print(f"│ {tool.ljust(max_tool_len)} │ {str(count).rjust(max_len - max_tool_len - 2)} │")
+        print(f"│ {tool.ljust(max_tool_len)} │ {str(count).rjust(box_width - max_tool_len - 7)} │")
     
-    print(f"├{'─' * (max_tool_len + 2)}┼{'─' * (max_len - max_tool_len - 1)}┤")
+    print(f"├{'─' * (max_tool_len + 2)}┼{'─' * (box_width - max_tool_len - 5)}┤")
     total_calls = sum(tool_calls.values())
-    print(f"│ {'TOTAL'.ljust(max_tool_len)} │ {str(total_calls).rjust(max_len - max_tool_len - 2)} │")
-    print(f"└{'─' * (max_tool_len + 2)}┴{'─' * (max_len - max_tool_len - 1)}┘")
+    print(f"│ {'TOTAL'.ljust(max_tool_len)} │ {str(total_calls).rjust(box_width - max_tool_len - 7)} │")
+    print(f"└{'─' * (max_tool_len + 2)}┴{'─' * (box_width - max_tool_len - 5)}┘")
+
+def format_section_marker(text):
+    """Detect and format section markers in output texts"""
+    # Simple markers we directly look for
+    formatted_markers = {
+        "PROBLEM STATEMENT:": "PROBLEM STATEMENT",
+        "CONSTRAINTS:": "CONSTRAINTS",
+        "VARIABLES:": "VARIABLES",
+        "OBJECTIVE:": "OBJECTIVE",
+        "=== SOLUTION ===": "SOLUTION",
+        "=== END SOLUTION ===": "END SOLUTION"
+    }
+    
+    # Check for exact marker matches
+    for marker, display_text in formatted_markers.items():
+        if marker in text:
+            return format_box(display_text)
+    
+    # Check for equals-sign wrapped headers (like "======= HEADER =======")
+    if text.startswith("=") and "=" * 3 in text:
+        # Extract the header text between the equals signs
+        parts = text.split("=")
+        # Find the non-empty part that likely contains the header
+        for part in parts:
+            cleaned = part.strip()
+            if cleaned and len(cleaned) > 1:  # Avoid single characters
+                return format_box(cleaned)
+                
+    return None
 
 def print_summary(problem_files, success_count, failed_tests, all_tool_calls, solver_type):
-    """Print summary of test results in a box"""
-    # Return success code if all tests passed, error code otherwise
-    if len(failed_tests) == 0:
-        return 0
-    else:
-        # Print failed tests without the summary box
-        if failed_tests:
-            print("\nFailed tests:")
-            for test in failed_tests:
-                print(f"  - {test}")
+    """Print summary of test results"""
+    if failed_tests:
+        print("\nFailed tests:")
+        for test in failed_tests:
+            print(f"  - {test}")
         return 1
+    return 0
 
 def track_tool_usage(line):
     """Extract tool usage from a line of output"""
@@ -213,13 +271,9 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     """Run a single problem through the appropriate test-client"""
     problem_name = os.path.basename(problem_file).replace('.md', '')
     
-    # Create a nice box for the header
+    # Use the unified box formatting
     header_text = f"Testing problem [{solver_name.upper()}]: {problem_name}"
-    box_width = len(header_text) + 2  # Add some padding
-    
-    print(f"\n┌{'─' * (box_width + 2)}┐")
-    print(f"│ {header_text.center(box_width)} │")
-    print(f"└{'─' * (box_width + 2)}┘")
+    print(format_box(header_text))
     
     abs_problem_path = os.path.abspath(problem_file)
     
@@ -235,8 +289,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     # Add common args: timeout and verbose if supported
     if verbose:
          print("Verbose flag enabled: Output will be printed in real-time.")
-         # If test-client/test-client-mzn support a standard --verbose, it could be added here.
-         # cmd += " --verbose" 
     
     if timeout and timeout != DEFAULT_TIMEOUT:
         # Assume test-client and test-client-mzn accept --timeout
@@ -256,17 +308,64 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     
     # Define a closure for read_stream to access variables from run_test
     def read_stream(stream, prefix, line_list):
+        """Process output stream and format section headers appropriately."""
         nonlocal model_content, agent_response, solution_content, tool_calls
         
         capture_model = False
         capture_response = False
         capture_solution = False
         
+        # Headers that should be formatted as boxes
+        section_headers = {
+            "PROBLEM STATEMENT:": "PROBLEM STATEMENT",
+            "PROBLEM STATEMENT": "PROBLEM STATEMENT",
+            "FINAL MODEL:": "FINAL MODEL",
+            "FINAL MODEL": "FINAL MODEL",
+            "SOLUTION RESULT:": "SOLUTION RESULT",
+            "SOLUTION RESULT": "SOLUTION RESULT",
+            "REVIEW RESULT:": "REVIEW RESULT",
+            "REVIEW RESULT": "REVIEW RESULT",
+            "CONSTRAINTS:": "CONSTRAINTS",
+            "VARIABLES:": "VARIABLES",
+            "OBJECTIVE:": "OBJECTIVE",
+            "=== SOLUTION ===": "SOLUTION",
+            "=== END SOLUTION ===": "END SOLUTION"
+        }
+        
         for line in iter(stream.readline, ''):
             # Store in line_list for processing
             line_list.append(line)
             
-            # Print the line in real-time
+            # Direct match for agent entry lines (special case)
+            if line.strip() == "system: Entering ReAct agent":
+                print(format_box("REACT AGENT"))
+                continue
+            
+            if line.strip() == "system: Entering Review agent":
+                print(format_box("REVIEW AGENT"))
+                continue
+            
+            # Check for section headers
+            line_stripped = line.strip()
+            
+            # First check for exact matches
+            if line_stripped in section_headers:
+                print(format_box(section_headers[line_stripped]))
+                continue
+            
+            # Then check for equals-sign wrapped headers
+            if "=" * 10 in line and not line_stripped.startswith("system:"):
+                # Skip pure equals-sign separator lines
+                if line_stripped == "=" * len(line_stripped):
+                    continue
+                
+                # Extract header text between equals signs
+                text = line_stripped.replace("=", "").strip()
+                if text and len(text) > 1:  # Avoid single characters
+                    print(format_box(text))
+                    continue
+            
+            # If no special formatting needed, print the line as is
             print(line, end='')
             
             # Track tool usage
@@ -275,8 +374,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 tool_calls[tool_name] += 1
             
             # --- Content Capture Logic --- 
-            cleaned_line = line
-            
             # Capture model
             if "Current model:" in line:
                 capture_model = True
@@ -284,24 +381,24 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 continue
             elif capture_model:
                 # Stop capturing model if a tool call appears
-                if line.strip().startswith("TOOL:"):
+                if line_stripped.startswith("TOOL:"):
                     capture_model = False
                 else:
-                    model_content += cleaned_line 
+                    model_content += line
             
             # Capture agent response
             if "Agent reply received" in line:
                 capture_response = True
-                agent_response = "" # Reset for final response
+                agent_response = ""  # Reset for final response
                 continue
             elif capture_response:
-                 # Heuristic: stop capturing response at separators or specific prefixes
+                # Heuristic: stop capturing response at separators or specific prefixes
                 if "------------------------------------------------------------" in line or \
                    line.startswith("STDERR:") or \
                    line.startswith("[CLIENT OUTPUT END]"): 
                     capture_response = False
                 else:
-                    agent_response += cleaned_line
+                    agent_response += line
     
             # Capture solution
             if "=== SOLUTION ===" in line:
@@ -312,7 +409,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 if "=== END SOLUTION ===" in line:
                     capture_solution = False
                 else:
-                    solution_content += cleaned_line
+                    solution_content += line
     
     # --- Execute the command ---
     print(f"Running command: {cmd}")
@@ -321,8 +418,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     result_status = "error" # Default status
 
     try:
-        print(f"{'-'*60}\n[CLIENT OUTPUT START]\n{'-'*60}")
-        
         # Use Popen with threading for output capture
         process = subprocess.Popen(
             cmd, 
@@ -353,7 +448,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             # Give threads a moment to finish reading potentially buffered output
             stdout_thread.join(timeout=1) 
             stderr_thread.join(timeout=1)
-            print(f"\n{'-'*60}\n[CLIENT OUTPUT END - TIMED OUT]\n{'-'*60}")
             print(f"\n⏱️ Test timed out after {timeout} seconds: {problem_name}")
             result_status = "timeout"
 
@@ -395,7 +489,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
 
     except Exception as e:
         # Catch potential errors during process setup or unexpected issues
-        print(f"\n{'-'*60}\n[CLIENT OUTPUT END - ERROR]\n{'-'*60}")
         print(f"\n❌ An unexpected error occurred while testing {problem_name}: {str(e)}")
         result_status = "error"
         # Attempt to save JSON even on error
