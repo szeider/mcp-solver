@@ -45,6 +45,14 @@ class AgentState(TypedDict):
     mem_model: Optional[str] = None
     mem_solution: Optional[str] = None
     review_result: Optional[Dict[str, Any]] = None
+    # New field for token usage
+    mem_tokens_used: Optional[int] = None
+    # New field for review verdict
+    mem_review_verdict: Optional[str] = None
+    # New field for tool usage
+    mem_tool_usage: Optional[Dict[str, int]] = None
+    # New field for full review text
+    mem_review_text: Optional[str] = None
 
 
 # Step 2: Define the model node function
@@ -79,8 +87,11 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     # Track output tokens using the TokenCounter
     token_counter.count_main_output(response.content)
     
-    # Return updated state with model response added
-    return {"messages": [response]}
+    # Get total tokens for state
+    total_tokens = token_counter.get_total_tokens()
+    
+    # Return updated state with model response added and token count
+    return {"messages": [response], "mem_tokens_used": total_tokens}
 
 
 # Step 3: Define the tools node function
@@ -95,6 +106,16 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         Updated state with tool messages added
     """
     messages = state["messages"]
+    
+    # Copy tool usage from ToolStats singleton at the beginning
+    tool_usage = {}
+    try:
+        from mcp_solver.client.tool_stats import ToolStats
+        tool_stats = ToolStats.get_instance()
+        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
+            tool_usage = dict(tool_stats.tool_calls)
+    except Exception as e:
+        print(f"Warning: Could not access ToolStats: {e}", file=sys.stderr)
     
     # Find the last AI message with tool calls
     tool_calls = []
@@ -113,9 +134,9 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
             tool_calls = additional_kwargs["tool_calls"]
             break
     
-    # If no tool calls were found, return empty messages
+    # If no tool calls were found, return empty messages but preserve the tool usage
     if not tool_calls:
-        return {"messages": []}
+        return {"messages": [], "mem_tool_usage": tool_usage}
     
     # Set up async execution environment
     try:
@@ -166,8 +187,16 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         result = execute_tool_safely(tool, tool_name, tool_id, tool_args, loop)
         tool_results.append(result)
     
-    # Return updated state with tool messages added
-    return {"messages": tool_results}
+    # Update tool usage again after execution
+    try:
+        tool_stats = ToolStats.get_instance()
+        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
+            tool_usage = dict(tool_stats.tool_calls)
+    except Exception:
+        pass
+    
+    # Return updated state with tool messages and tool usage added
+    return {"messages": tool_results, "mem_tool_usage": tool_usage}
 
 
 def extract_tool_info(tool_call: Any) -> Dict[str, Any]:
@@ -433,9 +462,17 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
             # Silently handle parsing errors
             pass
         
+        # Extract verdict from review result
+        mem_review_verdict = review_result.get("correctness", "unknown")
+        
+        # Store full review content for review_text
+        mem_review_text = response.content
+        
         # Return both the review result and keep existing messages
         return {
             "review_result": review_result, 
+            "mem_review_verdict": mem_review_verdict,
+            "mem_review_text": mem_review_text,
             "messages": state.get("messages", [])  # Preserve existing messages
         }
     except Exception as e:
@@ -445,6 +482,8 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                 "correctness": "unknown", 
                 "explanation": f"Error running reviewer: {str(e)}"
             },
+            "mem_review_verdict": "unknown",
+            "mem_review_text": f"Error running reviewer: {str(e)}",
             "messages": state.get("messages", [])  # Preserve existing messages
         }
 
@@ -578,7 +617,6 @@ def create_react_agent(
     return SyncCompatWrapper(async_agent)
 
 
-# Function to run the agent on a human input
 async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None, review_prompt: Optional[str] = None):
     """
     Async function for running an agent on a human input message.
@@ -631,6 +669,35 @@ async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None
     if hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
         normalized_state["mem_solution"] = list(execute_tool_safely.mem_solution.values())[-1]
     
+    # Ensure tool usage is in the normalized state
+    try:
+        from mcp_solver.client.tool_stats import ToolStats
+        tool_stats = ToolStats.get_instance()
+        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
+            normalized_state["mem_tool_usage"] = dict(tool_stats.tool_calls)
+    except Exception as e:
+        print(f"Warning: Could not access ToolStats in run_agent: {e}", file=sys.stderr)
+    
+    # If review_result exists, store it in mem_review_text
+    if "review_result" in normalized_state and normalized_state["review_result"]:
+        normalized_state["mem_review_text"] = normalized_state["review_result"]
+    
+    # Print token usage so run_test.py can capture it
+    if "mem_tokens_used" in normalized_state:
+        print(f"mem_tokens_used: {normalized_state['mem_tokens_used']}")
+    
+    # Print review verdict so run_test.py can capture it
+    if "mem_review_verdict" in normalized_state:
+        print(f"mem_review_verdict: {normalized_state['mem_review_verdict']}")
+    
+    # Print review text so run_test.py can capture it
+    if "mem_review_text" in normalized_state and normalized_state["mem_review_text"]:
+        print(f"mem_review_text: {normalized_state['mem_review_text']}")
+    
+    # Print tool usage so run_test.py can capture it
+    if "mem_tool_usage" in normalized_state and normalized_state["mem_tool_usage"]:
+        print(f"mem_tool_usage: {json.dumps(normalized_state['mem_tool_usage'])}")
+    
     return normalized_state
 
 
@@ -648,16 +715,35 @@ def normalize_state(state) -> Dict:
     """
     # Check if it's already a dict with the expected structure
     if isinstance(state, dict) and "messages" in state:
-        return state
+        # Copy all keys from the original state
+        normalized = dict(state)
+        return normalized
     
     # Handle object-style state (newer LangGraph versions)
     if hasattr(state, "messages"):
-        return {"messages": state.messages}
+        # Try to convert all attributes to a dict
+        result = {"messages": state.messages}
+        # Copy other fields if they exist
+        for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
+                     "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
+            if hasattr(state, field):
+                result[field] = getattr(state, field)
+        return result
     
     # Handle nested values dict pattern
     if hasattr(state, "values") and isinstance(state.values, dict):
+        # Start with messages
+        result = {}
         if "messages" in state.values:
-            return {"messages": state.values["messages"]}
+            result["messages"] = state.values["messages"]
+        
+        # Copy other fields if they exist
+        for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
+                     "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
+            if field in state.values:
+                result[field] = state.values[field]
+        
+        return result
     
     # Handle the case where state itself might be the messages
     if isinstance(state, list) and all(isinstance(msg, BaseMessage) for msg in state):

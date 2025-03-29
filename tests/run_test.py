@@ -24,6 +24,10 @@ import json
 # Now import the get_prompt_path function from the module
 from src.mcp_solver.core.prompt_loader import get_prompt_path
 
+# Import tool statistics and token counter
+from src.mcp_solver.client.tool_stats import ToolStats
+from src.mcp_solver.client.token_counter import TokenCounter
+
 # Import test configuration constants (excluding prompt files)
 from tests.test_config import (
     MCP_CLIENT_DIR, 
@@ -291,6 +295,8 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
     solution_content = ""
     review_content = ""
     tokens_used = 0
+    review_verdict = "unknown"
+    mem_tool_usage = {}
     
     # Create a thread-safe dictionary to store output from the threads
     from threading import Lock
@@ -299,7 +305,9 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         "tokens_used": 0,
         "solution_content": "",
         "review_content": "",
-        "tools_called": 0
+        "tools_called": 0,
+        "review_verdict": "unknown",
+        "mem_tool_usage": {}
     }
     
     # Define a closure for read_stream to access variables from run_test
@@ -315,6 +323,8 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         local_solution_content = ""
         local_review_content = ""
         local_tools_called = 0
+        local_review_verdict = "unknown"
+        local_mem_tool_usage = {}
         
         # Headers that should be formatted as boxes
         section_headers = {
@@ -336,6 +346,31 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         for line in iter(stream.readline, ''):
             # Store in line_list for processing
             line_list.append(line)
+            
+            # Look for mem_ variables in the output
+            if "mem_tokens_used:" in line:
+                token_match = re.search(r'mem_tokens_used: (\d+)', line)
+                if token_match:
+                    local_tokens_used = int(token_match.group(1))
+                    with output_lock:
+                        shared_output["tokens_used"] = local_tokens_used
+            
+            if "mem_review_verdict:" in line:
+                verdict_match = re.search(r'mem_review_verdict: (\w+)', line)
+                if verdict_match:
+                    local_review_verdict = verdict_match.group(1)
+                    with output_lock:
+                        shared_output["review_verdict"] = local_review_verdict
+            
+            if "mem_tool_usage:" in line:
+                try:
+                    tool_json = re.search(r'mem_tool_usage: (\{.+\})', line)
+                    if tool_json:
+                        local_mem_tool_usage = json.loads(tool_json.group(1))
+                        with output_lock:
+                            shared_output["mem_tool_usage"] = local_mem_tool_usage
+                except Exception as e:
+                    print(f"Error parsing mem_tool_usage: {e}")
             
             # Look for token usage information - need to correctly identify the line with COMBINED TOTAL
             if "Token" in line and "COMBINED TOTAL" in line:
@@ -361,9 +396,10 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                         except ValueError:
                             pass  # Keep as 0 if conversion fails
                     
-                    # Store in the shared dictionary
+                    # Store in the shared dictionary if we don't already have a value from mem_tokens_used
                     with output_lock:
-                        shared_output["tokens_used"] = local_tokens_used
+                        if shared_output["tokens_used"] == 0:
+                            shared_output["tokens_used"] = local_tokens_used
             
             # Look for the total tool count in the statistics table
             if "Tool" in line and "TOTAL" in line and "│" in line:
@@ -403,6 +439,18 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 
                 continue
             
+            # Look for correctness indicators in review output
+            if "Correctness:" in line:
+                if "correct" in line:
+                    local_review_verdict = "correct"
+                elif "incorrect" in line:
+                    local_review_verdict = "incorrect"
+                else:
+                    local_review_verdict = "unknown"
+                    
+                with output_lock:
+                    shared_output["review_verdict"] = local_review_verdict
+            
             # Then check for equals-sign wrapped headers
             if "=" * 10 in line and not line_stripped.startswith("system:"):
                 # Skip pure equals-sign separator lines
@@ -421,7 +469,6 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
             # Track tool usage
             tool_name = track_tool_usage(line)
             if tool_name:
-                print(f"DEBUG - Detected tool usage: {tool_name}")
                 tool_calls[tool_name] += 1
             
             # --- Content Capture Logic --- 
@@ -525,6 +572,8 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         solution_content = shared_output["solution_content"]
         review_content = shared_output["review_content"]
         tools_called = shared_output["tools_called"]
+        review_verdict = shared_output["review_verdict"]
+        mem_tool_usage = shared_output["mem_tool_usage"]
 
         # --- Process results --- 
         end_time = datetime.now()
@@ -534,6 +583,16 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         if save_results and output_dir:
              save_text_files(output_dir, problem_name, model_content, agent_response, config['model_ext'])
 
+        # If mem_tool_usage is populated, use it instead of scraped tool calls
+        tools_for_json = mem_tool_usage if mem_tool_usage else {k: v for k, v in tool_calls.items()}
+        
+        # Map review verdict to a more standard result status if it exists
+        if review_verdict and review_verdict != "unknown":
+            if review_verdict == "correct":
+                result_status = "correct"
+            elif review_verdict == "incorrect":
+                result_status = "incorrect"
+        
         # Save JSON result if path provided (always save, regardless of success/fail/timeout)
         if result_path:
             json_data = {
@@ -542,7 +601,7 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
                 "solution": solution_content,
                 "review": review_content,
                 "result": result_status,
-                "tools_called": tools_called,
+                "tools_called": tools_for_json,
                 "tokens_used": tokens_used
             }
             
@@ -561,10 +620,10 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         # Display tool usage statistics
         print_tool_stats(tool_calls, problem_name)
 
-        if result_status == "success":
+        if result_status == "success" or result_status == "correct":
             print("Test completed successfully")
             return True, tool_calls
-        elif result_status == "failure":
+        elif result_status == "failure" or result_status == "incorrect":
              print(f"ERROR: Test failed with non-zero exit code ({exit_code})")
              return False, tool_calls
         else: # Timeout or Error

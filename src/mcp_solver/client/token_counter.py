@@ -148,3 +148,9 @@ class TokenCounter:
         table = self.get_stats_table()
         self.console.print("\n")
         self.console.print(table) 
+        
+    def get_total_tokens(self):
+        """Get the total number of tokens used."""
+        main_total = self.main_input_tokens + self.main_output_tokens
+        reviewer_total = self.reviewer_input_tokens + self.reviewer_output_tokens
+        return main_total + reviewer_total 
