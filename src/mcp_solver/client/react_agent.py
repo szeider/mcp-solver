@@ -436,6 +436,12 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
     mem_model = state.get("mem_model", "")
     mem_solution = state.get("mem_solution", "")
     
+    print("DEBUG - REVIEW PROCESS STARTING", flush=True)
+    print(f"DEBUG - Review prompt length: {len(review_prompt)} chars", flush=True)
+    print(f"DEBUG - Problem length: {len(mem_problem)} chars", flush=True)
+    print(f"DEBUG - Model length: {len(mem_model)} chars", flush=True)
+    print(f"DEBUG - Solution length: {len(mem_solution)} chars", flush=True)
+    
     # Process the solution to make it more readable if it's in JSON format
     processed_solution = mem_solution
     try:
@@ -484,8 +490,9 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                             processed_solution = "Solution values found:\n"
                             for var, value in value_matches:
                                 processed_solution += f"{var} = {value}\n"
-    except Exception:
-        # Silently handle errors in solution processing
+    except Exception as e:
+        # Log errors in solution processing
+        print(f"DEBUG - Error processing solution: {str(e)}", flush=True)
         pass
     
     # Create reviewer prompt using Template
@@ -496,8 +503,24 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
         SOLUTION=processed_solution
     )
     
-    # Request structured output
-    structured_prompt = f"{reviewer_prompt}\n\nPlease provide your review in the following JSON format:\n{{\"correctness\": \"[correct|incorrect|unknown]\", \"explanation\": \"Your detailed explanation\"}}"
+    print("DEBUG - Reviewer prompt after substitution:", flush=True)
+    print("======================================", flush=True)
+    print(reviewer_prompt[:500] + "..." if len(reviewer_prompt) > 500 else reviewer_prompt, flush=True)
+    print("======================================", flush=True)
+    
+    # Request structured output with clearer formatting instructions
+    structured_prompt = f"""{reviewer_prompt}
+
+IMPORTANT: Your answer MUST follow this exact JSON format:
+
+```json
+{{
+  "correctness": "correct",  // Must be exactly one of: "correct", "incorrect", or "unknown"
+  "explanation": "Your detailed explanation here"
+}}
+```
+
+DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object as shown above."""
     
     try:
         # Track reviewer input tokens using the TokenCounter
@@ -511,6 +534,12 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
         # Track reviewer output tokens using the TokenCounter
         token_counter.count_reviewer_output(response.content)
         
+        # Print the full response for debugging
+        print("DEBUG - Raw reviewer response:", flush=True)
+        print("======================================", flush=True)
+        print(response.content, flush=True)
+        print("======================================", flush=True)
+        
         # Try to parse JSON from the response
         review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
         try:
@@ -518,22 +547,103 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
             import re
             import json
             
-            # Try to find JSON pattern in the text
-            json_match = re.search(r'({.*})', response.content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict) and "correctness" in parsed:
-                    review_result = parsed
-        except Exception:
-            # Silently handle parsing errors
-            pass
+            # Find complete JSON objects by parsing the text carefully with brace matching
+            def extract_json_object(text):
+                # Find potential start of a JSON object
+                start_idx = text.find('{')
+                if start_idx == -1:
+                    return None
+                
+                # Count opening and closing braces to find the complete object
+                open_braces = 0
+                for i in range(start_idx, len(text)):
+                    if text[i] == '{':
+                        open_braces += 1
+                    elif text[i] == '}':
+                        open_braces -= 1
+                        if open_braces == 0:
+                            # Complete JSON object found
+                            return text[start_idx:i+1]
+                
+                # If we exit the loop, no complete JSON object was found
+                return None
+            
+            # Extract first JSON object
+            json_str = extract_json_object(response.content)
+            
+            if json_str:
+                print(f"DEBUG - Extracted complete JSON string: {json_str}", flush=True)
+                try:
+                    parsed = json.loads(json_str)
+                    print(f"DEBUG - Parsed JSON: {parsed}", flush=True)
+                    if isinstance(parsed, dict) and "correctness" in parsed:
+                        review_result = parsed
+                    else:
+                        print("DEBUG - JSON missing 'correctness' field", flush=True)
+                except json.JSONDecodeError as e:
+                    print(f"DEBUG - JSON parsing error: {str(e)}", flush=True)
+                    # Try to fix common JSON issues (single quotes instead of double quotes)
+                    try:
+                        import ast
+                        # Replace single quotes with double quotes for JSON compatibility
+                        fixed_str = json_str.replace("'", '"')
+                        # Try with direct json loads after fixing quotes
+                        try:
+                            fixed_parsed = json.loads(fixed_str)
+                            if isinstance(fixed_parsed, dict) and "correctness" in fixed_parsed:
+                                review_result = fixed_parsed
+                                print(f"DEBUG - Fixed JSON with quote replacement: {fixed_parsed}", flush=True)
+                        except Exception as e3:
+                            print(f"DEBUG - Failed to fix with quote replacement: {str(e3)}", flush=True)
+                            # Fall back to ast.literal_eval
+                            fixed_dict = ast.literal_eval(json_str)
+                            if isinstance(fixed_dict, dict) and "correctness" in fixed_dict:
+                                review_result = fixed_dict
+                                print(f"DEBUG - Fixed JSON with ast.literal_eval: {fixed_dict}", flush=True)
+                    except Exception as e2:
+                        print(f"DEBUG - Failed to fix JSON with ast: {str(e2)}", flush=True)
+            else:
+                print("DEBUG - No JSON object found in response", flush=True)
+                # Try explicit patterns for correctness
+                print("DEBUG - Looking for explicit verdict patterns", flush=True)
+                
+                # Look for markdown style verdicts
+                if "verdict: correct" in response.content.lower() or "verdict: *correct*" in response.content.lower() or "correct" in response.content.lower() and "incorrect" not in response.content.lower():
+                    print("DEBUG - Found explicit 'correct' verdict", flush=True)
+                    # Extract explanation if possible
+                    explanation = "Explicit correct verdict found in response"
+                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
+                    if explanation_match:
+                        explanation = explanation_match.group(1).strip()
+                    review_result = {"correctness": "correct", "explanation": explanation}
+                elif "verdict: incorrect" in response.content.lower() or "verdict: *incorrect*" in response.content.lower():
+                    print("DEBUG - Found explicit 'incorrect' verdict", flush=True)
+                    # Extract explanation if possible
+                    explanation = "Explicit incorrect verdict found in response"
+                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
+                    if explanation_match:
+                        explanation = explanation_match.group(1).strip()
+                    review_result = {"correctness": "incorrect", "explanation": explanation}
+                elif "verdict: unknown" in response.content.lower() or "verdict: *unknown*" in response.content.lower():
+                    print("DEBUG - Found explicit 'unknown' verdict", flush=True)
+                    # Extract explanation if possible
+                    explanation = "Explicit unknown verdict found in response"
+                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
+                    if explanation_match:
+                        explanation = explanation_match.group(1).strip()
+                    review_result = {"correctness": "unknown", "explanation": explanation}
+        except Exception as e:
+            print(f"DEBUG - General error parsing review: {str(e)}", flush=True)
+            print(f"DEBUG - Response type: {type(response.content)}", flush=True)
         
         # Extract verdict from review result
         mem_review_verdict = review_result.get("correctness", "unknown")
         
         # Store full review content for review_text
         mem_review_text = response.content
+        
+        print(f"DEBUG - Final review verdict: {mem_review_verdict}", flush=True)
+        print(f"DEBUG - Final review explanation: {review_result.get('explanation', 'None')}", flush=True)
         
         # Return both the review result and keep existing messages
         return {
@@ -543,6 +653,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
             "messages": state.get("messages", [])  # Preserve existing messages
         }
     except Exception as e:
+        print(f"DEBUG - Exception in reviewer: {str(e)}", flush=True)
         # Return a default review result and keep existing messages
         return {
             "review_result": {
@@ -603,469 +714,110 @@ def router(state: AgentState) -> Union[Literal["call_model", "call_tools", "call
 
 
 # Step 5: Define the complete graph
-def create_react_agent(
-    llm: BaseChatModel,
-    tools: List[BaseTool],
-    system_prompt: Optional[str] = None,
-    review_prompt: Optional[str] = None,
-):
-    """
-    Create a ReAct agent using LangGraph.
+def create_react_agent(model: BaseChatModel, tools: List[BaseTool], system_prompt: Optional[str] = None) -> Any:
+    """Create a ReAct agent with the given tools and model.
+    
+    This function creates a ReAct agent with the given tools and model. It wires the agent
+    up to perform the ReAct loop (act, think, observe, repeat).
     
     Args:
-        llm: The language model to use
-        tools: List of tools to provide to the agent
-        system_prompt: Optional system prompt
-        review_prompt: Optional review prompt for solution evaluation
+        model: The language model to use
+        tools: The tools to give the agent
+        system_prompt: Optional system prompt to use
         
     Returns:
-        A compiled agent with a synchronous interface
+        A runnable ReAct agent
     """
-    # Create a tools by name dictionary for fast lookup
+    # Create a mapping of tool name to tool
     tools_by_name = {tool.name: tool for tool in tools}
     
-    # Prepare the LLM with the tools
-    llm_with_tools = llm.bind_tools(tools)
-    
-    # Create a graph with the agent state
+    # Create the agent state graph
     workflow = StateGraph(AgentState)
     
-    # Add nodes to the graph
-    workflow.add_node("call_model", lambda state: call_model(state, llm_with_tools, system_prompt))
+    # Define a partial call_model function that binds the model and system_prompt
+    def call_model_with_system_prompt(state):
+        return call_model(state, model, system_prompt)
     
-    # Attempt to use ToolNode with our tools
-    try:
-        tool_node = ToolNode(tools)
-        workflow.add_node("call_tools", tool_node)
-    except Exception as e:
-        print(f"Warning: Error creating ToolNode with built-in tools: {str(e)}")
-        print("Falling back to custom call_tools implementation")
-        workflow.add_node("call_tools", lambda state: call_tools(state, tools_by_name))
+    # Define a partial call_tools function that binds the tools
+    def call_tools_with_tools(state):
+        return call_tools(state, tools_by_name)
     
-    # Add reviewer node (using the same LLM but without tools)
-    workflow.add_node("call_reviewer", lambda state: call_reviewer(state, llm))
+    # Define the review function that binds the model
+    def call_review_with_model(state):
+        return call_reviewer(state, model)
     
-    # Add conditional edges with our router
+    # Add the model node
+    workflow.add_node("model", call_model_with_system_prompt)
+    
+    # Add the tools node
+    workflow.add_node("tools", call_tools_with_tools)
+    
+    # Add the reviewer node 
+    workflow.add_node("reviewer", call_review_with_model)
+    
+    # Tool node for handling tool calls
+    workflow.add_node("tool_node", ToolNode(tools))
+    
+    # Add edges between the nodes
+    workflow.add_edge("model", "tools")
+    workflow.add_edge("tools", "model")
+    
+    # Define conditional edge for ending after model step
+    def should_continue(state):
+        """Check if there are any tool calls in the last AI message."""
+        # Get the most recent message
+        messages = state["messages"]
+        if not messages:
+            return "model"
+            
+        # Get the last message from the AI
+        last_message = messages[-1]
+        if not isinstance(last_message, AIMessage):
+            return "model"
+            
+        # Check if there are any tool calls
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            # There are explicit tool calls
+            return "tools"
+            
+        # Check for tool calls in additional kwargs
+        additional_kwargs = getattr(last_message, "additional_kwargs", {})
+        if additional_kwargs and "tool_calls" in additional_kwargs:
+            # There are tool calls in the additional kwargs
+            return "tools"
+            
+        # No tool calls, check for review prompt
+        if state.get("review_prompt") and state.get("mem_model") and state.get("mem_solution"):
+            # We have everything needed for a review
+            return "reviewer"
+            
+        # If we get here, we're done
+        return END
+    
+    # Add conditional edge out of model
     workflow.add_conditional_edges(
-        "call_model",  # from node
-        router,        # routing function
-        {
-            "call_tools": "call_tools",  # route condition -> target node
-            "call_reviewer": "call_reviewer",  # route to reviewer
-            END: END                     # end the graph
-        }
+        "model",
+        should_continue
     )
     
+    # Define conditional edge for completion after tools step
+    def should_end_after_tools(state):
+        """Check if we should end after executing tools."""
+        if state.get("review_prompt") and state.get("mem_model") and state.get("mem_solution"):
+            # We have everything needed for a review
+            return "reviewer"
+        return "model"
+    
+    # Add conditional edge out of tools
     workflow.add_conditional_edges(
-        "call_tools",  # from node
-        router,        # routing function
-        {
-            "call_model": "call_model",  # route condition -> target node
-            "call_reviewer": "call_reviewer",  # route to reviewer
-            END: END                     # end the graph
-        }
+        "tools",
+        should_end_after_tools
     )
     
-    workflow.add_conditional_edges(
-        "call_reviewer",  # from node
-        router,           # routing function
-        {
-            END: END      # after reviewer, always end
-        }
-    )
+    # Add the edge from reviewer to END
+    workflow.add_edge("reviewer", END)
     
-    # Set the entry point - always start with the model
-    workflow.set_entry_point("call_model")
+    # Compile the workflow
+    app = workflow.compile()
     
-    # Compile the graph
-    async_agent = workflow.compile()
-    
-    # Wrap the async agent with a synchronous interface
-    return SyncCompatWrapper(async_agent)
-
-
-async def run_agent(agent, message: str, config: Optional[RunnableConfig] = None, review_prompt: Optional[str] = None):
-    """
-    Async function for running an agent on a human input message.
-    
-    Args:
-        agent: The agent to run
-        message: The human input message
-        config: Optional configuration
-        review_prompt: Optional review prompt for solution evaluation
-        
-    Returns:
-        The final state of the agent
-    """
-    # Global declaration at the beginning of the function
-    global mem_solution
-    
-    # Reset global mem_solution at the start of each run
-    mem_solution = "No solution generated yet"
-    
-    # If it's our wrapped agent, unwrap it first to use the async version
-    if isinstance(agent, SyncCompatWrapper):
-        async_agent = agent.async_agent
-    else:
-        async_agent = agent
-        
-    # Create the initial state
-    initial_state = {
-        "messages": [HumanMessage(content=message)],
-        "mem_solution": "No solution generated yet",  # Initialize mem_solution
-        "mem_model": "No model captured yet",         # Initialize mem_model
-        "mem_problem": message                        # Store the problem statement
-    }
-    
-    # Add review_prompt if provided
-    if review_prompt:
-        initial_state["review_prompt"] = review_prompt
-    
-    # Run the agent asynchronously
-    final_state = await async_agent.ainvoke(initial_state, config)
-    
-    # Normalize the state to ensure consistent format
-    normalized_state = normalize_state(final_state)
-    
-    # Try to extract Z3 solution from messages directly
-    for message in normalized_state.get("messages", []):
-        if isinstance(message, ToolMessage) and "solve_model" in message.name and "'values':" in message.content:
-            try:
-                import re
-                values_match = re.search(r"'values':\s*(\{[^\}]+\})", message.content)
-                if values_match:
-                    extracted_solution = values_match.group(1)
-                    mem_solution = extracted_solution
-                    normalized_state["mem_solution"] = extracted_solution
-            except Exception:
-                pass
-    
-    # If the module-level solution has been updated, use it
-    if mem_solution != "No solution generated yet":
-        normalized_state["mem_solution"] = mem_solution
-    # Otherwise fall back to the execute_tool_safely.mem_solution
-    elif hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
-        # Get the latest solution (using the last tool_id if there were multiple calls)
-        latest_solution = None
-        
-        # Check if we have a specifically extracted values field for Z3
-        if "values" in execute_tool_safely.mem_solution:
-            latest_solution = execute_tool_safely.mem_solution["values"]
-        else:
-            # Otherwise get the last solution added by a tool call
-            tool_ids = [k for k in execute_tool_safely.mem_solution.keys() if k != "values"]
-            if tool_ids:
-                latest_solution = execute_tool_safely.mem_solution[tool_ids[-1]]
-        
-        if latest_solution:
-            normalized_state["mem_solution"] = latest_solution
-    
-    # Ensure token usage is in the normalized state
-    if "mem_tokens_used" not in normalized_state:
-        try:
-            token_counter = TokenCounter.get_instance()
-            normalized_state["mem_tokens_used"] = token_counter.get_total_tokens()
-        except Exception as e:
-            print(f"Warning: Could not access TokenCounter: {e}", file=sys.stderr)
-    
-    # Ensure tool usage is in the normalized state
-    try:
-        from mcp_solver.client.tool_stats import ToolStats
-        tool_stats = ToolStats.get_instance()
-        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
-            normalized_state["mem_tool_usage"] = dict(tool_stats.tool_calls)
-    except Exception as e:
-        print(f"Warning: Could not access ToolStats in run_agent: {e}", file=sys.stderr)
-    
-    # If review_result exists but mem_review_text doesn't, store review_result explanation in mem_review_text
-    if "review_result" in normalized_state and normalized_state["review_result"]:
-        if "mem_review_text" not in normalized_state or not normalized_state["mem_review_text"]:
-            if isinstance(normalized_state["review_result"], dict):
-                # Store the explanation as review text
-                normalized_state["mem_review_text"] = normalized_state["review_result"].get("explanation", 
-                                                   json.dumps(normalized_state["review_result"]))
-            else:
-                # Store the entire review result
-                normalized_state["mem_review_text"] = str(normalized_state["review_result"])
-    
-    # Ensure review verdict is in the normalized state
-    if "mem_review_verdict" not in normalized_state and "review_result" in normalized_state:
-        if isinstance(normalized_state["review_result"], dict) and "correctness" in normalized_state["review_result"]:
-            normalized_state["mem_review_verdict"] = normalized_state["review_result"]["correctness"]
-    
-    # Print all state variables consistently for run_test.py to capture
-    # These prints should be the single source of truth for run_test.py
-    if "mem_tokens_used" in normalized_state:
-        print(f"mem_tokens_used: {normalized_state['mem_tokens_used']}")
-    
-    if "mem_review_verdict" in normalized_state:
-        print(f"mem_review_verdict: {normalized_state['mem_review_verdict']}")
-    
-    if "mem_review_text" in normalized_state and normalized_state["mem_review_text"]:
-        print(f"mem_review_text: {normalized_state['mem_review_text']}")
-    
-    if "mem_solution" in normalized_state and normalized_state["mem_solution"]:
-        # Print solution to allow run_test.py to determine satisfiability
-        print(f"mem_solution: {normalized_state['mem_solution']}")
-    
-    if "mem_tool_usage" in normalized_state and normalized_state["mem_tool_usage"]:
-        print(f"mem_tool_usage: {json.dumps(normalized_state['mem_tool_usage'])}")
-    
-    return normalized_state
-
-
-def normalize_state(state) -> Dict:
-    """
-    Normalize state to a consistent dictionary format regardless of LangGraph version.
-    
-    This utility handles the differences in state formats between LangGraph versions.
-    
-    Args:
-        state: The state to normalize (could be dict, object, or other format)
-        
-    Returns:
-        A normalized dictionary representation of the state
-    """
-    # First convert the state to a normalized dictionary format
-    if isinstance(state, dict) and "messages" in state:
-        # Copy all keys from the original state
-        normalized_state = dict(state)
-    elif hasattr(state, "messages"):
-        # Try to convert all attributes to a dict
-        normalized_state = {"messages": state.messages}
-        # Copy other fields if they exist
-        for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
-                     "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
-            if hasattr(state, field):
-                normalized_state[field] = getattr(state, field)
-    elif hasattr(state, "values") and isinstance(state.values, dict):
-        # Start with messages
-        normalized_state = {}
-        if "messages" in state.values:
-            normalized_state["messages"] = state.values["messages"]
-        
-        # Copy other fields if they exist
-        for field in ["mem_problem", "mem_model", "mem_solution", "mem_tokens_used", 
-                     "mem_review_verdict", "mem_tool_usage", "mem_review_text", "review_result", "review_prompt"]:
-            if field in state.values:
-                normalized_state[field] = state.values[field]
-    elif isinstance(state, list) and all(isinstance(msg, BaseMessage) for msg in state):
-        normalized_state = {"messages": state}
-    elif isinstance(state, dict) and len(state) > 0:
-        # Look for any node output that contains messages
-        normalized_state = {"messages": []}
-        for node_name, node_output in state.items():
-            if isinstance(node_output, dict) and "messages" in node_output:
-                normalized_state = {"messages": node_output["messages"]}
-                break
-            elif isinstance(node_output, list) and all(isinstance(msg, BaseMessage) for msg in node_output):
-                normalized_state = {"messages": node_output}
-                break
-    else:
-        # Fallback: If we can't determine the format, log warning and return empty dict with messages
-        print(f"Warning: Unrecognized state format: {type(state)}", file=sys.stderr)
-        
-        # Try to extract any messages if possible, otherwise return empty list
-        messages = []
-        if isinstance(state, dict):
-            # Look for any key that might contain messages
-            for key, value in state.items():
-                if isinstance(value, list) and value and isinstance(value[0], BaseMessage):
-                    messages = value
-                    break
-        
-        normalized_state = {"messages": messages}
-    
-    # Now ensure all required fields have default values if missing
-    
-    # Handle solution - prefer state value, but fall back to global if needed
-    if "mem_solution" not in normalized_state or not normalized_state.get("mem_solution"):
-        # Get the global mem_solution variable
-        global mem_solution
-        
-        # If the global solution has been set, use it
-        if mem_solution != "No solution generated yet":
-            normalized_state["mem_solution"] = mem_solution
-        # Otherwise check if the function attribute has been set
-        elif hasattr(execute_tool_safely, "mem_solution") and execute_tool_safely.mem_solution:
-            # Get the latest solution (using the last tool_id if there were multiple calls)
-            latest_solution = None
-            
-            # Check if we have a specifically extracted values field for Z3
-            if "values" in execute_tool_safely.mem_solution:
-                latest_solution = execute_tool_safely.mem_solution["values"]
-            else:
-                # Otherwise get the last solution added by a tool call
-                tool_ids = [k for k in execute_tool_safely.mem_solution.keys() if k != "values"]
-                if tool_ids:
-                    latest_solution = execute_tool_safely.mem_solution[tool_ids[-1]]
-            
-            if latest_solution:
-                normalized_state["mem_solution"] = latest_solution
-        else:
-            # Default value if no solution is found anywhere
-            normalized_state["mem_solution"] = "No solution generated yet"
-    
-    # Ensure token usage is in the normalized state
-    if "mem_tokens_used" not in normalized_state:
-        try:
-            token_counter = TokenCounter.get_instance()
-            normalized_state["mem_tokens_used"] = token_counter.get_total_tokens()
-        except Exception as e:
-            print(f"Warning: Could not access TokenCounter: {e}", file=sys.stderr)
-    
-    # Ensure tool usage is in the normalized state
-    try:
-        from mcp_solver.client.tool_stats import ToolStats
-        tool_stats = ToolStats.get_instance()
-        if hasattr(tool_stats, "tool_calls") and tool_stats.tool_calls:
-            normalized_state["mem_tool_usage"] = dict(tool_stats.tool_calls)
-    except Exception as e:
-        print(f"Warning: Could not access ToolStats in run_agent: {e}", file=sys.stderr)
-    
-    # If review_result exists but mem_review_text doesn't, store review_result explanation in mem_review_text
-    if normalized_state.get("review_result") and "mem_review_text" not in normalized_state:
-        if isinstance(normalized_state["review_result"], dict):
-            # Store the explanation as review text
-            normalized_state["mem_review_text"] = normalized_state["review_result"].get("explanation", 
-                                               json.dumps(normalized_state["review_result"]))
-        else:
-            # Store the entire review result
-            normalized_state["mem_review_text"] = str(normalized_state["review_result"])
-    
-    # Ensure review verdict is in the normalized state
-    if "mem_review_verdict" not in normalized_state and normalized_state.get("review_result"):
-        if isinstance(normalized_state["review_result"], dict) and "correctness" in normalized_state["review_result"]:
-            normalized_state["mem_review_verdict"] = normalized_state["review_result"]["correctness"]
-    
-    # Print all state variables consistently for run_test.py to capture
-    # These prints should be the single source of truth for run_test.py
-    if "mem_tokens_used" in normalized_state:
-        print(f"mem_tokens_used: {normalized_state['mem_tokens_used']}")
-    
-    if "mem_review_verdict" in normalized_state:
-        print(f"mem_review_verdict: {normalized_state['mem_review_verdict']}")
-    
-    if normalized_state.get("mem_review_text"):
-        print(f"mem_review_text: {normalized_state['mem_review_text']}")
-    
-    if normalized_state.get("mem_solution"):
-        # Print solution to allow run_test.py to determine satisfiability
-        print(f"mem_solution: {normalized_state['mem_solution']}")
-    
-    if normalized_state.get("mem_tool_usage"):
-        print(f"mem_tool_usage: {json.dumps(normalized_state['mem_tool_usage'])}")
-    
-    return normalized_state
-
-
-class SyncCompatWrapper:
-    """
-    A wrapper class that provides a synchronous interface to an async agent.
-    
-    This allows an async agent to be used with code that expects a synchronous
-    interface. It properly handles event loops to avoid conflicts.
-    """
-    def __init__(self, async_agent):
-        """Initialize with an async agent."""
-        self.async_agent = async_agent
-    
-    def invoke(self, inputs, config=None):
-        """
-        Provides a synchronous interface to the async agent.
-        
-        Args:
-            inputs: The inputs to pass to the agent
-            config: Optional configuration
-            
-        Returns:
-            The final state of the agent
-        """
-        try:
-            # Check if we're already inside a running event loop
-            loop = asyncio.get_running_loop()
-            
-            # We're in an event loop - use run_coroutine_threadsafe
-            if loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(
-                    self.async_agent.ainvoke(inputs, config), loop
-                )
-                return future.result(timeout=300)  # 5-minute timeout
-                
-        except RuntimeError:
-            # No running event loop - use asyncio.run()
-            return asyncio.run(self.async_agent.ainvoke(inputs, config))
-            
-        # Fallback if in loop but run_coroutine_threadsafe fails
-        try:
-            import nest_asyncio
-            nest_asyncio.apply()
-            return asyncio.run(self.async_agent.ainvoke(inputs, config))
-        except Exception as e:
-            print(f"Error in invoke: {e}", file=sys.stderr)
-            raise
-            
-    def stream(self, inputs, config=None):
-        """
-        Provides a synchronous streaming interface to the async agent.
-        
-        Args:
-            inputs: The inputs to pass to the agent
-            config: Optional configuration
-            
-        Returns:
-            A generator yielding states from the agent
-        """
-        # Try to get the current event loop
-        try:
-            loop = asyncio.get_running_loop()
-            in_event_loop = loop.is_running()
-        except RuntimeError:
-            in_event_loop = False
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        if in_event_loop:
-            # We're in a running event loop
-            async def astream_wrapper():
-                async for item in self.async_agent.astream(inputs, config):
-                    yield item
-            
-            # Create an async generator
-            agen = astream_wrapper()
-            
-            # Yield items using run_coroutine_threadsafe
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                
-                while True:
-                    try:
-                        future = asyncio.run_coroutine_threadsafe(
-                            agen.__anext__(), loop
-                        )
-                        yield future.result(timeout=60)
-                    except StopAsyncIteration:
-                        break
-                    except Exception as e:
-                        print(f"Error in stream: {e}", file=sys.stderr)
-                        break
-            except ImportError:
-                print("Warning: nest_asyncio not available. Streaming may not work properly.", file=sys.stderr)
-                # Simplified fallback
-                return asyncio.run(self._collect_stream_results(inputs, config))
-        else:
-            # No running event loop - use simpler approach
-            for item in loop.run_until_complete(self._collect_stream_results(inputs, config)):
-                yield item
-    
-    async def _collect_stream_results(self, inputs, config=None):
-        """Helper to collect all stream results at once when streaming isn't possible."""
-        results = []
-        async for item in self.async_agent.astream(inputs, config):
-            results.append(item)
-        return results
-
-
-# For backward compatibility
-create_custom_react_agent = create_react_agent 
+    return app 

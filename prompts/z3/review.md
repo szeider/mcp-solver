@@ -12,9 +12,17 @@ You are given a problem description, a Python Z3 encoding, and a solution. Verif
 
 ## Output Format
 
-1. Verdict: *correct*, *incorrect*, or *unknown*
-2. Confidence: Integer from 0 (not confident) to 10 (very confident)
-3. Brief justification of your assessment
+IMPORTANT: Your answer MUST follow this exact JSON format:
+
+```json
+{
+  "correctness": "correct",  // Must be exactly one of: "correct", "incorrect", or "unknown"
+  "confidence": 10,          // Integer from 0 (not confident) to 10 (very confident)
+  "explanation": "Your detailed justification of the assessment here"
+}
+```
+
+DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object as shown above.
 
 ## Data
 
