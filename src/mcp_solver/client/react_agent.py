@@ -438,7 +438,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
     """
     global mem_solution
     
-    print("DEBUG - REVIEW PROCESS STARTING", flush=True)
+    print("Starting solution review process...", flush=True)
 
     # Extract necessary information from state
     mem_problem = state.get("mem_problem", "No problem statement provided")
@@ -494,8 +494,8 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                             for var, value in value_matches:
                                 processed_solution += f"{var} = {value}\n"
     except Exception as e:
-        # Log errors in solution processing
-        print(f"DEBUG - Error processing solution: {str(e)}", flush=True)
+        # Log errors in solution processing but continue
+        print(f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True)
         pass
     
     # Create reviewer prompt using Template
@@ -506,10 +506,8 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
         SOLUTION=processed_solution
     )
     
-    print("DEBUG - Reviewer prompt after substitution:", flush=True)
-    print("======================================", flush=True)
-    print(reviewer_prompt[:500] + "..." if len(reviewer_prompt) > 500 else reviewer_prompt, flush=True)
-    print("======================================", flush=True)
+    # For debug, show just a preview of the prompt
+    print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
     
     # Request structured output with clearer formatting instructions
     structured_prompt = f"""{reviewer_prompt}
@@ -524,74 +522,103 @@ Return your assessment in JSON format with these fields:
         token_counter = TokenCounter.get_instance()
         token_counter.count_reviewer_input(structured_prompt)
         
-        # Call the model with a HumanMessage and specify JSON response format
+        # Create a human message with the prompt
         review_message = HumanMessage(content=structured_prompt)
         
-        # Try using native JSON mode if available based on the model type
+        # Define the expected output structure
+        from typing import Literal
+        from pydantic import BaseModel
+        
+        class ReviewResult(BaseModel):
+            explanation: str
+            correctness: Literal["correct", "incorrect", "unknown"]
+        
         try:
-            # For OpenAI or Anthropic models that support response_format
-            response = model.invoke(
-                [review_message],
-                response_format={"type": "json_object"}
-            )
-        except (TypeError, ValueError, AttributeError):
-            # Fallback for models that don't support response_format parameter
-            print("DEBUG - Model doesn't support native JSON mode, using standard invoke", flush=True)
+            # Use LangChain's built-in structured output method
+            print("Using model's structured output capabilities...", flush=True)
+            structured_model = model.with_structured_output(ReviewResult)
+            result = structured_model.invoke(review_message)
+            
+            # Convert the structured output to a dict
+            review_result = {
+                "correctness": result.correctness,
+                "explanation": result.explanation
+            }
+            
+            # Keep the original response for review_text
+            response = model.invoke([review_message])
+            mem_review_text = response.content
+            
+            # Track reviewer output tokens using the TokenCounter
+            token_counter.count_reviewer_output(response.content)
+        
+        except (TypeError, ValueError, AttributeError, ImportError) as e:
+            # Fallback for models that don't support structured output
+            print(f"Using standard invocation (structured output not available)", flush=True)
+            
+            # Invoke the model normally
             response = model.invoke([review_message])
             
-        # Track reviewer output tokens using the TokenCounter
-        token_counter.count_reviewer_output(response.content)
-        
-        # Print the full response for debugging
-        print("DEBUG - Raw reviewer response:", flush=True)
-        print(response.content, flush=True)
-        
-        # Try to parse JSON from the response - simplified approach
-        review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
-        
-        # Simple JSON extraction - look for content between ```json and ``` markers or direct JSON
-        content = response.content
-        try:
-            import json
+            # Track reviewer output tokens using the TokenCounter
+            token_counter.count_reviewer_output(response.content)
             
-            # Try direct JSON parsing first (for native JSON mode responses)
+            # Try to parse the JSON from the response
+            from langchain_core.output_parsers import JsonOutputParser
+            import json
+            import re
+            
+            review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
+            
+            # Try direct JSON parsing
             try:
-                parsed = json.loads(content)
-                if isinstance(parsed, dict) and "correctness" in parsed:
-                    review_result = parsed
-                    print(f"DEBUG - Successfully parsed direct JSON", flush=True)
-            except json.JSONDecodeError:
-                # If direct parsing fails, look for ```json blocks
-                import re
-                json_block_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
-                
-                if json_block_match:
-                    # Extract JSON from code block
-                    json_content = json_block_match.group(1).strip()
-                    print(f"DEBUG - Found JSON code block", flush=True)
-                    parsed = json.loads(json_content)
-                    if isinstance(parsed, dict) and "correctness" in parsed:
-                        review_result = parsed
-                else:
-                    # If no code block, look for any JSON object in the response
-                    json_match = re.search(r'(\{.*\})', content, re.DOTALL)
-                    if json_match:
-                        json_content = json_match.group(1).strip()
-                        print(f"DEBUG - Found JSON object in text", flush=True)
-                        parsed = json.loads(json_content)
-                        if isinstance(parsed, dict) and "correctness" in parsed:
-                            review_result = parsed
-        except Exception as e:
-            print(f"DEBUG - JSON parsing failed: {str(e)}", flush=True)
+                json_parser = JsonOutputParser()
+                review_result = json_parser.parse(response.content)
+                print("Successfully parsed JSON response", flush=True)
+            except Exception:
+                # If direct parsing fails, try looking for JSON in code blocks
+                content = response.content
+                try:
+                    # Look for ```json blocks
+                    json_block_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+                    if json_block_match:
+                        json_content = json_block_match.group(1).strip()
+                        print("Extracted JSON from code block", flush=True)
+                        review_result = json.loads(json_content)
+                    else:
+                        # If no code block, look for any JSON object in the response
+                        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+                        if json_match:
+                            json_content = json_match.group(1).strip()
+                            print("Extracted JSON from text", flush=True)
+                            review_result = json.loads(json_content)
+                except Exception as e:
+                    print(f"JSON parsing failed, using defaults", flush=True)
+            
+            # Store full review content for review_text
+            mem_review_text = response.content
         
         # Extract verdict from review result
         mem_review_verdict = review_result.get("correctness", "unknown")
         
-        # Store full review content for review_text
-        mem_review_text = response.content
+        # Check for consistency between verdict and explanation
+        explanation = review_result.get("explanation", "")
         
-        print(f"DEBUG - Final review verdict: {mem_review_verdict}", flush=True)
-        print(f"DEBUG - Final review explanation: {review_result.get('explanation', 'None')}", flush=True)
+        # Look for conclusive statements at the end of the explanation
+        conclusion_check = explanation.lower().strip()
+        last_lines = conclusion_check.split('\n')[-3:]  # Get last 3 lines
+        conclusion_text = ' '.join(last_lines)
+        
+        # Check if there's a mismatch between verdict and conclusion
+        if "solution is correct" in conclusion_text and mem_review_verdict != "correct":
+            print(f"Fixing verdict mismatch: changed from '{mem_review_verdict}' to 'correct'", flush=True)
+            mem_review_verdict = "correct"
+            review_result["correctness"] = "correct"
+        elif "solution is incorrect" in conclusion_text and mem_review_verdict != "incorrect":
+            print(f"Fixing verdict mismatch: changed from '{mem_review_verdict}' to 'incorrect'", flush=True)
+            mem_review_verdict = "incorrect"
+            review_result["correctness"] = "incorrect"
+        
+        print(f"Review complete: verdict is '{mem_review_verdict}'", flush=True)
         
         # Return both the review result and keep existing messages
         return {
@@ -601,7 +628,7 @@ Return your assessment in JSON format with these fields:
             "messages": state.get("messages", [])  # Preserve existing messages
         }
     except Exception as e:
-        print(f"DEBUG - Exception in reviewer: {str(e)}", flush=True)
+        print(f"Review process error: {str(e)}", flush=True)
         # Return a default review result and keep existing messages
         return {
             "review_result": {
