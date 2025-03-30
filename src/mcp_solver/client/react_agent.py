@@ -30,7 +30,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 # Updated imports for langgraph
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
@@ -77,11 +77,15 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     Returns:
         Updated state with model response added
     """
+    print("[call_model] Entering model node", flush=True)
+    
     # Get the current messages
     messages = list(state["messages"])
+    print(f"[call_model] Message count: {len(messages)}", flush=True)
     
     # Add system message at the beginning if provided and not already there
     if system_prompt and not any(isinstance(msg, SystemMessage) for msg in messages):
+        print(f"[call_model] Adding system prompt ({len(system_prompt)} chars)", flush=True)
         messages.insert(0, SystemMessage(content=system_prompt))
     
     # Track input tokens using the TokenCounter
@@ -90,11 +94,19 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     print(f"[call_model] Input token estimate: {input_token_count}", flush=True)
     
     # Call the model with the messages
+    print("[call_model] Invoking model", flush=True)
     response = model.invoke(messages)
+    print(f"[call_model] Model response received, length: {len(response.content)}", flush=True)
     
     # Track output tokens using the TokenCounter
     output_token_count = token_counter.count_main_output(response.content)
     print(f"[call_model] Output token estimate: {output_token_count}", flush=True)
+    
+    # Check if the response has tool calls
+    has_tool_calls = hasattr(response, "tool_calls") and response.tool_calls
+    has_tool_calls_kwargs = getattr(response, "additional_kwargs", {}).get("tool_calls")
+    print(f"[call_model] Response has tool_calls: {has_tool_calls}", flush=True)
+    print(f"[call_model] Response has tool_calls in kwargs: {bool(has_tool_calls_kwargs)}", flush=True)
     
     # Get total tokens for state
     total_tokens = token_counter.get_total_tokens()
@@ -107,6 +119,7 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     state_update["mem_main_output_tokens"] = token_counter.main_output_tokens
     
     print(f"[call_model] Returning token counts - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}", flush=True)
+    print("[call_model] Exiting model node", flush=True)
     
     return state_update
 
@@ -122,7 +135,10 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
     Returns:
         Updated state with tool messages added
     """
+    print("[call_tools] Entering tools node", flush=True)
+    
     messages = state["messages"]
+    print(f"[call_tools] Message count: {len(messages)}", flush=True)
     
     # Copy tool usage from ToolStats singleton at the beginning
     tool_usage = {}
@@ -143,16 +159,19 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         # Look for tool_calls in the message
         if hasattr(message, "tool_calls") and message.tool_calls:
             tool_calls = message.tool_calls
+            print(f"[call_tools] Found {len(tool_calls)} tool_calls in message attribute", flush=True)
             break
         
         # Also check additional message kwargs (for dict-style tool_calls)
         additional_kwargs = getattr(message, "additional_kwargs", {})
         if additional_kwargs and "tool_calls" in additional_kwargs:
             tool_calls = additional_kwargs["tool_calls"]
+            print(f"[call_tools] Found {len(tool_calls)} tool_calls in additional_kwargs", flush=True)
             break
     
     # If no tool calls were found, return empty messages but preserve the tool usage
     if not tool_calls:
+        print("[call_tools] No tool calls found, returning empty messages", flush=True)
         return {"messages": [], "mem_tool_usage": tool_usage}
     
     # Set up async execution environment
@@ -175,11 +194,14 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
     tool_results = []
     combined_state_updates = {}
     
+    print(f"[call_tools] Processing {len(tool_calls)} tool calls", flush=True)
+    
     for tool_call in tool_calls:
         # Extract tool information using a normalized approach
         tool_info = extract_tool_info(tool_call)
         
         if not tool_info["name"]:
+            print("[call_tools] Tool call missing name, skipping", flush=True)
             continue
             
         tool_name = tool_info["name"]
@@ -187,12 +209,12 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         tool_args = tool_info["args"] or {}
             
         # Log tool execution for debugging
-        print(f"Executing tool: {tool_name} with args: {json.dumps(tool_args, indent=2)}", file=sys.stderr)
+        print(f"[call_tools] Executing tool: {tool_name} with args: {json.dumps(tool_args, indent=2)}", flush=True)
         
         # Handle when tool isn't found
         if tool_name not in tools_by_name:
             error_msg = f"Tool '{tool_name}' not found in available tools"
-            print(f"Warning: {error_msg}", file=sys.stderr)
+            print(f"[call_tools] Warning: {error_msg}", flush=True)
             tool_message = ToolMessage(
                 content=f"Error: {error_msg}",
                 tool_call_id=tool_id,
@@ -205,8 +227,10 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
         tool = tools_by_name[tool_name]
         
         # Execute the tool and get both the message and state updates
+        print(f"[call_tools] Executing tool: {tool_name}", flush=True)
         tool_message, state_updates = execute_tool_safely(tool, tool_name, tool_id, tool_args, loop)
         tool_results.append(tool_message)
+        print(f"[call_tools] Tool {tool_name} execution complete", flush=True)
         
         # Merge any state updates
         combined_state_updates.update(state_updates)
@@ -225,6 +249,9 @@ def call_tools(state: AgentState, tools_by_name: Dict[str, BaseTool]) -> Dict:
     # Add any state updates from tools
     if combined_state_updates:
         result.update(combined_state_updates)
+    
+    print(f"[call_tools] Returning {len(tool_results)} tool messages", flush=True)
+    print("[call_tools] Exiting tools node", flush=True)
         
     return result
 
@@ -614,33 +641,142 @@ def router(state: AgentState) -> Union[Literal["call_model", "call_tools", "call
     """
     messages = state.get("messages", [])
     
+    # Debug logging
+    print(f"[router] Examining state with {len(messages)} messages", flush=True)
+    
     # Safety check for empty messages
     if not messages:
+        print("[router] No messages, ending graph", flush=True)
         return END
     
     last_message = messages[-1]
     
+    # Debug the type of last message
+    print(f"[router] Last message type: {type(last_message).__name__}", flush=True)
+    
     # If the last message is a tool message or human message, we should call the model
     if isinstance(last_message, (ToolMessage, HumanMessage)):
+        print("[router] Last message is ToolMessage or HumanMessage, routing to call_model", flush=True)
         return "call_model"
     
     # If the last message is an AI message with tool calls, we should execute the tools
     if isinstance(last_message, AIMessage):
-        # Check for tool_calls attribute
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            return "call_tools"
-            
-        # Also check additional_kwargs for tool_calls
+        # Detailed debug of AIMessage properties
+        print("[router] Debugging AIMessage properties:", flush=True)
+        print(f"[router] - content: {last_message.content[:100]}...", flush=True)
+        print(f"[router] - has 'tool_calls' attribute: {hasattr(last_message, 'tool_calls')}", flush=True)
+        
+        if hasattr(last_message, 'tool_calls'):
+            print(f"[router] - tool_calls type: {type(last_message.tool_calls)}", flush=True)
+            print(f"[router] - tool_calls value: {last_message.tool_calls}", flush=True)
+        
+        print(f"[router] - has 'additional_kwargs': {hasattr(last_message, 'additional_kwargs')}", flush=True)
+        
         additional_kwargs = getattr(last_message, "additional_kwargs", {})
-        if additional_kwargs and "tool_calls" in additional_kwargs and additional_kwargs["tool_calls"]:
+        print(f"[router] - additional_kwargs: {additional_kwargs}", flush=True)
+        
+        # Check for actual function calls in content
+        import re
+        function_call_pattern = r'(clear_model|add_item|replace_item|delete_item|get_model|solve_model)\('
+        content_has_function_calls = bool(re.search(function_call_pattern, last_message.content))
+        print(f"[router] - Content has function calls: {content_has_function_calls}", flush=True)
+        
+        # Check for tool_calls attribute
+        has_tool_calls_attr = hasattr(last_message, "tool_calls") and last_message.tool_calls
+        
+        # Check additional_kwargs for tool_calls
+        has_tool_calls_kwargs = additional_kwargs and "tool_calls" in additional_kwargs and additional_kwargs["tool_calls"]
+        
+        # Debug tool call detection
+        print(f"[router] AIMessage tool_calls attribute: {has_tool_calls_attr}", flush=True)
+        print(f"[router] AIMessage tool_calls in kwargs: {has_tool_calls_kwargs}", flush=True)
+        
+        # If we find function calls in the content, try to extract and process them
+        if content_has_function_calls and not (has_tool_calls_attr or has_tool_calls_kwargs):
+            print("[router] Found function calls in content but no tool_calls, routing to call_tools", flush=True)
+            
+            # This is a backup approach for models that don't use the structured format
+            # Extract function calls from content and add them to additional_kwargs
+            tool_calls = extract_tool_calls_from_content(last_message.content)
+            if tool_calls:
+                # Dynamically add tool_calls to the message's additional_kwargs
+                if not hasattr(last_message, "additional_kwargs"):
+                    setattr(last_message, "additional_kwargs", {})
+                last_message.additional_kwargs["tool_calls"] = tool_calls
+                print(f"[router] Extracted {len(tool_calls)} tool calls from content", flush=True)
+                return "call_tools"
+        
+        if has_tool_calls_attr or has_tool_calls_kwargs:
+            print("[router] Found tool calls, routing to call_tools", flush=True)
             return "call_tools"
     
     # If no conditions match or AI message doesn't have tool calls, go to reviewer if we haven't already
-    if not state.get("review_result"):  # Only go to reviewer if we haven't already
+    # and if we have the required information for review
+    if not state.get("review_result") and state.get("review_prompt") and state.get("mem_model") and state.get("mem_solution"):
+        print("[router] All conditions met for review, routing to call_reviewer", flush=True)
         return "call_reviewer"
     
-    # If we've already been to the reviewer, end the graph
+    # If we've already been to the reviewer or don't have enough information, end the graph
+    print("[router] No further actions needed, ending graph", flush=True)
     return END
+
+def extract_tool_calls_from_content(content: str) -> List[Dict]:
+    """Extract tool calls from message content for models that don't use structured format.
+    
+    Args:
+        content: The message content to extract tool calls from
+        
+    Returns:
+        List of extracted tool calls in a format compatible with tool_calls
+    """
+    import re
+    
+    # Pattern to match function calls like: function_name(arg1="value1", arg2="value2")
+    # or function_name({"arg1": "value1", "arg2": "value2"})
+    pattern = r'(clear_model|add_item|replace_item|delete_item|get_model|solve_model)\(([^)]*)\)'
+    
+    tool_calls = []
+    matches = re.finditer(pattern, content)
+    
+    for i, match in enumerate(matches):
+        function_name = match.group(1)
+        args_str = match.group(2).strip()
+        
+        # Try to parse arguments
+        args = {}
+        try:
+            # If args look like a dictionary
+            if args_str.startswith('{') and args_str.endswith('}'):
+                # Use a safe eval-like approach instead of eval
+                import ast
+                args = ast.literal_eval(args_str)
+            else:
+                # Handle key=value format
+                arg_pattern = r'(\w+)=(?:"([^"]*)"|\'([^\']*)\'|(\{[^}]*\})|(\d+))'
+                arg_matches = re.finditer(arg_pattern, args_str)
+                
+                for arg_match in arg_matches:
+                    key = arg_match.group(1)
+                    # Find the first non-None value among the capture groups
+                    value = next((g for g in arg_match.groups()[1:] if g is not None), "")
+                    args[key] = value
+        except Exception as e:
+            print(f"Error parsing args: {e}", file=sys.stderr)
+            args = {"raw_args": args_str}
+        
+        # Create a tool call entry
+        tool_call = {
+            "id": f"call_{i}",
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "arguments": args
+            }
+        }
+        
+        tool_calls.append(tool_call)
+    
+    return tool_calls
 
 
 # Step 5: Define the complete graph
@@ -658,6 +794,8 @@ def create_react_agent(model: BaseChatModel, tools: List[BaseTool], system_promp
     Returns:
         A runnable ReAct agent
     """
+    print("[create_react_agent] Creating custom ReAct agent", flush=True)
+    
     # Create a mapping of tool name to tool
     tools_by_name = {tool.name: tool for tool in tools}
     
@@ -677,77 +815,25 @@ def create_react_agent(model: BaseChatModel, tools: List[BaseTool], system_promp
         return call_reviewer(state, model)
     
     # Add the model node
-    workflow.add_node("model", call_model_with_system_prompt)
+    workflow.add_node("call_model", call_model_with_system_prompt)
     
     # Add the tools node
-    workflow.add_node("tools", call_tools_with_tools)
+    workflow.add_node("call_tools", call_tools_with_tools)
     
     # Add the reviewer node 
-    workflow.add_node("reviewer", call_review_with_model)
-    
-    # Tool node for handling tool calls
-    workflow.add_node("tool_node", ToolNode(tools))
+    workflow.add_node("call_reviewer", call_review_with_model)
     
     # Add edges between the nodes
-    workflow.add_edge("model", "tools")
-    workflow.add_edge("tools", "model")
+    workflow.add_edge(START, "call_model")
     
-    # Define conditional edge for ending after model step
-    def should_continue(state):
-        """Check if there are any tool calls in the last AI message."""
-        # Get the most recent message
-        messages = state["messages"]
-        if not messages:
-            return "model"
-            
-        # Get the last message from the AI
-        last_message = messages[-1]
-        if not isinstance(last_message, AIMessage):
-            return "model"
-            
-        # Check if there are any tool calls
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            # There are explicit tool calls
-            return "tools"
-            
-        # Check for tool calls in additional kwargs
-        additional_kwargs = getattr(last_message, "additional_kwargs", {})
-        if additional_kwargs and "tool_calls" in additional_kwargs:
-            # There are tool calls in the additional kwargs
-            return "tools"
-            
-        # No tool calls, check for review prompt
-        if state.get("review_prompt") and state.get("mem_model") and state.get("mem_solution"):
-            # We have everything needed for a review
-            return "reviewer"
-            
-        # If we get here, we're done
-        return END
-    
-    # Add conditional edge out of model
-    workflow.add_conditional_edges(
-        "model",
-        should_continue
-    )
-    
-    # Define conditional edge for completion after tools step
-    def should_end_after_tools(state):
-        """Check if we should end after executing tools."""
-        if state.get("review_prompt") and state.get("mem_model") and state.get("mem_solution"):
-            # We have everything needed for a review
-            return "reviewer"
-        return "model"
-    
-    # Add conditional edge out of tools
-    workflow.add_conditional_edges(
-        "tools",
-        should_end_after_tools
-    )
-    
-    # Add the edge from reviewer to END
-    workflow.add_edge("reviewer", END)
+    # Add the router to determine which node to call next
+    workflow.add_conditional_edges("call_model", router)
+    workflow.add_conditional_edges("call_tools", router)
+    workflow.add_edge("call_reviewer", END)
     
     # Compile the workflow
     app = workflow.compile()
+    
+    print("[create_react_agent] Custom ReAct agent created", flush=True)
     
     return app 

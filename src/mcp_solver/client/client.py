@@ -18,11 +18,18 @@ from mcp_solver.core.prompt_loader import load_prompt
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
-from langgraph.prebuilt import create_react_agent
+
+# Agent implementations
+from langgraph.prebuilt import create_react_agent as create_builtin_agent
+from mcp_solver.client.react_agent import create_react_agent as create_custom_agent
+from mcp_solver.client.react_agent import call_reviewer
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
 from .token_counter import TokenCounter
+
+# Configuration for agent selection
+USE_BUILTIN_AGENT = True  # Set to True to use the built-in LangGraph agent, False to use our custom agent
 
 def format_token_count(count):
     """
@@ -457,9 +464,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     print("", flush=True)
                     sys.stdout.flush()
 
-                    # Initialize the agent with tools - with simplified output
-                    agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
-
                     # Get recursion_limit from args (if provided), then from config, or default to 200
                     recursion_limit = args.recursion_limit if args is not None and hasattr(args, 'recursion_limit') else None
                     if recursion_limit is None:
@@ -496,6 +500,14 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     # token_counter.main_output_tokens = 0
                     
                     try:
+                        # Initialize the agent with tools
+                        if USE_BUILTIN_AGENT:
+                            log_system("Using built-in LangGraph agent")
+                            agent = create_builtin_agent(SOLVE_MODEL, wrapped_tools)
+                        else:
+                            log_system("Using custom MCP Solver agent")
+                            agent = create_custom_agent(SOLVE_MODEL, wrapped_tools)
+
                         # Execute the agent
                         response = await agent.ainvoke(
                             {"messages": state["messages"]}, config=config
@@ -599,8 +611,6 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         try:
             # Simplified reviewer start message
             log_system("Entering Review agent")
-            
-            from mcp_solver.client.react_agent import call_reviewer
             
             # Create a state object that mimics the AgentState expected by call_reviewer
             reviewer_state = {
