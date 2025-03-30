@@ -532,6 +532,21 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             state["messages"].append(
                                 {"role": "assistant", "content": agent_reply}
                             )
+                            
+                            # If token counts are available in the response, preserve them
+                            if "mem_main_input_tokens" in response:
+                                print(f"Main agent input tokens: {response.get('mem_main_input_tokens', 0)}", flush=True)
+                                # Update the token counter
+                                token_counter = TokenCounter.get_instance()
+                                token_counter.main_input_tokens = max(token_counter.main_input_tokens, 
+                                                                     response.get("mem_main_input_tokens", 0))
+                                
+                            if "mem_main_output_tokens" in response:
+                                print(f"Main agent output tokens: {response.get('mem_main_output_tokens', 0)}", flush=True)
+                                # Update the token counter
+                                token_counter = TokenCounter.get_instance()
+                                token_counter.main_output_tokens = max(token_counter.main_output_tokens,
+                                                                      response.get("mem_main_output_tokens", 0))
                         else:
                             print(
                                 "Warning: No message content found in response",

@@ -98,7 +98,13 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     total_tokens = token_counter.get_total_tokens()
     
     # Return updated state with model response added and token count
-    return {"messages": [response], "mem_tokens_used": total_tokens}
+    state_update = {"messages": messages + [response], "mem_tokens_used": total_tokens}
+    
+    # Also preserve the token counts separately for reporting
+    state_update["mem_main_input_tokens"] = token_counter.main_input_tokens
+    state_update["mem_main_output_tokens"] = token_counter.main_output_tokens
+    
+    return state_update
 
 
 # Step 3: Define the tools node function
