@@ -17,12 +17,6 @@ else:
     print("No solution found")
 ```
 
-## Configuration
-
-To run the MCP Solver in Z3 mode:
-
-- Use `mcp-solver-z3` command (instead of `mcp-solver`)
-
 ## Core Features
 
 Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
@@ -44,6 +38,7 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 
    - Use descriptive variable names for readability
    - Group related constraints together
+   - Build long code incremetally by adding smaller items, so you get validation feedback and detect an error early
    - Comment complex constraint logic
 
 3. **Use the correct export_solution call**:
@@ -110,10 +105,11 @@ export_solution(solver=solver, variables={"verified": verified})  # Works
 Here's a modular example that demonstrates using bitvectors and arrays for verification:
 
 ```python
+# Item 1: Setup and imports
 from z3 import *
 from mcp_solver.z3 import export_solution
 
-# Define a verification problem with bitvectors
+# Item 2: Define the bitvector verification model
 def build_verification_model():
     # Create an 8-bit input X
     X = BitVec('X', 8)
@@ -144,11 +140,15 @@ def build_verification_model():
     
     return s, X, Y, Z, parity, index
 
-# Execute the verification
+# Item 3: Execute the verification
+# Build and get our verification model components
 solver, X, Y, Z, parity, index = build_verification_model()
+
+# Check if a counterexample exists (property violation)
 result = solver.check()
 
-# Export the verification result
+# Item 4: Process results and export the solution
+# Create Z3 boolean for the verification result
 property_verified = Bool('property_verified')
 result_solver = Solver()
 
@@ -165,6 +165,7 @@ else:
 
 # Export the solution
 export_solution(solver=result_solver, variables={"property_verified": property_verified})
+
 ```
 
 This example verifies whether a computed value Z (the lowest bit of X XOR table[X&7]) always equals the parity of X. The structured approach makes it easy to build, verify, and analyze complex properties using bitvectors and arrays.
@@ -183,25 +184,47 @@ Here are patterns for common proof techniques:
 ### Proving Algebraic Identities
 
 ```python
-# To prove expressions e1 and e2 are equal for all values in the domain:
+# Item 1: Setup and imports
 from z3 import *
+from mcp_solver.z3 import export_solution
 
-def prove_equality(e1, e2):
-    # Create a solver that attempts to find a counterexample
-    s = Solver()
-    x = Int('x')
-    # Add domain constraints if necessary
-    s.add(x > 0)
-    # Try to find a case where expressions are NOT equal
-    s.add(simplify(e1) != simplify(e2))
-    
-    # If check() returns unsat, no counterexample exists, proving equality
-    if s.check() == unsat:
-        print("Expressions are equal for all valid inputs")
-        return True
-    else:
-        print("Found counterexample:", s.model())
-        return False
+# Setup variables for our test
+x = Int('x')
+
+# Item 2: Define the expressions and create a solver to check equality
+# Test expressions: x² + 2x ≡ x(x+2)
+expr1 = x**2 + 2*x
+expr2 = x*(x+2)
+
+# Create a solver that attempts to find a counterexample
+solver = Solver()
+
+# Add domain constraints if necessary
+solver.add(x > 0)
+
+# Try to find a case where expressions are NOT equal
+solver.add(simplify(expr1) != simplify(expr2))
+
+# Item 3: Check results and export the solution
+# Create Z3 boolean for the verification result
+equality_proven = Bool('equality_proven')
+result_solver = Solver()
+
+# Check if a counterexample exists
+result = solver.check()
+if result == unsat:
+    # No counterexample found, expressions are equal
+    print("Expressions are equal for all valid inputs")
+    result_solver.add(equality_proven == True)
+else:
+    # Found a counterexample
+    model = solver.model()
+    print("Found counterexample:", model)
+    result_solver.add(equality_proven == False)
+
+# Export the solution using the result solver and boolean variable
+export_solution(solver=result_solver, variables={"equality_proven": equality_proven})
+
 ```
 
 ### Mathematical Induction - Recommended Approach
@@ -269,15 +292,18 @@ This approach:
 When working with algebraic transformations, use `simplify()` to verify steps:
 
 ```python
+# Item 1: Setup and import Z3
 from z3 import *
+from mcp_solver.z3 import export_solution
 
-# Example: Verify an algebraic transformation
+# Define the variable for our algebraic verification
 k = Int('k')
 
-# Starting expression
+# Item 2: Define and expand the expressions
+# Starting expression: k²(k+1)²/4 + (k+1)³
 expr1 = k**2 * (k+1)**2 / 4 + (k+1)**3
 
-# Target expression after transformation
+# Target expression: (k+1)²(k+2)²/4
 expr2 = (k+1)**2 * (k+2)**2 / 4
 
 # Expand both expressions for comparison
@@ -287,11 +313,33 @@ expanded2 = simplify(expr2)
 print("Expanded expr1:", expanded1)
 print("Expanded expr2:", expanded2)
 
-# Verify they are equal
-if simplify(expanded1 - expanded2) == 0:
-    print("Expressions are equivalent")
+# Item 3: Verify equivalence and export results
+# Try to find a counterexample where the expressions differ
+counterexample_solver = Solver()
+counterexample_solver.add(expr1 != expr2)
+
+# Check if a counterexample exists
+result = counterexample_solver.check()
+
+# Create Z3 boolean for the verification result
+is_equivalent = Bool('is_equivalent')
+result_solver = Solver()
+
+if result == unsat:
+    # No counterexample found, expressions are equivalent
+    result_solver.add(is_equivalent == True)
+    print("Expressions are equivalent (verified: no counterexample exists)")
 else:
-    print("Expressions differ")
+    # Found a counterexample
+    model = counterexample_solver.model()
+    k_value = model[k]
+    result_solver.add(is_equivalent == False)
+    print(f"Expressions differ. Counterexample: k = {k_value}")
+    print(f"Value of expr1 at k = {k_value}: {simplify(substitute(expr1, [(k, k_value)]))}")
+    print(f"Value of expr2 at k = {k_value}: {simplify(substitute(expr2, [(k, k_value)]))}")
+
+# Export the verification result
+export_solution(solver=result_solver, variables={"is_equivalent": is_equivalent})
 ```
 
 ## Template Library
@@ -313,54 +361,57 @@ from mcp_solver.z3.templates import (
 )
 ```
 
+
+
+
+
 ## Example Model: Sudoku Solver
 
 ```python
 from z3 import *
 from mcp_solver.z3 import export_solution  # Import the export_solution function
 
-def build_model():
-    # Sudoku puzzle (3x3 for simplicity)
-    # 0 represents empty cells
-    puzzle = [
-        [5, 3, 0],
-        [6, 0, 0],
-        [0, 9, 8]
-    ]
-    
-    # Create 3x3 matrix of integer variables
-    cells = [[Int(f"cell_{i}_{j}") for j in range(3)] for i in range(3)]
-    
-    # Create solver
-    s = Solver()
-    
-    # Add constraints
-    for i in range(3):
-        for j in range(3):
-            # Domain constraints
-            s.add(cells[i][j] >= 1, cells[i][j] <= 9)
-            
-            # Fixed cells
-            if puzzle[i][j] != 0:
-                s.add(cells[i][j] == puzzle[i][j])
-    
-    # All distinct in rows, columns
-    for i in range(3):
-        s.add(all_distinct([cells[i][j] for j in range(3)]))  # Rows
-        s.add(all_distinct([cells[j][i] for j in range(3)]))  # Columns
-    
-    variables = {f"cell_{i}_{j}": cells[i][j] for i in range(3) for j in range(3)}
-    return s, variables
+# Step 1: Define the puzzle and create the model
+# Sudoku puzzle (3x3 for simplicity)
+# 0 represents empty cells
+puzzle = [
+    [5, 3, 0],
+    [6, 0, 0],
+    [0, 9, 8]
+]
 
-# Solve the model and export the solution
-solver, variables = build_model()
+# Create 3x3 matrix of integer variables
+cells = [[Int(f"cell_{i}_{j}") for j in range(3)] for i in range(3)]
 
+# Create solver
+solver = Solver()
+
+# Step 2: Add domain and fixed cell constraints
+for i in range(3):
+    for j in range(3):
+        # Domain constraints
+        solver.add(cells[i][j] >= 1, cells[i][j] <= 9)
+        
+        # Fixed cells
+        if puzzle[i][j] != 0:
+            solver.add(cells[i][j] == puzzle[i][j])
+
+# Step 3: Add row and column distinctness constraints
+for i in range(3):
+    solver.add(Distinct([cells[i][j] for j in range(3)]))  # Rows
+    solver.add(Distinct([cells[j][i] for j in range(3)]))  # Columns
+
+# Step 4: Create variables dictionary for exporting
+variables = {f"cell_{i}_{j}": cells[i][j] for i in range(3) for j in range(3)}
+
+# Step 5: Solve and export the solution
 # Always check if a solution exists before exporting
 if solver.check() == sat:
     # This line is REQUIRED to extract the solution
     export_solution(solver=solver, variables=variables)
 else:
     print("No solution found")
+
 ```
 
 ## Function Scope and Variable Access
@@ -513,78 +564,95 @@ else:
 Here's a complete example showing how to prove that the sum of cubes from 1 to n equals n²(n+1)²/4:
 
 ```python
+# Item 1: Setup and imports
 from z3 import *
 from mcp_solver.z3 import export_solution
 
-def prove_sum_of_cubes():
-    # Create solver
-    solver = Solver()
-    
-    # 1. Verify concrete examples first
-    print("CONCRETE EXAMPLES VERIFICATION:")
-    for n_val in range(1, 6):
-        # Calculate sum of cubes
-        sum_cubes = sum(i**3 for i in range(1, n_val+1))
-        # Calculate formula result
-        formula = (n_val**2 * (n_val+1)**2) // 4
-        
-        print(f"n = {n_val}: sum = {sum_cubes}, formula = {formula}")
-        if sum_cubes != formula:
-            print(f"MISMATCH at n = {n_val}")
-    
-    # 2. Base case verification (n=1)
-    print("\nBASE CASE (n=1):")
-    base_sum = 1  # 1³ = 1
-    base_formula = (1**2 * (1+1)**2) // 4  # 1²*2²/4 = 1
-    print(f"Base case: {base_sum} = {base_formula}")
-    
-    # 3. Inductive step - symbolic verification
-    print("\nINDUCTIVE STEP:")
-    
-    # Symbolic variables
-    k = Int('k')
-    
-    # Inductive hypothesis: sum of cubes from 1 to k = k²(k+1)²/4
-    sum_k = k*k*(k+1)*(k+1) / 4
-    
-    # Next term (k+1)³
-    next_term = (k+1)*(k+1)*(k+1)
-    
-    # Sum for k+1: sum for k + (k+1)³ 
-    sum_k_plus_1 = sum_k + next_term
-    
-    # Formula for k+1: (k+1)²(k+2)²/4
-    formula_k_plus_1 = (k+1)*(k+1)*(k+2)*(k+2) / 4
-    
-    # Check if they are equal by trying to find a counterexample
-    ind_solver = Solver()
-    ind_solver.add(k > 0)
-    ind_solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
-    
-    if ind_solver.check() == unsat:
-        print("Inductive step verified: No counterexample found")
-        
-        # Create Z3 boolean for the result
-        proof_verified = Bool('proof_verified')
-        result_solver = Solver()
-        result_solver.add(proof_verified == True)
-        
-        return result_solver, {"proof_verified": proof_verified}
-    else:
-        print(f"Counterexample found: k = {ind_solver.model()[k]}")
-        
-        # Create Z3 boolean for the result
-        proof_verified = Bool('proof_verified')
-        result_solver = Solver()
-        result_solver.add(proof_verified == False)
-        
-        return result_solver, {"proof_verified": proof_verified}
+# Item 2: Verify concrete examples
+print("CONCRETE EXAMPLES VERIFICATION:")
+all_examples_match = True
 
-# Call the proof function
-solver, variables = prove_sum_of_cubes()
+for n_val in range(1, 6):
+    # Calculate sum of cubes
+    sum_cubes = sum(i**3 for i in range(1, n_val+1))
+    
+    # Calculate formula result
+    formula = (n_val**2 * (n_val+1)**2) // 4
+    
+    print(f"n = {n_val}: sum = {sum_cubes}, formula = {formula}")
+    
+    if sum_cubes != formula:
+        print(f"MISMATCH at n = {n_val}")
+        all_examples_match = False
 
-# Export the result
-export_solution(solver=solver, variables=variables)
+# Item 3: Verify the base case (n=1)
+print("\nBASE CASE (n=1):")
+base_sum = 1  # 1³ = 1
+base_formula = (1**2 * (1+1)**2) // 4  # 1²*2²/4 = 1
+print(f"Base case: {base_sum} = {base_formula}")
+
+base_case_verified = (base_sum == base_formula)
+
+# Item 4: Inductive step verification
+print("\nINDUCTIVE STEP:")
+
+# Symbolic variables
+k = Int('k')
+
+# Inductive hypothesis: sum of cubes from 1 to k = k²(k+1)²/4
+sum_k = k*k*(k+1)*(k+1) / 4
+
+# Next term (k+1)³
+next_term = (k+1)*(k+1)*(k+1)
+
+# Sum for k+1: sum for k + (k+1)³ 
+sum_k_plus_1 = sum_k + next_term
+
+# Formula for k+1: (k+1)²(k+2)²/4
+formula_k_plus_1 = (k+1)*(k+1)*(k+2)*(k+2) / 4
+
+# Create solver to find a counterexample
+ind_solver = Solver()
+ind_solver.add(k > 0)  # Domain constraint: k is positive
+ind_solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
+
+# Check if they are equal by trying to find a counterexample
+induction_result = ind_solver.check()
+if induction_result == unsat:
+    print("Inductive step verified: No counterexample found")
+    induction_verified = True
+else:
+    counterexample = ind_solver.model()[k]
+    print(f"Counterexample found: k = {counterexample}")
+    induction_verified = False
+
+# Item 5: Consolidate results and export the solution
+# Create Z3 boolean for the final verification result
+proof_verified = Bool('proof_verified')
+result_solver = Solver()
+
+# The proof is verified if all three parts succeeded
+result_solver.add(proof_verified == (all_examples_match and base_case_verified and induction_verified))
+
+# Print final conclusion
+if all_examples_match and base_case_verified and induction_verified:
+    print("\nPROOF COMPLETED SUCCESSFULLY:")
+    print("✓ All concrete examples match")
+    print("✓ Base case verified")
+    print("✓ Inductive step verified")
+    print("\nTherefore, the formula 1³ + 2³ + ... + n³ = [n²(n+1)²]/4 is proven.")
+else:
+    print("\nPROOF FAILED:")
+    if not all_examples_match:
+        print("✗ Concrete examples don't match")
+    if not base_case_verified:
+        print("✗ Base case failed")
+    if not induction_verified:
+        print("✗ Inductive step failed")
+
+# Export the solution
+export_solution(solver=result_solver, variables={"proof_verified": proof_verified})
+
 ```
 
 ## Model Tracking
