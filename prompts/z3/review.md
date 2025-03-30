@@ -16,12 +16,23 @@ IMPORTANT: Your answer MUST follow this exact JSON format:
 
 ```json
 {
-  "correctness": "correct",
-  "explanation": "Your detailed justification of the assessment here"
+  "explanation": "Your detailed justification of the assessment here, list all constraints. END WITH A CLEAR CONCLUSION STATEMENT.",
+  "correctness": "correct"
 }
 ```
 
 The "correctness" field MUST be exactly one of: "correct", "incorrect", or "unknown".
+
+IMPORTANT: Follow this exact process:
+1. First, analyze each constraint in detail in the "explanation" field
+2. End your explanation with a clear conclusion: "The solution is correct." or "The solution is incorrect."
+3. Only AFTER completing your explanation, set the "correctness" field to match your conclusion
+
+IMPORTANT: Before finalizing your response, always check that:
+1. Your explanation ends with a clear conclusion statement
+2. The "correctness" field matches your conclusion exactly
+3. If your explanation concludes "The solution is correct", then set "correctness" to "correct"
+4. If your explanation concludes "The solution is incorrect", then set "correctness" to "incorrect"
 
 DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object.
 
