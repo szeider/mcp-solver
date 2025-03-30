@@ -13,6 +13,9 @@ import json
 import traceback
 from copy import deepcopy
 from string import Template
+import logging
+import os
+import re
 
 from langchain_core.messages import (
     AIMessage, 
@@ -421,36 +424,36 @@ def execute_tool_safely(tool: BaseTool, tool_name: str, tool_id: str, tool_args:
 
 # Step 3.5: Define the reviewer node function
 def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
-    """Review the solution using the review prompt and model/solution memory.
+    """Call a reviewer to assess the solution.
+    
+    This function takes the current agent state, which includes the solution,
+    and calls a reviewer to assess its correctness.
     
     Args:
-        state: The current agent state with mem_problem, mem_model, mem_solution
+        state: The current agent state
         model: The language model to use
         
     Returns:
-        Updated state with review results
+        Updated state with review result added
     """
-    # Get necessary data from state
-    review_prompt = state.get("review_prompt", "")
-    mem_problem = state.get("mem_problem", "")
-    mem_model = state.get("mem_model", "")
-    mem_solution = state.get("mem_solution", "")
+    global mem_solution
     
     print("DEBUG - REVIEW PROCESS STARTING", flush=True)
-    print(f"DEBUG - Review prompt length: {len(review_prompt)} chars", flush=True)
-    print(f"DEBUG - Problem length: {len(mem_problem)} chars", flush=True)
-    print(f"DEBUG - Model length: {len(mem_model)} chars", flush=True)
-    print(f"DEBUG - Solution length: {len(mem_solution)} chars", flush=True)
-    
+
+    # Extract necessary information from state
+    mem_problem = state.get("mem_problem", "No problem statement provided")
+    mem_model = state.get("mem_model", "No model code provided")  
+    solution = state.get("mem_solution", mem_solution)
+
     # Process the solution to make it more readable if it's in JSON format
-    processed_solution = mem_solution
+    processed_solution = solution
     try:
-        if isinstance(mem_solution, str) and "solution" in mem_solution:
+        if isinstance(solution, str) and "solution" in solution:
             # Try using ast.literal_eval which is safer than eval for parsing Python literals
             import ast
             try:
                 # Convert the string representation of a dict to an actual dict
-                solution_dict = ast.literal_eval(mem_solution)
+                solution_dict = ast.literal_eval(solution)
                 
                 if isinstance(solution_dict, dict) and 'solution' in solution_dict:
                     solution_values = solution_dict['solution']
@@ -470,7 +473,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                 import json
                 
                 # Extract the solution part
-                solution_match = re.search(r"'solution'\s*:\s*({[^}]+})", mem_solution)
+                solution_match = re.search(r"'solution'\s*:\s*({[^}]+})", solution)
                 if solution_match:
                     try:
                         # Try to parse just the solution part
@@ -481,7 +484,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
                             processed_solution += f"{var} = {value}\n"
                         
                         # Check for satisfiability
-                        if "'satisfiable': True" in mem_solution:
+                        if "'satisfiable': True" in solution:
                             processed_solution += "\nThe model is satisfiable."
                     except json.JSONDecodeError:
                         # If JSON parsing fails, extract manually
@@ -496,7 +499,7 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
         pass
     
     # Create reviewer prompt using Template
-    reviewer_template = Template(review_prompt)
+    reviewer_template = Template(state.get("review_prompt", ""))
     reviewer_prompt = reviewer_template.substitute(
         PROBLEM=mem_problem,
         MODEL=mem_model,
@@ -511,130 +514,75 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
     # Request structured output with clearer formatting instructions
     structured_prompt = f"""{reviewer_prompt}
 
-IMPORTANT: Your answer MUST follow this exact JSON format:
-
-```json
-{{
-  "correctness": "correct",  // Must be exactly one of: "correct", "incorrect", or "unknown"
-  "explanation": "Your detailed explanation here"
-}}
-```
-
-DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object as shown above."""
+Return your assessment in JSON format with these fields:
+- correctness: must be exactly one of "correct", "incorrect", or "unknown"
+- explanation: your detailed justification
+"""
     
     try:
         # Track reviewer input tokens using the TokenCounter
         token_counter = TokenCounter.get_instance()
         token_counter.count_reviewer_input(structured_prompt)
         
-        # Call the model with a HumanMessage
+        # Call the model with a HumanMessage and specify JSON response format
         review_message = HumanMessage(content=structured_prompt)
-        response = model.invoke([review_message])
         
+        # Try using native JSON mode if available based on the model type
+        try:
+            # For OpenAI or Anthropic models that support response_format
+            response = model.invoke(
+                [review_message],
+                response_format={"type": "json_object"}
+            )
+        except (TypeError, ValueError, AttributeError):
+            # Fallback for models that don't support response_format parameter
+            print("DEBUG - Model doesn't support native JSON mode, using standard invoke", flush=True)
+            response = model.invoke([review_message])
+            
         # Track reviewer output tokens using the TokenCounter
         token_counter.count_reviewer_output(response.content)
         
         # Print the full response for debugging
         print("DEBUG - Raw reviewer response:", flush=True)
-        print("======================================", flush=True)
         print(response.content, flush=True)
-        print("======================================", flush=True)
         
-        # Try to parse JSON from the response
+        # Try to parse JSON from the response - simplified approach
         review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
+        
+        # Simple JSON extraction - look for content between ```json and ``` markers or direct JSON
+        content = response.content
         try:
-            # Look for JSON in the response
-            import re
             import json
             
-            # Find complete JSON objects by parsing the text carefully with brace matching
-            def extract_json_object(text):
-                # Find potential start of a JSON object
-                start_idx = text.find('{')
-                if start_idx == -1:
-                    return None
+            # Try direct JSON parsing first (for native JSON mode responses)
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and "correctness" in parsed:
+                    review_result = parsed
+                    print(f"DEBUG - Successfully parsed direct JSON", flush=True)
+            except json.JSONDecodeError:
+                # If direct parsing fails, look for ```json blocks
+                import re
+                json_block_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
                 
-                # Count opening and closing braces to find the complete object
-                open_braces = 0
-                for i in range(start_idx, len(text)):
-                    if text[i] == '{':
-                        open_braces += 1
-                    elif text[i] == '}':
-                        open_braces -= 1
-                        if open_braces == 0:
-                            # Complete JSON object found
-                            return text[start_idx:i+1]
-                
-                # If we exit the loop, no complete JSON object was found
-                return None
-            
-            # Extract first JSON object
-            json_str = extract_json_object(response.content)
-            
-            if json_str:
-                print(f"DEBUG - Extracted complete JSON string: {json_str}", flush=True)
-                try:
-                    parsed = json.loads(json_str)
-                    print(f"DEBUG - Parsed JSON: {parsed}", flush=True)
+                if json_block_match:
+                    # Extract JSON from code block
+                    json_content = json_block_match.group(1).strip()
+                    print(f"DEBUG - Found JSON code block", flush=True)
+                    parsed = json.loads(json_content)
                     if isinstance(parsed, dict) and "correctness" in parsed:
                         review_result = parsed
-                    else:
-                        print("DEBUG - JSON missing 'correctness' field", flush=True)
-                except json.JSONDecodeError as e:
-                    print(f"DEBUG - JSON parsing error: {str(e)}", flush=True)
-                    # Try to fix common JSON issues (single quotes instead of double quotes)
-                    try:
-                        import ast
-                        # Replace single quotes with double quotes for JSON compatibility
-                        fixed_str = json_str.replace("'", '"')
-                        # Try with direct json loads after fixing quotes
-                        try:
-                            fixed_parsed = json.loads(fixed_str)
-                            if isinstance(fixed_parsed, dict) and "correctness" in fixed_parsed:
-                                review_result = fixed_parsed
-                                print(f"DEBUG - Fixed JSON with quote replacement: {fixed_parsed}", flush=True)
-                        except Exception as e3:
-                            print(f"DEBUG - Failed to fix with quote replacement: {str(e3)}", flush=True)
-                            # Fall back to ast.literal_eval
-                            fixed_dict = ast.literal_eval(json_str)
-                            if isinstance(fixed_dict, dict) and "correctness" in fixed_dict:
-                                review_result = fixed_dict
-                                print(f"DEBUG - Fixed JSON with ast.literal_eval: {fixed_dict}", flush=True)
-                    except Exception as e2:
-                        print(f"DEBUG - Failed to fix JSON with ast: {str(e2)}", flush=True)
-            else:
-                print("DEBUG - No JSON object found in response", flush=True)
-                # Try explicit patterns for correctness
-                print("DEBUG - Looking for explicit verdict patterns", flush=True)
-                
-                # Look for markdown style verdicts
-                if "verdict: correct" in response.content.lower() or "verdict: *correct*" in response.content.lower() or "correct" in response.content.lower() and "incorrect" not in response.content.lower():
-                    print("DEBUG - Found explicit 'correct' verdict", flush=True)
-                    # Extract explanation if possible
-                    explanation = "Explicit correct verdict found in response"
-                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
-                    if explanation_match:
-                        explanation = explanation_match.group(1).strip()
-                    review_result = {"correctness": "correct", "explanation": explanation}
-                elif "verdict: incorrect" in response.content.lower() or "verdict: *incorrect*" in response.content.lower():
-                    print("DEBUG - Found explicit 'incorrect' verdict", flush=True)
-                    # Extract explanation if possible
-                    explanation = "Explicit incorrect verdict found in response"
-                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
-                    if explanation_match:
-                        explanation = explanation_match.group(1).strip()
-                    review_result = {"correctness": "incorrect", "explanation": explanation}
-                elif "verdict: unknown" in response.content.lower() or "verdict: *unknown*" in response.content.lower():
-                    print("DEBUG - Found explicit 'unknown' verdict", flush=True)
-                    # Extract explanation if possible
-                    explanation = "Explicit unknown verdict found in response"
-                    explanation_match = re.search(r'justification:(.+?)(?=\n\n|\Z)', response.content, re.DOTALL | re.IGNORECASE)
-                    if explanation_match:
-                        explanation = explanation_match.group(1).strip()
-                    review_result = {"correctness": "unknown", "explanation": explanation}
+                else:
+                    # If no code block, look for any JSON object in the response
+                    json_match = re.search(r'(\{.*\})', content, re.DOTALL)
+                    if json_match:
+                        json_content = json_match.group(1).strip()
+                        print(f"DEBUG - Found JSON object in text", flush=True)
+                        parsed = json.loads(json_content)
+                        if isinstance(parsed, dict) and "correctness" in parsed:
+                            review_result = parsed
         except Exception as e:
-            print(f"DEBUG - General error parsing review: {str(e)}", flush=True)
-            print(f"DEBUG - Response type: {type(response.content)}", flush=True)
+            print(f"DEBUG - JSON parsing failed: {str(e)}", flush=True)
         
         # Extract verdict from review result
         mem_review_verdict = review_result.get("correctness", "unknown")

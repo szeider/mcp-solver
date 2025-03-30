@@ -16,13 +16,14 @@ IMPORTANT: Your answer MUST follow this exact JSON format:
 
 ```json
 {
-  "correctness": "correct",  // Must be exactly one of: "correct", "incorrect", or "unknown"
-  "confidence": 10,          // Integer from 0 (not confident) to 10 (very confident)
+  "correctness": "correct",
   "explanation": "Your detailed justification of the assessment here"
 }
 ```
 
-DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object as shown above.
+The "correctness" field MUST be exactly one of: "correct", "incorrect", or "unknown".
+
+DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object.
 
 ## Data
 
