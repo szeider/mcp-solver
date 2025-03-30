@@ -14,11 +14,11 @@ from .llm_factory import LLMFactory
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
+from mcp_solver.core.prompt_loader import load_prompt
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
-from mcp_solver.core.prompt_loader import load_prompt
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
@@ -215,10 +215,6 @@ def wrap_tool(tool):
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
                     
-                    # Explicitly print mem_solution for test runner to capture
-                    print(f"mem_solution: {wrap_tool.mem_solution}")
-                    sys.stdout.flush()
-
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
                     for available_tool in getattr(wrap_tool, "available_tools", []):
@@ -231,10 +227,6 @@ def wrap_tool(tool):
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
                                 
-                                # Explicitly print mem_model for test runner to capture
-                                print(f"mem_model: {wrap_tool.mem_model}")
-                                sys.stdout.flush()
-
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
@@ -247,10 +239,6 @@ def wrap_tool(tool):
                     if tool_name == "get_model":
                         # Create a global variable to store the model
                         wrap_tool.mem_model = formatted
-                        
-                        # Explicitly print mem_model for test runner to capture
-                        print(f"mem_model: {wrap_tool.mem_model}")
-                        sys.stdout.flush()
 
                 return result
             except Exception as e:
@@ -295,10 +283,6 @@ def wrap_tool(tool):
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
                     
-                    # Explicitly print mem_solution for test runner to capture
-                    print(f"mem_solution: {wrap_tool.mem_solution}")
-                    sys.stdout.flush()
-
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
                     for available_tool in getattr(wrap_tool, "available_tools", []):
@@ -315,10 +299,6 @@ def wrap_tool(tool):
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
                                 
-                                # Explicitly print mem_model for test runner to capture
-                                print(f"mem_model: {wrap_tool.mem_model}")
-                                sys.stdout.flush()
-
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
@@ -331,10 +311,6 @@ def wrap_tool(tool):
                     if tool_name == "get_model":
                         # Create a global variable to store the model
                         wrap_tool.mem_model = formatted
-                        
-                        # Explicitly print mem_model for test runner to capture
-                        print(f"mem_model: {wrap_tool.mem_model}")
-                        sys.stdout.flush()
 
                 return result
             except Exception as e:
@@ -515,9 +491,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     
                     # Ensure token counter is initialized before agent runs
                     token_counter = TokenCounter.get_instance()
-                    # Reset token counts before agent runs to avoid accumulation from previous runs
-                    token_counter.main_input_tokens = 0
-                    token_counter.main_output_tokens = 0
+                    # Do not reset token counts - this prevents proper tracking
+                    # token_counter.main_input_tokens = 0
+                    # token_counter.main_output_tokens = 0
                     
                     try:
                         # Execute the agent
@@ -525,6 +501,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             {"messages": state["messages"]}, config=config
                         )
 
+                        # Debug output - print response structure
+                        print(f"Agent response keys: {list(response.keys())}", flush=True)
+                        
                         # Extract and add the agent's response to state
                         if (
                             response.get("messages")
@@ -544,25 +523,26 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             for key, value in response.items():
                                 if key != "messages" and key.startswith("mem_"):
                                     state[key] = value
-                                    print(f"State update: {key} = {value}", flush=True)
+                                    # Debug print only if needed
+                                    # print(f"State update: {key} = {value}", flush=True)
                             
                             # Explicitly update token counter from response
                             if "mem_main_input_tokens" in response:
                                 input_tokens = response.get("mem_main_input_tokens", 0)
-                                print(f"Main agent input tokens: {input_tokens}", flush=True)
+                                # print(f"Main agent input tokens: {input_tokens}", flush=True)
                                 if input_tokens > 0:
                                     token_counter.main_input_tokens = input_tokens
                             
                             if "mem_main_output_tokens" in response:
                                 output_tokens = response.get("mem_main_output_tokens", 0)
-                                print(f"Main agent output tokens: {output_tokens}", flush=True)
+                                # print(f"Main agent output tokens: {output_tokens}", flush=True)
                                 if output_tokens > 0:
                                     token_counter.main_output_tokens = output_tokens
                             
                             # If we didn't get explicit token counts but we got messages, estimate them
                             if token_counter.main_input_tokens == 0 and response.get("messages"):
                                 # Estimate tokens from input messages
-                                print("No token counts found, estimating from messages...", flush=True)
+                                # Don't print annoying message: print("No token counts found, estimating from messages...", flush=True)
                                 input_msgs = [msg for msg in response.get("messages", []) if not isinstance(msg, AIMessage)]
                                 token_counter.count_main_input(input_msgs)
                                 
@@ -607,8 +587,8 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     
     # Always print the current state's mem_solution before review
     # This ensures the value is available in the logs even if tools were never called
-    print(f"mem_solution: {state.get('mem_solution', 'No solution generated yet')}")
-    sys.stdout.flush()
+    # print(f"mem_solution: {state.get('mem_solution', 'No solution generated yet')}")
+    # sys.stdout.flush()
     
     # Display problem, model, and result before reviewing
     display_problem_model_result(state)
