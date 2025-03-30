@@ -533,20 +533,27 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                 {"role": "assistant", "content": agent_reply}
                             )
                             
-                            # If token counts are available in the response, preserve them
+                            # Pass all relevant state updates from the response to the state object
+                            # This ensures token counts and other metadata are preserved
+                            for key, value in response.items():
+                                if key != "messages" and key.startswith("mem_"):
+                                    state[key] = value
+                                    print(f"State update: {key} = {value}", flush=True)
+                            
+                            # Explicitly handle token counts for backward compatibility 
+                            token_counter = TokenCounter.get_instance()
                             if "mem_main_input_tokens" in response:
                                 print(f"Main agent input tokens: {response.get('mem_main_input_tokens', 0)}", flush=True)
-                                # Update the token counter
-                                token_counter = TokenCounter.get_instance()
                                 token_counter.main_input_tokens = max(token_counter.main_input_tokens, 
-                                                                     response.get("mem_main_input_tokens", 0))
-                                
+                                                                    response.get("mem_main_input_tokens", 0))
+                            
                             if "mem_main_output_tokens" in response:
                                 print(f"Main agent output tokens: {response.get('mem_main_output_tokens', 0)}", flush=True)
-                                # Update the token counter
-                                token_counter = TokenCounter.get_instance()
                                 token_counter.main_output_tokens = max(token_counter.main_output_tokens,
-                                                                      response.get("mem_main_output_tokens", 0))
+                                                                    response.get("mem_main_output_tokens", 0))
+                            
+                            # Log the token totals for debugging
+                            print(f"Current token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}", flush=True)
                         else:
                             print(
                                 "Warning: No message content found in response",
@@ -580,10 +587,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
     
-    # Always print the current state's mem_solution and mem_model before review
-    # This ensures these values are available in the logs even if tools were never called
+    # Always print the current state's mem_solution before review
+    # This ensures the value is available in the logs even if tools were never called
     print(f"mem_solution: {state.get('mem_solution', 'No solution generated yet')}")
-    print(f"mem_model: {state.get('mem_model', 'No model captured yet')}")
     sys.stdout.flush()
     
     # Display problem, model, and result before reviewing
@@ -802,12 +808,31 @@ def generate_result_json(state, json_path):
     tool_stats = ToolStats.get_instance()
     tool_calls = tool_stats.tool_calls if tool_stats.enabled else {}
     
+    # Get the full explanation from the review result
+    review_explanation = ""
+    if isinstance(state.get("review_result"), dict):
+        review_explanation = state["review_result"].get("explanation", "")
+    
+    # If we have the full review text available, use that as a backup
+    if not review_explanation and state.get("mem_review_text"):
+        # Try to extract just the explanation part (before any verdict tag)
+        import re
+        verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', 
+                                 state.get("mem_review_text", ""), 
+                                 re.IGNORECASE)
+        if verdict_match:
+            parts = state["mem_review_text"].split('<verdict>')
+            review_explanation = parts[0].strip()
+        else:
+            # Use the full text as explanation
+            review_explanation = state.get("mem_review_text", "")
+    
     # Prepare JSON data
     json_data = {
         "problem": state.get("mem_problem", ""),
         "model": state.get("mem_model", "No model captured"),
         "solution": state.get("mem_solution", "No solution generated"),
-        "review_text": state.get("review_result", {}).get("explanation", ""),
+        "review_text": review_explanation,
         "review_verdict": state.get("review_result", {}).get("correctness", "unknown"),
         "result": "correct" if state.get("review_result", {}).get("correctness") == "correct" else "incorrect",
         "tool_calls": tool_calls,

@@ -46,29 +46,36 @@ Follow these steps carefully:
 
 ## Output Format
 
-IMPORTANT: Your answer MUST follow this exact JSON format:
+After your detailed analysis, provide your verdict using simple XML tags.
 
-```json
-{
-  "explanation": "Your detailed justification of the assessment here, list all constraints. END WITH A CLEAR CONCLUSION STATEMENT.",
-  "correctness": "correct"
-}
+IMPORTANT: Your answer MUST follow this structure:
+1. First provide a detailed explanation of your reasoning
+2. Analyze each constraint in detail
+3. End with a clear conclusion statement: "The solution is correct." or "The solution is incorrect."
+4. Finally, add exactly ONE of these verdict tags on a new line:
+   <verdict>correct</verdict>
+   <verdict>incorrect</verdict>
+   <verdict>unknown</verdict>
+
+For example:
+```
+[Your detailed analysis here]
+
+After checking all constraints, I can confirm that each one is satisfied by the provided solution values.
+
+The solution is correct.
+
+<verdict>correct</verdict>
 ```
 
-The "correctness" field MUST be exactly one of: "correct", "incorrect", or "unknown".
-
-IMPORTANT: Follow this exact process:
-1. First, analyze each constraint in detail in the "explanation" field
-2. End your explanation with a clear conclusion: "The solution is correct." or "The solution is incorrect."
-3. Only AFTER completing your explanation, set the "correctness" field to match your conclusion
+The verdict must be EXACTLY one of: "correct", "incorrect", or "unknown" - nothing else.
 
 IMPORTANT: Before finalizing your response, always check that:
 1. Your explanation ends with a clear conclusion statement
-2. The "correctness" field matches your conclusion exactly
-3. If your explanation concludes "The solution is correct", then set "correctness" to "correct"
-4. If your explanation concludes "The solution is incorrect", then set "correctness" to "incorrect"
-
-DO NOT include anything else before or after the JSON object. Format your entire answer as a valid JSON object.
+2. The verdict tag matches your conclusion exactly 
+3. If your explanation concludes "The solution is correct", then use <verdict>correct</verdict>
+4. If your explanation concludes "The solution is incorrect", then use <verdict>incorrect</verdict>
+5. If you cannot determine correctness, use <verdict>unknown</verdict>
 
 ## Data
 

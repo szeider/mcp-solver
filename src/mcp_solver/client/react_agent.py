@@ -515,114 +515,55 @@ def call_reviewer(state: AgentState, model: BaseChatModel) -> Dict:
     # For debug, show just a preview of the prompt
     print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
     
-    # Request structured output with clearer formatting instructions
-    structured_prompt = f"""{reviewer_prompt}
-
-Return your assessment in JSON format with these fields:
-- correctness: must be exactly one of "correct", "incorrect", or "unknown"
-- explanation: your detailed justification
-"""
-    
     try:
         # Track reviewer input tokens using the TokenCounter
         token_counter = TokenCounter.get_instance()
-        token_counter.count_reviewer_input(structured_prompt)
+        token_counter.count_reviewer_input(reviewer_prompt)
         
         # Create a human message with the prompt
-        review_message = HumanMessage(content=structured_prompt)
+        review_message = HumanMessage(content=reviewer_prompt)
         
-        # Define the expected output structure
-        from typing import Literal
-        from pydantic import BaseModel
+        print("Calling model for review...", flush=True)
         
-        class ReviewResult(BaseModel):
-            explanation: str
-            correctness: Literal["correct", "incorrect", "unknown"]
+        # Invoke the model normally
+        response = model.invoke([review_message])
+        response_text = response.content
         
-        try:
-            # Use LangChain's built-in structured output method
-            print("Using model's structured output capabilities...", flush=True)
-            structured_model = model.with_structured_output(ReviewResult)
-            result = structured_model.invoke(review_message)
+        # Track reviewer output tokens
+        token_counter.count_reviewer_output(response_text)
+        
+        # Parse the verdict from the response using regex
+        import re
+        verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', response_text, re.IGNORECASE)
+        
+        if verdict_match:
+            # Extract the verdict
+            verdict = verdict_match.group(1).lower()
+            print(f"Found verdict tag: {verdict}", flush=True)
             
-            # Convert the structured output to a dict
+            # Get the explanation (everything before the verdict tag)
+            explanation_parts = response_text.split('<verdict>')
+            explanation = explanation_parts[0].strip()
+            
+            # Create the review result
             review_result = {
-                "correctness": result.correctness,
-                "explanation": result.explanation
+                "correctness": verdict,
+                "explanation": explanation
             }
+        else:
+            # No explicit verdict tag, use "unknown"
+            verdict = "unknown"
+            print(f"No verdict tag found, using default: {verdict}", flush=True)
             
-            # Keep the original response for review_text
-            response = model.invoke([review_message])
-            mem_review_text = response.content
-            
-            # Track reviewer output tokens using the TokenCounter
-            token_counter.count_reviewer_output(response.content)
+            # Use the full response as the explanation
+            review_result = {
+                "correctness": verdict,
+                "explanation": response_text
+            }
         
-        except (TypeError, ValueError, AttributeError, ImportError) as e:
-            # Fallback for models that don't support structured output
-            print(f"Using standard invocation (structured output not available)", flush=True)
-            
-            # Invoke the model normally
-            response = model.invoke([review_message])
-            
-            # Track reviewer output tokens using the TokenCounter
-            token_counter.count_reviewer_output(response.content)
-            
-            # Try to parse the JSON from the response
-            from langchain_core.output_parsers import JsonOutputParser
-            import json
-            import re
-            
-            review_result = {"correctness": "unknown", "explanation": "Failed to parse review"}
-            
-            # Try direct JSON parsing
-            try:
-                json_parser = JsonOutputParser()
-                review_result = json_parser.parse(response.content)
-                print("Successfully parsed JSON response", flush=True)
-            except Exception:
-                # If direct parsing fails, try looking for JSON in code blocks
-                content = response.content
-                try:
-                    # Look for ```json blocks
-                    json_block_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
-                    if json_block_match:
-                        json_content = json_block_match.group(1).strip()
-                        print("Extracted JSON from code block", flush=True)
-                        review_result = json.loads(json_content)
-                    else:
-                        # If no code block, look for any JSON object in the response
-                        json_match = re.search(r'(\{.*\})', content, re.DOTALL)
-                        if json_match:
-                            json_content = json_match.group(1).strip()
-                            print("Extracted JSON from text", flush=True)
-                            review_result = json.loads(json_content)
-                except Exception as e:
-                    print(f"JSON parsing failed, using defaults", flush=True)
-            
-            # Store full review content for review_text
-            mem_review_text = response.content
-        
-        # Extract verdict from review result
-        mem_review_verdict = review_result.get("correctness", "unknown")
-        
-        # Check for consistency between verdict and explanation
-        explanation = review_result.get("explanation", "")
-        
-        # Look for conclusive statements at the end of the explanation
-        conclusion_check = explanation.lower().strip()
-        last_lines = conclusion_check.split('\n')[-3:]  # Get last 3 lines
-        conclusion_text = ' '.join(last_lines)
-        
-        # Check if there's a mismatch between verdict and conclusion
-        if "solution is correct" in conclusion_text and mem_review_verdict != "correct":
-            print(f"Fixing verdict mismatch: changed from '{mem_review_verdict}' to 'correct'", flush=True)
-            mem_review_verdict = "correct"
-            review_result["correctness"] = "correct"
-        elif "solution is incorrect" in conclusion_text and mem_review_verdict != "incorrect":
-            print(f"Fixing verdict mismatch: changed from '{mem_review_verdict}' to 'incorrect'", flush=True)
-            mem_review_verdict = "incorrect"
-            review_result["correctness"] = "incorrect"
+        # Store extracted values
+        mem_review_verdict = review_result["correctness"]
+        mem_review_text = response_text
         
         print(f"Review complete: verdict is '{mem_review_verdict}'", flush=True)
         
@@ -633,8 +574,12 @@ Return your assessment in JSON format with these fields:
             "mem_review_text": mem_review_text,
             "messages": state.get("messages", [])  # Preserve existing messages
         }
+        
     except Exception as e:
         print(f"Review process error: {str(e)}", flush=True)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", flush=True)
+        
         # Return a default review result and keep existing messages
         return {
             "review_result": {
