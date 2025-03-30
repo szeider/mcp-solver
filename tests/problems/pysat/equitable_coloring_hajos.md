@@ -1,0 +1,1 @@
+Find an equitable 3-coloring of the Hajós graph.

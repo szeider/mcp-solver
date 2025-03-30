@@ -86,13 +86,15 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     
     # Track input tokens using the TokenCounter
     token_counter = TokenCounter.get_instance()
-    token_counter.count_main_input(messages)
+    input_token_count = token_counter.count_main_input(messages)
+    print(f"[call_model] Input token estimate: {input_token_count}", flush=True)
     
     # Call the model with the messages
     response = model.invoke(messages)
     
     # Track output tokens using the TokenCounter
-    token_counter.count_main_output(response.content)
+    output_token_count = token_counter.count_main_output(response.content)
+    print(f"[call_model] Output token estimate: {output_token_count}", flush=True)
     
     # Get total tokens for state
     total_tokens = token_counter.get_total_tokens()
@@ -103,6 +105,8 @@ def call_model(state: AgentState, model: BaseChatModel, system_prompt: Optional[
     # Also preserve the token counts separately for reporting
     state_update["mem_main_input_tokens"] = token_counter.main_input_tokens
     state_update["mem_main_output_tokens"] = token_counter.main_output_tokens
+    
+    print(f"[call_model] Returning token counts - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}", flush=True)
     
     return state_update
 

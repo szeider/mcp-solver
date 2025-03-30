@@ -105,6 +105,70 @@ solver.add(verified == result)  # Connect Python result to Z3 variable
 export_solution(solver=solver, variables={"verified": verified})  # Works
 ```
 
+## Bitvector Verification Example
+
+Here's a modular example that demonstrates using bitvectors and arrays for verification:
+
+```python
+from z3 import *
+from mcp_solver.z3 import export_solution
+
+# Define a verification problem with bitvectors
+def build_verification_model():
+    # Create an 8-bit input X
+    X = BitVec('X', 8)
+    
+    # Create a lookup table (array indexed by 3-bit values)
+    table = Array('table', BitVecSort(3), BitVecSort(8))
+    
+    # Step 1: Extract the lower 3 bits of X as the index
+    index = Extract(2, 0, X)
+    
+    # Step 2: Look up a value Y from the table
+    Y = Select(table, index)
+    
+    # Step 3: Compute Z = (X XOR Y) & 1
+    Z = Extract(0, 0, X ^ Y)
+    
+    # Calculate the parity of X (XOR of all bits)
+    parity = BitVecVal(0, 1)
+    for i in range(8):
+        parity = parity ^ Extract(i, i, X)
+    
+    # Check if property holds: Z == parity(X)
+    property_holds = (Z == parity)
+    
+    # Create solver and look for counterexamples
+    s = Solver()
+    s.add(Not(property_holds))
+    
+    return s, X, Y, Z, parity, index
+
+# Execute the verification
+solver, X, Y, Z, parity, index = build_verification_model()
+result = solver.check()
+
+# Export the verification result
+property_verified = Bool('property_verified')
+result_solver = Solver()
+
+if result == sat:
+    # Property doesn't hold (found counterexample)
+    result_solver.add(property_verified == False)
+    model = solver.model()
+    print(f"Input X = {model.evaluate(X)}, parity = {model.evaluate(parity)}")
+    print(f"Z = {model.evaluate(Z)}, which differs from parity")
+else:
+    # Property holds (no counterexample)
+    result_solver.add(property_verified == True)
+    print("Property verified: Z always equals parity of X")
+
+# Export the solution
+export_solution(solver=result_solver, variables={"property_verified": property_verified})
+```
+
+This example verifies whether a computed value Z (the lowest bit of X XOR table[X&7]) always equals the parity of X. The structured approach makes it easy to build, verify, and analyze complex properties using bitvectors and arrays.
+
 ## Mathematical Proofs with Z3
 
 Z3 can be used for mathematical proofs in addition to constraint solving.
@@ -112,7 +176,7 @@ Z3 can be used for mathematical proofs in addition to constraint solving.
 NOTE:
 
 - Use proper Z3 syntax for mathemtics and use strict JSON format.
-- Unusal charactes, even in a comment, can cause the idem you want to add being empty, causing an error.
+- Unusal charactes, even in a comment, can cause the item you want to add being empty, causing an error.
 
 Here are patterns for common proof techniques:
 
@@ -500,27 +564,6 @@ def prove_sum_of_cubes():
     if ind_solver.check() == unsat:
         print("Inductive step verified: No counterexample found")
         
-        # 4. Show algebraic expansion for clarity
-        print("\nALGEBRAIC VERIFICATION:")
-        print("Starting with sum_k + (k+1)³ where sum_k = k²(k+1)²/4")
-        print("= k²(k+1)²/4 + (k+1)³")
-        print("= k²(k+1)²/4 + 4(k+1)³/4")
-        print("= [k²(k+1)² + 4(k+1)³]/4")
-        
-        print("\nExpanding k²(k+1)²:")
-        print("= k²(k² + 2k + 1) = k⁴ + 2k³ + k²")
-        
-        print("\nExpanding 4(k+1)³:")
-        print("= 4(k³ + 3k²k + 3k + 1) = 4k³ + 12k² + 12k + 4")
-        
-        print("\nCombining terms in the numerator:")
-        print("= [k⁴ + 2k³ + k² + 4k³ + 12k² + 12k + 4]/4")
-        print("= [k⁴ + 6k³ + 13k² + 12k + 4]/4")
-        
-        print("\nFactoring to match (k+1)²(k+2)²/4:")
-        print("= [(k+1)²(k+2)²]/4")
-        print("= (k+1)²(k+2)²/4")
-        
         # Create Z3 boolean for the result
         proof_verified = Bool('proof_verified')
         result_solver = Solver()
@@ -595,26 +638,11 @@ If your solution isn't being properly captured:
            print(f"Warning: {var_name} is not a Z3 variable!")
    ```
 
-   7. ✅ If you get "Missing required parameter 'content'" errors:
-
-      - **Problem**: Your content might be too large or contain special characters
-      - **Solution**: Split your code into smaller, logical items using multiple add_item calls
-      
-      ```python
-      # Instead of one large item:
-      # add_item(index=1, content=very_large_code)
-      
-      # Use multiple smaller items:
-      add_item(index=1, content="# Item 1: Setup and imports")
-      add_item(index=2, content="# Item 2: Core logic")
-      add_item(index=3, content="# Item 3: Results and export")
-      ```
-
 7. ✅ If you get "Missing required parameter 'content'" errors:
 
    - **Problem**: Your content might be too large or contain special characters
    - **Solution**: Split your code into smaller, logical items using multiple add_item calls
-   
+
    ```python
    # Instead of one large item:
    # add_item(index=1, content=very_large_code)
@@ -623,8 +651,7 @@ If your solution isn't being properly captured:
    add_item(index=1, content="# Item 1: Setup and imports")
    add_item(index=2, content="# Item 2: Core logic")
    add_item(index=3, content="# Item 3: Results and export")
-
-
+   ```
 
 ## Common Error Patterns and Solutions
 

@@ -512,7 +512,13 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     # Simplified agent start message
                     log_system("Entering ReAct agent")
                     sys.stdout.flush()
-
+                    
+                    # Ensure token counter is initialized before agent runs
+                    token_counter = TokenCounter.get_instance()
+                    # Reset token counts before agent runs to avoid accumulation from previous runs
+                    token_counter.main_input_tokens = 0
+                    token_counter.main_output_tokens = 0
+                    
                     try:
                         # Execute the agent
                         response = await agent.ainvoke(
@@ -540,20 +546,32 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                     state[key] = value
                                     print(f"State update: {key} = {value}", flush=True)
                             
-                            # Explicitly handle token counts for backward compatibility 
-                            token_counter = TokenCounter.get_instance()
+                            # Explicitly update token counter from response
                             if "mem_main_input_tokens" in response:
-                                print(f"Main agent input tokens: {response.get('mem_main_input_tokens', 0)}", flush=True)
-                                token_counter.main_input_tokens = max(token_counter.main_input_tokens, 
-                                                                    response.get("mem_main_input_tokens", 0))
+                                input_tokens = response.get("mem_main_input_tokens", 0)
+                                print(f"Main agent input tokens: {input_tokens}", flush=True)
+                                if input_tokens > 0:
+                                    token_counter.main_input_tokens = input_tokens
                             
                             if "mem_main_output_tokens" in response:
-                                print(f"Main agent output tokens: {response.get('mem_main_output_tokens', 0)}", flush=True)
-                                token_counter.main_output_tokens = max(token_counter.main_output_tokens,
-                                                                    response.get("mem_main_output_tokens", 0))
+                                output_tokens = response.get("mem_main_output_tokens", 0)
+                                print(f"Main agent output tokens: {output_tokens}", flush=True)
+                                if output_tokens > 0:
+                                    token_counter.main_output_tokens = output_tokens
                             
-                            # Log the token totals for debugging
-                            print(f"Current token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}", flush=True)
+                            # If we didn't get explicit token counts but we got messages, estimate them
+                            if token_counter.main_input_tokens == 0 and response.get("messages"):
+                                # Estimate tokens from input messages
+                                print("No token counts found, estimating from messages...", flush=True)
+                                input_msgs = [msg for msg in response.get("messages", []) if not isinstance(msg, AIMessage)]
+                                token_counter.count_main_input(input_msgs)
+                                
+                                # Estimate tokens from output messages
+                                output_msgs = [msg for msg in response.get("messages", []) if isinstance(msg, AIMessage)]
+                                token_counter.count_main_output(output_msgs)
+                            
+                            # Log the final token counts
+                            print(f"Final token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}", flush=True)
                         else:
                             print(
                                 "Warning: No message content found in response",
