@@ -4,10 +4,12 @@ import asyncio
 import argparse
 import json
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Sequence, Optional
 from rich.console import Console
 import traceback
 from pathlib import Path
+import re
+from string import Template
 
 # Core dependencies
 from .llm_factory import LLMFactory
@@ -17,19 +19,15 @@ from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
 from mcp_solver.core.prompt_loader import load_prompt
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-# Agent implementations
-from langgraph.prebuilt import create_react_agent as create_builtin_agent
-from mcp_solver.client.react_agent import create_react_agent as create_custom_agent
-from mcp_solver.client.react_agent import call_reviewer
+# LangGraph agent implementation
+from langgraph.prebuilt import create_react_agent
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
 from .token_counter import TokenCounter
 
-# Configuration for agent selection
-USE_BUILTIN_AGENT = True  # Set to True to use the built-in LangGraph agent, False to use our custom agent
 
 def format_token_count(count):
     """
@@ -372,6 +370,165 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def call_reviewer(state: Dict, model: Any) -> Dict:
+    """Call a reviewer to assess the solution.
+    
+    This function takes the current state, which includes the solution,
+    and calls a reviewer to assess its correctness.
+    
+    Args:
+        state: The current state
+        model: The language model to use
+        
+    Returns:
+        Updated state with review result added
+    """
+    print("Starting solution review process...", flush=True)
+
+    # Extract necessary information from state
+    mem_problem = state.get("mem_problem", "No problem statement provided")
+    mem_model = state.get("mem_model", "No model code provided")  
+    solution = state.get("mem_solution", "No solution generated yet")
+
+    # Process the solution to make it more readable if it's in JSON format
+    processed_solution = solution
+    try:
+        if isinstance(solution, str) and "solution" in solution:
+            # Try using ast.literal_eval which is safer than eval for parsing Python literals
+            import ast
+            try:
+                # Convert the string representation of a dict to an actual dict
+                solution_dict = ast.literal_eval(solution)
+                
+                if isinstance(solution_dict, dict) and 'solution' in solution_dict:
+                    solution_values = solution_dict['solution']
+                    
+                    processed_solution = "Solution values found:\n"
+                    for var, value in solution_values.items():
+                        processed_solution += f"{var} = {value}\n"
+                    
+                    # Add a clear statement about satisfiability
+                    if solution_dict.get('satisfiable', False):
+                        processed_solution += "\nThe model is satisfiable."
+                    else:
+                        processed_solution += "\nThe model is NOT satisfiable."
+            except (SyntaxError, ValueError):
+                # If literal_eval fails, try regex approach
+                import json
+                
+                # Extract the solution part
+                solution_match = re.search(r"'solution'\s*:\s*({[^}]+})", solution)
+                if solution_match:
+                    try:
+                        # Try to parse just the solution part
+                        solution_part = solution_match.group(1).replace("'", '"')
+                        solution_values = json.loads(solution_part)
+                        processed_solution = "Solution values found:\n"
+                        for var, value in solution_values.items():
+                            processed_solution += f"{var} = {value}\n"
+                        
+                        # Check for satisfiability
+                        if "'satisfiable': True" in solution:
+                            processed_solution += "\nThe model is satisfiable."
+                    except json.JSONDecodeError:
+                        # If JSON parsing fails, extract manually
+                        value_matches = re.findall(r"'([^']+)':\s*(\d+)", solution_match.group(1))
+                        if value_matches:
+                            processed_solution = "Solution values found:\n"
+                            for var, value in value_matches:
+                                processed_solution += f"{var} = {value}\n"
+    except Exception as e:
+        # Log errors in solution processing but continue
+        print(f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True)
+        pass
+    
+    # Create reviewer prompt using Template
+    reviewer_template = Template(state.get("review_prompt", ""))
+    reviewer_prompt = reviewer_template.substitute(
+        PROBLEM=mem_problem,
+        MODEL=mem_model,
+        SOLUTION=processed_solution
+    )
+    
+    # For debug, show just a preview of the prompt
+    print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
+    
+    try:
+        # Track reviewer input tokens using the TokenCounter
+        token_counter = TokenCounter.get_instance()
+        token_counter.count_reviewer_input(reviewer_prompt)
+        
+        # Create a human message with the prompt
+        review_message = HumanMessage(content=reviewer_prompt)
+        
+        print("Calling model for review...", flush=True)
+        
+        # Invoke the model normally
+        response = model.invoke([review_message])
+        response_text = response.content
+        
+        # Track reviewer output tokens
+        token_counter.count_reviewer_output(response_text)
+        
+        # Parse the verdict from the response using regex
+        verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', response_text, re.IGNORECASE)
+        
+        if verdict_match:
+            # Extract the verdict
+            verdict = verdict_match.group(1).lower()
+            print(f"Found verdict tag: {verdict}", flush=True)
+            
+            # Get the explanation (everything before the verdict tag)
+            explanation_parts = response_text.split('<verdict>')
+            explanation = explanation_parts[0].strip()
+            
+            # Create the review result
+            review_result = {
+                "correctness": verdict,
+                "explanation": explanation
+            }
+        else:
+            # No explicit verdict tag, use "unknown"
+            verdict = "unknown"
+            print(f"No verdict tag found, using default: {verdict}", flush=True)
+            
+            # Use the full response as the explanation
+            review_result = {
+                "correctness": verdict,
+                "explanation": response_text
+            }
+        
+        # Store extracted values
+        mem_review_verdict = review_result["correctness"]
+        mem_review_text = response_text
+        
+        print(f"Review complete: verdict is '{mem_review_verdict}'", flush=True)
+        
+        # Return both the review result and keep existing messages
+        return {
+            "review_result": review_result, 
+            "mem_review_verdict": mem_review_verdict,
+            "mem_review_text": mem_review_text,
+            "messages": state.get("messages", [])  # Preserve existing messages
+        }
+        
+    except Exception as e:
+        print(f"Review process error: {str(e)}", flush=True)
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}", flush=True)
+        
+        # Return a default review result and keep existing messages
+        return {
+            "review_result": {
+                "correctness": "unknown", 
+                "explanation": f"Error running reviewer: {str(e)}"
+            },
+            "mem_review_verdict": "unknown",
+            "mem_review_text": f"Error running reviewer: {str(e)}",
+            "messages": state.get("messages", [])  # Preserve existing messages
+        }
+
+
 async def mcp_solver_node(state: dict, model_name: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
@@ -490,7 +647,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     config = RunnableConfig(recursion_limit=recursion_limit)
 
                     # Simplified agent start message
-                    log_system("Entering ReAct agent")
+                    log_system("Entering ReAct Agent")
                     sys.stdout.flush()
                     
                     # Ensure token counter is initialized before agent runs
@@ -501,12 +658,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     
                     try:
                         # Initialize the agent with tools
-                        if USE_BUILTIN_AGENT:
-                            log_system("Using built-in LangGraph agent")
-                            agent = create_builtin_agent(SOLVE_MODEL, wrapped_tools)
-                        else:
-                            log_system("Using custom MCP Solver agent")
-                            agent = create_custom_agent(SOLVE_MODEL, wrapped_tools)
+                        agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
 
                         # Execute the agent
                         response = await agent.ainvoke(
@@ -610,7 +762,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     if SOLVE_MODEL and state.get("review_prompt"):
         try:
             # Simplified reviewer start message
-            log_system("Entering Review agent")
+            log_system("Entering Review Agent")
             
             # Create a state object that mimics the AgentState expected by call_reviewer
             reviewer_state = {
@@ -824,7 +976,6 @@ def generate_result_json(state, json_path):
     # If we have the full review text available, use that as a backup
     if not review_explanation and state.get("mem_review_text"):
         # Try to extract just the explanation part (before any verdict tag)
-        import re
         verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', 
                                  state.get("mem_review_text", ""), 
                                  re.IGNORECASE)
