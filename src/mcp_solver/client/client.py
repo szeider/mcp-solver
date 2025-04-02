@@ -986,6 +986,12 @@ def generate_result_json(state, json_path):
             # Use the full text as explanation
             review_explanation = state.get("mem_review_text", "")
     
+    # Extract the problem name from the query file path
+    problem_name = ""
+    if state.get("args") and hasattr(state["args"], "query"):
+        query_path = state["args"].query
+        problem_name = os.path.basename(query_path).replace('.md', '')
+    
     # Prepare JSON data
     json_data = {
         "problem": state.get("mem_problem", ""),
@@ -995,7 +1001,9 @@ def generate_result_json(state, json_path):
         "review_verdict": state.get("review_result", {}).get("correctness", "unknown"),
         "result": "correct" if state.get("review_result", {}).get("correctness") == "correct" else "incorrect",
         "tool_calls": tool_calls,
-        "tokens": tokens
+        "tokens": tokens,
+        "mode": state.get("mode", "unknown"),
+        "problem_name": problem_name
     }
     
     # Save to file
@@ -1045,6 +1053,9 @@ async def main():
 
     # Store args in state for later use
     state["args"] = args
+    
+    # Store mode in state for later use in JSON output
+    state["mode"] = mode
 
     # Initialize mem_solution and mem_model
     state["mem_solution"] = "No solution generated yet"

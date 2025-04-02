@@ -1,6 +1,24 @@
-# PySAT Solver
+# MCP Solver – Quick Start Guide
+
+Welcome to the MCP Solver. This document provides concise guidelines on how to interact with the MCP Solver.
 
 This service provides access to PySAT (Python SAT Solver) with a simplified interface for propositional constraint modeling using CNF (Conjunctive Normal Form).
+
+
+
+## Overview
+
+The MCP Solver integrates PySAT solving with the Model Context Protocol, allowing you to create, modify, and solve PySAT encodings. The following tools are available:
+
+- **clear_model**
+- **add_item**
+- **replace_item**
+- **delete_item**
+- **solve_model**
+
+These tools let you construct your model incrementally and solve it using a SAT solver.
+
+
 
 ## Quick Start Example
 
@@ -73,6 +91,13 @@ solver.delete()
 > **Note:** MaxSAT optimization functionality is not supported. Only standard SAT solving capabilities are available.
 
 > **Timeout Handling:** When using `solve_model`, always specify a timeout (in seconds) to prevent long-running computations. If your model times out, you'll receive a response with `"status": "timeout"` and `"timeout": true`, but the connection will be maintained so you can modify and retry your model.
+
+
+
+## Solving and Verification
+
+- **Solution Verification:**  
+  After solving, verify that the returned solution satisfies all specified constraints. If you get UNSAT, then check that all clauses are indeed justified from the problem description.
 
 ## ⭐ Pre-Implemented Helper Functions
 
@@ -393,3 +418,13 @@ solver.delete()
 - Values will be automatically extracted into a flat "values" dictionary
 - If multiple dictionaries contain the same key, values are preserved by prefixing keys with their parent dictionary name
 - Keys that appear in only one dictionary won't be prefixed
+
+## Final Notes
+
+- **Review Return Information:**  
+  Carefully review the confirmation messages and the current model after each tool call.
+- **Split long code parts** into smaller items.
+- **Verification:**  
+  Always verify the solution after a solve operation by checking that all constraints are satisfied and justified.
+
+Happy modeling with MCP Solver!

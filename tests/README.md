@@ -7,14 +7,14 @@ This directory contains tests for the MCP Solver project.
 For a quick end-to-end test after code changes, run any of these commands:
 
 ```bash
-# MiniZinc test - N-Queens problem
-run-test mzn --problem tests/problems/mzn/nqueens.md
+# MiniZinc test 
+run-test mzn 
 
-# PySAT test - Graph Coloring problem
-run-test pysat --problem tests/problems/pysat/graph_coloring.md
+# PySAT test 
+run-test pysat 
 
 # Z3 test - Cryptarithmetic puzzle
-run-test z3 --problem tests/problems/z3/cryptarithmetic.md
+run-test z3 
 ```
 
 ## Test Structure
