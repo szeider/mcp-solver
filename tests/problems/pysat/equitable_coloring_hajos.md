@@ -1,1 +1,1 @@
-Find an equitable 3-coloring of the Hajós graph.
+Find an equitable 3-coloring of the Hajós join of three C₅ cycles (cycle graphs with 5 vertices each).
