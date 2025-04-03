@@ -8,11 +8,6 @@ from pathlib import Path
 MCP_CLIENT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # Use the current project directory
 DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
-# Updated prompt file paths for the new structure
-MZN_PROMPT_FILE = "prompts/mzn/instructions.md"
-PYSAT_PROMPT_FILE = "prompts/pysat/instructions.md"
-Z3_PROMPT_FILE = "prompts/z3/instructions.md"
-
 # Get absolute paths to key directories
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PROBLEMS_DIR = os.path.join(os.path.dirname(__file__), "problems")
@@ -24,10 +19,6 @@ RESULTS_DIR = os.path.join(ROOT_DIR, "test_results")
 def get_abs_path(rel_path):
     """Convert a path relative to the root directory to an absolute path."""
     return os.path.join(ROOT_DIR, rel_path)
-
-def get_prompt_path(prompt_file):
-    """Get the absolute path to a prompt file."""
-    return get_abs_path(prompt_file)
 
 # Helper function to load a prompt using the centralized loader
 def load_prompt_for_test(mode, prompt_type="instructions"):

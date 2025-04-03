@@ -35,7 +35,75 @@ except ImportError:
 # Track the last solution
 _LAST_SOLUTION = None
 
-def export_solution(solver=None, variables=None, objective=None) -> Dict[str, Any]:
+def _extract_variable_values(model, variables: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Helper function to extract variable values from a Z3 model.
+    
+    Args:
+        model: Z3 model
+        variables: Dictionary mapping variable names to Z3 variables
+    
+    Returns:
+        Dictionary with variable names and their values
+    """
+    result = {}
+    
+    if not model or not variables:
+        return result
+    
+    for name, var in variables.items():
+        try:
+            # Try basic model evaluation
+            val = model.eval(var, model_completion=True)
+            if val is not None:
+                # Convert to appropriate Python type
+                if z3.is_int(val):
+                    result[name] = val.as_long()
+                elif z3.is_real(val):
+                    # Convert rational to float
+                    result[name] = float(val.as_decimal(10))
+                elif z3.is_bool(val):
+                    result[name] = z3.is_true(val)
+                elif hasattr(z3, 'is_string') and z3.is_string(val):
+                    result[name] = str(val)
+                else:
+                    # For other types, convert to string
+                    result[name] = str(val)
+        except Exception as e:
+            print(f"Error extracting value for {name}: {e}")
+            result[name] = f"Error: {str(e)}"
+    
+    return result
+
+def _extract_objective_value(model, objective):
+    """
+    Helper function to extract objective value from a Z3 model.
+    
+    Args:
+        model: Z3 model
+        objective: Z3 expression being optimized
+    
+    Returns:
+        Objective value in appropriate Python type or None if error
+    """
+    if not model or objective is None:
+        return None
+    
+    try:
+        obj_val = model.eval(objective, model_completion=True)
+        if z3.is_int(obj_val):
+            return obj_val.as_long()
+        elif z3.is_real(obj_val):
+            return float(obj_val.as_decimal(10))
+        else:
+            return str(obj_val)
+    except Exception as e:
+        print(f"Error extracting objective value: {e}")
+        return f"Error: {str(e)}"
+
+def export_solution(solver=None, variables=None, objective=None, satisfiable=None, 
+                   solution_dict=None, is_property_verification=False, 
+                   property_verified=None) -> Dict[str, Any]:
     """
     Extract and format solutions from a Z3 solver.
     
@@ -46,78 +114,114 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
         solver: Z3 Solver or Optimize object
         variables: Dictionary mapping variable names to Z3 variables
         objective: Z3 expression being optimized (optional)
+        satisfiable: Explicitly override the satisfiability status (optional)
+        solution_dict: Directly provide a solution dictionary (optional)
+        is_property_verification: Flag indicating if this is a property verification problem (optional)
+        property_verified: Boolean indicating if the property was verified (optional)
         
     Returns:
         Dictionary containing the solution details
     """
+    global _LAST_SOLUTION
+    
     # Initialize result dictionary
     result = {
         "satisfiable": False,
         "values": {},
         "objective": None,
-        "status": "unknown"
+        "status": "unknown",
+        "output": []
     }
     
-    # Validate inputs
-    if not solver or not variables:
-        print("Missing solver or variables")
+    # If solution_dict is provided, use it as the base
+    if solution_dict is not None and isinstance(solution_dict, dict):
+        result.update(solution_dict)
+        # Ensure result has all required fields
+        result.setdefault("satisfiable", False)
+        result.setdefault("values", {})
+        result.setdefault("objective", None)
+        result.setdefault("status", "unknown")
+        result.setdefault("output", [])
+        
+        # Update status if satisfiable flag has been set
+        if "satisfiable" in solution_dict:
+            result["status"] = "sat" if solution_dict["satisfiable"] else "unsat"
+        
+        # Store result and return
+        _LAST_SOLUTION = result
         return result
     
-    # Get the solver status
-    if isinstance(solver, z3.Solver) or isinstance(solver, z3.Optimize):
-        status = solver.check()
-        result["status"] = str(status)
+    # Process the solver if provided
+    if solver is not None:
+        # Get the solver status
+        if isinstance(solver, z3.Solver) or isinstance(solver, z3.Optimize):
+            status = solver.check()
+            result["status"] = str(status)
+            
+            # Extract solution if satisfiable
+            if status == z3.sat:
+                result["satisfiable"] = True
+                
+                if variables is not None:
+                    model = solver.model()
+                    # Extract variable values
+                    result["values"] = _extract_variable_values(model, variables)
+                    
+                    # Extract objective value if present
+                    if objective is not None and isinstance(solver, z3.Optimize):
+                        result["objective"] = _extract_objective_value(model, objective)
+        else:
+            print(f"Warning: Unknown solver type: {type(solver)}")
+    # Handle case with variables but no solver
+    elif variables is not None:
+        print("Warning: Variables provided but no solver. Only variable names will be included.")
+        result["values"] = {name: None for name in variables}
+    
+    # Override satisfiability if explicitly provided
+    if satisfiable is not None:
+        result["satisfiable"] = bool(satisfiable)
+        # Update status to match satisfiability flag
+        result["status"] = "sat" if result["satisfiable"] else "unsat"
+    
+    # Handle property verification cases
+    if is_property_verification:
+        # If property_verified is explicitly provided, use it
+        if property_verified is not None:
+            # Store the property verification result explicitly
+            result["values"]["property_verified"] = bool(property_verified)
+            
+            # For property verification:
+            # - If we found a counterexample (property not verified), the solver is satisfiable
+            # - If the property is verified for all cases, there's no counterexample, so the negation is unsatisfiable
+            if property_verified:
+                result["output"].append("Property verified successfully.")
+            else:
+                result["output"].append("Property verification failed. Counterexample found.")
+                # Ensure satisfiability is set correctly for counterexample
+                result["satisfiable"] = True
+                result["status"] = "sat"
+        else:
+            # Infer property verification status from solver result
+            # If solver returned unsat, property is verified (no counterexample)
+            # If solver returned sat, property is not verified (counterexample found)
+            property_verified = (result["status"] == "unsat")
+            result["values"]["property_verified"] = property_verified
+            
+            if property_verified:
+                result["output"].append("Property verified successfully.")
+            else:
+                result["output"].append("Property verification failed. Counterexample found.")
+                # Ensure satisfiability is set correctly for counterexample
+                result["satisfiable"] = True
+                result["status"] = "sat"
     else:
-        print(f"Unknown solver type: {type(solver)}")
-        return result
-    
-    # Extract solution if satisfiable
-    if status == z3.sat:
-        result["satisfiable"] = True
-        model = solver.model()
-        
-        # Extract variable values
-        for name, var in variables.items():
-            try:
-                # Try basic model evaluation
-                val = model.eval(var, model_completion=True)
-                if val is not None:
-                    # Convert to appropriate Python type
-                    if z3.is_int(val):
-                        result["values"][name] = val.as_long()
-                    elif z3.is_real(val):
-                        # Convert rational to float
-                        result["values"][name] = float(val.as_decimal(10))
-                    elif z3.is_bool(val):
-                        result["values"][name] = z3.is_true(val)
-                    elif hasattr(z3, 'is_string') and z3.is_string(val):
-                        result["values"][name] = str(val)
-                    else:
-                        # For other types, convert to string
-                        result["values"][name] = str(val)
-            except Exception as e:
-                print(f"Error extracting value for {name}: {e}")
-                result["values"][name] = f"Error: {str(e)}"
-        
-        # Extract objective value if present
-        if objective is not None and isinstance(solver, z3.Optimize):
-            try:
-                obj_val = model.eval(objective, model_completion=True)
-                if z3.is_int(obj_val):
-                    result["objective"] = obj_val.as_long()
-                elif z3.is_real(obj_val):
-                    result["objective"] = float(obj_val.as_decimal(10))
-                else:
-                    result["objective"] = str(obj_val)
-            except Exception as e:
-                print(f"Error extracting objective value: {e}")
-                result["objective"] = f"Error: {str(e)}"
+        # For regular constraint solving, add appropriate output messages
+        if result["satisfiable"]:
+            result["output"].append("Solution found.")
+        else:
+            result["output"].append("No solution exists that satisfies all constraints.")
     
     # Store result in global variable for the environment to find
-    global _LAST_SOLUTION
     _LAST_SOLUTION = result
-    
-    # Don't try to modify caller's scope, as it doesn't work reliably with nested functions
-    # Instead, the environment will retrieve the result from _LAST_SOLUTION
     
     return result 

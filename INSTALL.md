@@ -129,7 +129,7 @@ python -m venv .venv
 ### Install dependencies
 
 ```bash
-uv pip install -e .
+uv pip install -e ."[all]"
 ```
 
 This installs the MCP Solver in editable mode.
@@ -172,15 +172,20 @@ PATH=/opt/minizinc:$PATH
 
 Ensure `minizinc --version` works in the shell.
 
-### Python bindings
-
-```bash
-uv pip install minizinc rich langchain_mcp_adapters langchain_google_genai
-```
-
 ## Step 5: Run verification tests
 
-Before running the tests, make sure your Claude API key is set. You can either export it as an environment variable or define it in a `.env` file.
+Run the following tests to verify your MCP Solver setup:
+
+```bash
+uv run test-setup-mzn
+uv run test-setup-z3
+uv run test-setup-pysat
+uv run test-setup-client
+```
+
+## Step 6: Test Client Setup
+
+If you want to run the test client, make sure you have an [**Anthropic API key**](https://www.anthropic.com/api). You can either export it as an environment variable or define it in a `.env` file.
 
 ### macOS / Linux
 
@@ -194,26 +199,38 @@ export ANTHROPIC_API_KEY=sk-...
 $env:ANTHROPIC_API_KEY = "sk-..."
 ```
 
-Or add to `.env` file:
+Or add to an `.env` file in the project root:
 
 ```env
 ANTHROPIC_API_KEY=sk-...
 ```
 
-Run the following tests to verify your full MCP Solver setup:
+Test the client setup:
 
 ```bash
-uv run test-setup-mzn
-uv run test-setup-z3
-uv run test-setup-pysat
 uv run test-setup-client
 ```
 
-All tests should pass.
+You can now run a problem description 
+
+```bash
+# MiniZinc mode
+uv run test-client --query <query_file>.md
+
+# PySAT mode
+uv run test-client-pysat --query <query_file>.md
+
+# Z3 mode
+uv run test-client-z3 --query <query_file>.md
+```
+
+
+
+Some problem descriptions are provided in `tests/problems`
 
 ---
 
-## Step 6: Claude Desktop Setup
+## Step 7: Claude Desktop Setup
 
 ### macOS
 
@@ -245,6 +262,8 @@ xdg-settings set default-web-browser google-chrome.desktop # optionally
 
 ### Configure `claude_desktop_config.json`
 
+In the examples below, replace "mcp-solver-mzn" with "mcp-solver-pysat" or "mcp-solver-z3" depeding on the mode you want to run the MCP Solver in.
+
 #### macOS
 
 The config file is located at `~/Library/Application\ Support/Claude/claude_desktop_config.json`
@@ -253,10 +272,12 @@ The config file is located at `~/Library/Application\ Support/Claude/claude_desk
 {
   "mcpServers": {
     "MCP Solver": {
-      "command": "/path/to/mcp-solver/.venv/bin/python",
+      "command": "uv",
       "args": [
-        "-m",
-        "mcp_solver"
+        "--directory",
+        "/Users/stefanszeider/git/mcp-solver",
+        "run",
+        "mcp-solver-mzn"
       ]
     }
   }
@@ -271,10 +292,10 @@ The config file is located at `%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "MCP Solver": {
-      "command": "C:\\path\\to\\mcp-solver\\.venv\\Scripts\\python.exe",
+      "command": "cmd.exe",
       "args": [
-        "-m",
-        "mcp_solver"
+        "/C",
+        "cd C:\\Users\\AC Admin\\build\\mcp-solver && uv run mcp-solver-mzn"
       ]
     }
   }
@@ -289,10 +310,10 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "MCP Solver": {
-      "command": "/path/to/mcp-solver/.venv/bin/python",
+      "command": "/bin/bash",
       "args": [
-        "-m",
-        "mcp_solver.core.server"
+        "-c",
+        "cd /path/to/mcp-solver && uv run mcp-solver-mzn"
       ]
     }
   }
@@ -301,4 +322,9 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 
 ---
 
-You're now ready to use the solver! 
+### Usage:
+
+- We strongly recommend to use the [Claude Pro](https://claude.ai/) subscription to run the Claude 3.7 Sonnet.  
+- When you start Claude Desktop, you should see a *hammer symbol* counting at least 6 tools.
+- You shoukld also see an *electrical plugs* symbol. Click it, select *choose an integration*, then *MCP Solver instructions*. This shoudl add a prompt file `instructions.txt` to appear as an attachment. 
+- No you are ready to type your query to the MCP solver.

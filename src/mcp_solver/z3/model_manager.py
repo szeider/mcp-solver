@@ -262,18 +262,37 @@ class Z3ModelManager(SolverManager):
             
             # Add wrapper for export_solution to capture variables and solver
             combined_code = """
-# Wrap export_solution to capture variables and solver for scope management
-original_export_solution = export_solution
+# Import the export_solution function if not already imported
+try:
+    from mcp_solver.z3 import export_solution as original_export_solution
+except ImportError:
+    # Use the existing export_solution if import fails
+    original_export_solution = export_solution
 
-def wrapped_export_solution(solver, variables, solution_data=None):
+def wrapped_export_solution(solver=None, variables=None, objective=None, satisfiable=None, 
+                           solution_dict=None, is_property_verification=False, property_verified=None):
     # Store variables and solver in global variables for later access
     import sys
     module = sys.modules[__name__]
     if not hasattr(module, '_z3_registry'):
         module._z3_registry = {}
-    module._z3_registry["variables"] = variables
-    module._z3_registry["solver"] = solver
-    return original_export_solution(solver, variables, solution_data)
+    
+    # Store solver and variables in registry if provided
+    if variables is not None:
+        module._z3_registry["variables"] = variables
+    if solver is not None:
+        module._z3_registry["solver"] = solver
+    
+    # Pass through all parameters to the original function
+    return original_export_solution(
+        solver=solver, 
+        variables=variables, 
+        objective=objective,
+        satisfiable=satisfiable,
+        solution_dict=solution_dict,
+        is_property_verification=is_property_verification,
+        property_verified=property_verified
+    )
 
 export_solution = wrapped_export_solution
 """ + combined_code
@@ -357,8 +376,28 @@ export_solution = wrapped_export_solution
                 solution = result.get("solution", {})
                 formatted_result["satisfiable"] = solution.get("satisfiable", False)
                 formatted_result["values"] = solution.get("values", {})
+                
+                # Add other solution fields if present
                 if solution.get("objective") is not None:
                     formatted_result["objective"] = solution.get("objective")
+                
+                # Include output field from solution if present (for property verification messages)
+                if solution.get("output") and isinstance(solution.get("output"), list):
+                    # Append solution output to existing output
+                    formatted_result["output"].extend(solution.get("output"))
+                
+                # Add property_verified field if present (for property verification)
+                if "property_verified" in solution.get("values", {}):
+                    property_verified = solution["values"]["property_verified"]
+                    formatted_result["property_verified"] = property_verified
+                    
+                    # Add appropriate message based on property verification
+                    if property_verified:
+                        if not any("verified" in line.lower() for line in formatted_result["output"]):
+                            formatted_result["output"].append("Property verified successfully.")
+                    else:
+                        if not any("counterexample" in line.lower() for line in formatted_result["output"]):
+                            formatted_result["output"].append("Property verification failed. Counterexample found.")
             
             return formatted_result
             

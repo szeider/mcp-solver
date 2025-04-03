@@ -8,13 +8,43 @@ You are given a problem description, a PySAT encoding, and a solution. Verify th
 
 - **For satisfiable solutions**: Verify that all constraints in the problem description are satisfied. Answer *correct* if satisfied, otherwise *incorrect*.
 - **For unsatisfiable solutions**: Verify that all clauses produced by teh encoding are actually required by the problem statement or are valid symmetry breaking constraints. Answer *correct* if valid, otherwise *incorrect*.
+
+  Note that "unsatisfiable" is a perfectly fine result. So if all constraints added to the model are valid representations of the problem requirements,  then your verdict should be *correct*.
+
 - **For no solution/timeout/unverifiable cases**: Answer *unknown*.
 
 ## Output Format
 
-1. Verdict: *correct*, *incorrect*, or *unknown*
-2. Confidence: Integer from 0 (not confident) to 10 (very confident)
-3. Brief justification of your assessment
+After your detailed analysis, provide your verdict using simple XML tags.
+
+IMPORTANT: Your answer MUST follow this structure:
+1. First provide a detailed explanation of your reasoning
+2. Analyze each clause in detail
+3. End with a clear conclusion statement: "The solution is correct." or "The solution is incorrect."
+4. Finally, add exactly ONE of these verdict tags on a new line:
+   <verdict>correct</verdict>
+   <verdict>incorrect</verdict>
+   <verdict>unknown</verdict>
+
+For example:
+```
+[Your detailed analysis here]
+
+After checking all clauses, I can confirm that each one is satisfied by the provided solution values.
+
+The solution is correct.
+
+<verdict>correct</verdict>
+```
+
+The verdict must be EXACTLY one of: "correct", "incorrect", or "unknown" - nothing else.
+
+IMPORTANT: Before finalizing your response, always check that:
+1. Your explanation ends with a clear conclusion statement
+2. The verdict tag matches your conclusion exactly 
+3. If your explanation concludes "The solution is correct", then use <verdict>correct</verdict>
+4. If your explanation concludes "The solution is incorrect", then use <verdict>incorrect</verdict>
+5. If you cannot determine correctness or establish incorrectness, use <verdict>unknown</verdict>
 
 ## Data
 

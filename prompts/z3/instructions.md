@@ -4,24 +4,54 @@ This document provides information about using MCP Solver with the Z3 SMT Solver
 
 ## ⚠️ IMPORTANT: Solution Export Requirement ⚠️
 
-All Z3 models MUST call `export_solution(solver=solver, variables=variables)` to properly extract solutions. Without this call, results will not be captured, even if your solver finds a solution!
+All Z3 models MUST call `export_solution` to properly extract solutions. Without this call, results will not be captured, even if your solver finds a solution!
 
 ```python
 # Always include this import
 from mcp_solver.z3 import export_solution
 
-# After solving, always call export_solution with BOTH parameters
+# After solving, always call export_solution with the appropriate parameters
+
+## For standard constraint solving:
 if solver.check() == sat:
+    # For satisfiable solutions, provide the solver and variables
     export_solution(solver=solver, variables=variables)
 else:
-    print("No solution found")
+    # For unsatisfiable problems, explicitly set satisfiable=False
+    print("No solution exists that satisfies all constraints.")
+    export_solution(satisfiable=False, variables=variables)
+
+## For property verification (theorem proving):
+# When verifying a property, we look for a counterexample (negate the property)
+# solver.add(Not(property_to_verify))
+
+if solver.check() == sat:
+    # Counterexample found (property doesn't hold)
+    print("Property verification failed. Counterexample found.")
+    export_solution(
+        solver=solver, 
+        variables=variables,
+        is_property_verification=True
+    )
+else:
+    # No counterexample found (property holds for all cases)
+    print("Property verified successfully.")
+    export_solution(
+        satisfiable=False,
+        variables=variables,
+        is_property_verification=True
+    )
 ```
 
-## Configuration
+## Export Solution Parameters
 
-To run the MCP Solver in Z3 mode:
+The `export_solution` function supports the following parameters:
 
-- Use `mcp-solver-z3` command (instead of `mcp-solver`)
+- `solver`: The Z3 solver object containing constraints and status
+- `variables`: Dictionary mapping variable names to Z3 variables
+- `satisfiable`: Optional boolean to explicitly set satisfiability status (useful for unsatisfiable problems)
+- `objective`: Optional objective expression for optimization problems
+- `is_property_verification`: Boolean flag indicating if this is a property verification problem
 
 ## Core Features
 
@@ -44,16 +74,21 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 
    - Use descriptive variable names for readability
    - Group related constraints together
+   - Build long code incrementally by adding smaller items, so you get validation feedback and detect an error early
    - Comment complex constraint logic
 
 3. **Use the correct export_solution call**:
 
    ```python
+   # For satisfiable results
    export_solution(solver=solver, variables=variables)
+   
+   # For unsatisfiable results
+   export_solution(satisfiable=False, variables=variables)
+   
+   # For direct dictionary input (advanced usage)
+   export_solution(data={"satisfiable": False, "values": {}})
    ```
-
-   - Always provide both parameters
-   - Always check if a solution exists before exporting
 
 4. **For complex problems, use incremental development**:
 
@@ -103,7 +138,112 @@ verified = Bool('verified')
 solver = Solver()
 solver.add(verified == result)  # Connect Python result to Z3 variable
 export_solution(solver=solver, variables={"verified": verified})  # Works
+
+# ALTERNATIVE - Use the explicit satisfiable parameter
+export_solution(satisfiable=result, variables={})  # Also works
 ```
+
+## Handling Unsatisfiable Problems and Theorem Proving
+
+When working with problems that have no solution or proving theorems by contradiction:
+
+```python
+# Check if a solution exists for a constraint satisfaction problem
+result = solver.check()
+
+# Handle the result appropriately
+if result == sat:
+    print("Solution found!")
+    export_solution(solver=solver, variables=variables)
+else:
+    print("No solution exists that satisfies all constraints.")
+    # For standard constraint problems that are unsatisfiable:
+    export_solution(satisfiable=False, variables=variables)
+```
+
+### Theorem Proving Considerations
+
+When proving theorems, the relationship between solver results and theorem validity is important:
+
+1. **When searching for counterexamples**:
+   - If `solver.check() == sat` → Found a counterexample → Theorem is false
+   - If `solver.check() == unsat` → No counterexample exists → Theorem is true
+2. **When directly modeling a theorem**:
+   - If `solver.check() == sat` → Found a valid case → Theorem is true (for that case)
+   - If `solver.check() == unsat` → No valid case exists → Theorem is false
+
+Always make sure your solution export matches the semantic meaning of your result, not just the technical satisfiability status of your solver.
+
+## Bitvector Verification Example
+
+Here's a modular example that demonstrates using bitvectors and arrays for verification:
+
+```python
+# Item 1: Setup and imports
+from z3 import *
+from mcp_solver.z3 import export_solution
+
+# Item 2: Define the bitvector verification model
+def build_verification_model():
+    # Create an 8-bit input X
+    X = BitVec('X', 8)
+    
+    # Create a lookup table (array indexed by 3-bit values)
+    table = Array('table', BitVecSort(3), BitVecSort(8))
+    
+    # Step 1: Extract the lower 3 bits of X as the index
+    index = Extract(2, 0, X)
+    
+    # Step 2: Look up a value Y from the table
+    Y = Select(table, index)
+    
+    # Step 3: Compute Z = (X XOR Y) & 1
+    Z = Extract(0, 0, X ^ Y)
+    
+    # Calculate the parity of X (XOR of all bits)
+    parity = BitVecVal(0, 1)
+    for i in range(8):
+        parity = parity ^ Extract(i, i, X)
+    
+    # Check if property holds: Z == parity(X)
+    property_holds = (Z == parity)
+    
+    # Create solver and look for counterexamples
+    s = Solver()
+    s.add(Not(property_holds))
+    
+    return s, X, Y, Z, parity, index
+
+# Item 3: Execute the verification
+# Build and get our verification model components
+solver, X, Y, Z, parity, index = build_verification_model()
+
+# Check if a counterexample exists (property violation)
+result = solver.check()
+
+# Item 4: Process results and export the solution
+# Create Z3 boolean for the verification result
+property_verified = Bool('property_verified')
+
+if result == sat:
+    # Found a counterexample - the solver successfully found a case where the property fails
+    # This means the counterexample search was satisfiable (but the property is false)
+    print(f"Input X = {solver.model().evaluate(X)}, parity = {solver.model().evaluate(parity)}")
+    print(f"Z = {solver.model().evaluate(Z)}, which differs from parity")
+    # Export with solver result (sat) and the property_verified value (false)
+    solver.add(property_verified == False)
+    export_solution(solver=solver, variables={"property_verified": property_verified})
+else:
+    # No counterexample found - the property holds for all inputs
+    # The counterexample search was unsatisfiable (meaning the property is true)
+    print("Property verified: Z always equals parity of X")
+    # Create a new solver to express that the property is verified
+    result_solver = Solver()
+    result_solver.add(property_verified == True)
+    export_solution(solver=result_solver, variables={"property_verified": property_verified})
+```
+
+This example verifies whether a computed value Z (the lowest bit of X XOR table[X&7]) always equals the parity of X. The structured approach makes it easy to build, verify, and analyze complex properties using bitvectors and arrays.
 
 ## Mathematical Proofs with Z3
 
@@ -111,192 +251,221 @@ Z3 can be used for mathematical proofs in addition to constraint solving.
 
 NOTE:
 
-- Use proper Z3 syntax for mathemtics and use strict JSON format.
-- Unusal charactes, even in a comment, can cause the idem you want to add being empty, causing an error.
+- Use proper Z3 syntax for mathematics and use strict JSON format.
+- Unusual characters, even in a comment, can cause the item you want to add being empty, causing an error.
 
 Here are patterns for common proof techniques:
 
 ### Proving Algebraic Identities
 
 ```python
-# To prove expressions e1 and e2 are equal for all values in the domain:
+# Item 1: Setup and imports
 from z3 import *
+from mcp_solver.z3 import export_solution
 
-def prove_equality(e1, e2):
-    # Create a solver that attempts to find a counterexample
-    s = Solver()
-    x = Int('x')
-    # Add domain constraints if necessary
-    s.add(x > 0)
-    # Try to find a case where expressions are NOT equal
-    s.add(simplify(e1) != simplify(e2))
-    
-    # If check() returns unsat, no counterexample exists, proving equality
-    if s.check() == unsat:
-        print("Expressions are equal for all valid inputs")
-        return True
-    else:
-        print("Found counterexample:", s.model())
-        return False
+# Setup variables for our test
+x = Int('x')
+
+# Item 2: Define the expressions and create a solver to check equality
+# Test expressions: x² + 2x ≡ x(x+2)
+expr1 = x**2 + 2*x
+expr2 = x*(x+2)
+
+# Create a solver that attempts to find a counterexample
+solver = Solver()
+
+# Add domain constraints if necessary
+solver.add(x > 0)
+
+# Try to find a case where expressions are NOT equal
+solver.add(simplify(expr1) != simplify(expr2))
+
+# Item 3: Check results and export the solution
+# Create Z3 boolean for the verification result
+equality_proven = Bool('equality_proven')
+
+# Check if a counterexample exists
+result = solver.check()
+if result == unsat:
+    # No counterexample found, expressions are equal
+    print("Expressions are equal for all valid inputs")
+    # The counterexample search was unsatisfiable, meaning the equality is proven
+    result_solver = Solver()
+    result_solver.add(equality_proven == True)
+    export_solution(solver=result_solver, variables={"equality_proven": equality_proven})
+else:
+    # Found a counterexample - the solver successfully found inputs where expressions differ
+    # The counterexample search was satisfiable, meaning the equality is disproven
+    model = solver.model()
+    print("Found counterexample:", model)
+    solver.add(equality_proven == False)
+    export_solution(solver=solver, variables={"equality_proven": equality_proven})
 ```
 
-### Mathematical Induction - Recommended Approach
+## Export Solution Formats
 
-For mathematical induction proofs, we recommend using a "flat structure" approach with separate items:
+```python
+# For satisfiable constraint problems
+export_solution(solver=solver, variables=variables)
+
+# For unsatisfiable problems
+export_solution(satisfiable=False, variables=variables)
+
+# For direct dictionary input (advanced usage)
+export_solution(data={"satisfiable": False, "values": {}})
+
+# INCORRECT - missing parameters
+# export_solution()  # This will fail
+
+# INCORRECT - unsupported parameters
+# export_solution(solver=solver, variables=variables, solution_data={})  # This will fail
+```
+
+The `export_solution` function formats solutions differently depending on the scenario:
+
+1. **For satisfiable constraint problems**: Returns variable assignments that satisfy all constraints
+2. **For optimization problems**: Returns the optimal solution values
+3. **For proofs by contradiction (unsat results)**: Use the `satisfiable` parameter to explicitly specify the result
+
+## Working with Rational Arithmetic
+
+When dealing with divisions and fractions, use caution with integer vs. real types:
+
+```python
+# For formula like n²(n+1)²/4 where division is involved:
+
+# Option 1: Use integer division and ensure divisibility
+n = Int('n')
+formula_expr = (n * n * (n + 1) * (n + 1)) / 4  # Z3 will use integer division
+
+# Option 2: Use Real type for exact rational arithmetic
+n = Real('n')
+formula_expr = (n * n * (n + 1) * (n + 1)) / 4  # Exact rational result
+```
+
+## Multi-part Proofs
+
+For models that combine specific case verification with general proofs:
+
+```python
+# RECOMMENDED APPROACH - Separate solvers for different parts of proof
+# First solver for specific case (e.g., n=5)
+solver1 = Solver()
+n5 = Int('n5')
+solver1.add(n5 == 5)
+# Add specific case constraints...
+
+# Second solver for general proof
+solver2 = Solver()
+n = Int('n')
+# Add general proof constraints...
+
+# Check and export each part separately
+if solver1.check() == sat:
+    export_solution(solver=solver1, variables={"n5": n5})
+
+# For general proofs that prove by contradiction (expecting UNSAT)
+if solver2.check() == unsat:
+    print("General proof succeeded")
+    export_solution(satisfiable=False, variables={"n": n})
+else:
+    # Export counterexample if found
+    export_solution(solver=solver2, variables={"n": n})
+```
+
+## End-to-End Workflow Example: Sum of Cubes
+
+Here's a complete example showing how to prove that the sum of cubes from 1 to n equals n²(n+1)²/4:
 
 ```python
 # Item 1: Setup and imports
 from z3 import *
 from mcp_solver.z3 import export_solution
 
-# Define the formula to be proven
-print("Proof: 1² + 2² + ... + n² = n(n+1)(2n+1)/6")
 # Item 2: Verify concrete examples
-print("\nVerifying concrete examples:")
-all_examples_correct = True
-for n in range(1, 6):
-    sum_squares = sum(i**2 for i in range(1, n+1))
-    formula = n*(n+1)*(2*n+1)//6
-    print(f"n = {n}: sum = {sum_squares}, formula = {formula}")
-    if sum_squares != formula:
-        print(f"MISMATCH at n = {n}")
-        all_examples_correct = False
-# Item 3: Verify base case
-print("\nVerifying base case (n=1):")
-base_case_verified = (1 == 1*(1+1)*(2*1+1)//6)
-print(f"Base case: 1 = {1*(1+1)*(2*1+1)//6}")
-# Item 4: Verify inductive step
-print("\nVerifying inductive step:")
-k = Int('k')
-sum_k = k*(k+1)*(2*k+1)//6
-next_term = (k+1)**2
-sum_k_plus_1 = sum_k + next_term
-formula_k_plus_1 = (k+1)*(k+2)*(2*(k+1)+1)//6
+print("CONCRETE EXAMPLES VERIFICATION:")
+all_examples_match = True
 
+for n_val in range(1, 6):
+    # Calculate sum of cubes
+    sum_cubes = sum(i**3 for i in range(1, n_val+1))
+    
+    # Calculate formula result
+    formula = (n_val**2 * (n_val+1)**2) // 4
+    
+    print(f"n = {n_val}: sum = {sum_cubes}, formula = {formula}")
+    
+    if sum_cubes != formula:
+        print(f"MISMATCH at n = {n_val}")
+        all_examples_match = False
+
+# Item 3: Verify the base case (n=1)
+print("\nBASE CASE (n=1):")
+base_sum = 1  # 1³ = 1
+base_formula = (1**2 * (1+1)**2) // 4  # 1²*2²/4 = 1
+print(f"Base case: {base_sum} = {base_formula}")
+
+base_case_verified = (base_sum == base_formula)
+
+# Item 4: Inductive step verification
+print("\nINDUCTIVE STEP:")
+
+# Symbolic variables
+k = Int('k')
+
+# Inductive hypothesis: sum of cubes from 1 to k = k²(k+1)²/4
+sum_k = k*k*(k+1)*(k+1) / 4
+
+# Next term (k+1)³
+next_term = (k+1)*(k+1)*(k+1)
+
+# Sum for k+1: sum for k + (k+1)³ 
+sum_k_plus_1 = sum_k + next_term
+
+# Formula for k+1: (k+1)²(k+2)²/4
+formula_k_plus_1 = (k+1)*(k+1)*(k+2)*(k+2) / 4
+
+# Create solver to find a counterexample
 ind_solver = Solver()
-ind_solver.add(k > 0)
+ind_solver.add(k > 0)  # Domain constraint: k is positive
 ind_solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
 
-induction_verified = False
-if ind_solver.check() == unsat:
-    print("Inductive step verified: No counterexample exists")
+# Check if they are equal by trying to find a counterexample
+induction_result = ind_solver.check()
+if induction_result == unsat:
+    print("Inductive step verified: No counterexample found")
     induction_verified = True
 else:
-    print(f"Found counterexample: k = {ind_solver.model()[k]}")
-# Item 5: Export results using Z3 boolean variable
+    counterexample = ind_solver.model()[k]
+    print(f"Counterexample found: k = {counterexample}")
+    induction_verified = False
+
+# Item 5: Consolidate results and export the solution
+# Create Z3 boolean for the final verification result
 proof_verified = Bool('proof_verified')
 result_solver = Solver()
-result_solver.add(proof_verified == (all_examples_correct and base_case_verified and induction_verified))
+
+# The proof is verified if all three parts succeeded
+result_solver.add(proof_verified == (all_examples_match and base_case_verified and induction_verified))
+
+# Print final conclusion
+if all_examples_match and base_case_verified and induction_verified:
+    print("\nPROOF COMPLETED SUCCESSFULLY:")
+    print("✓ All concrete examples match")
+    print("✓ Base case verified")
+    print("✓ Inductive step verified")
+    print("\nTherefore, the formula 1³ + 2³ + ... + n³ = [n²(n+1)²]/4 is proven.")
+else:
+    print("\nPROOF FAILED:")
+    if not all_examples_match:
+        print("✗ Concrete examples don't match")
+    if not base_case_verified:
+        print("✗ Base case failed")
+    if not induction_verified:
+        print("✗ Inductive step failed")
 
 # Export the solution
 export_solution(solver=result_solver, variables={"proof_verified": proof_verified})
-```
-
-This approach:
-
-- Splits the proof into separate items that can be added with individual add_item calls
-- Maintains a flat structure without nested functions
-- Verifies each component of the proof separately
-- Allows for testing and debugging each part independently
-- Uses a single Z3 boolean variable for the final verification result
-
-### Algebraic Manipulation with Z3
-
-When working with algebraic transformations, use `simplify()` to verify steps:
-
-```python
-from z3 import *
-
-# Example: Verify an algebraic transformation
-k = Int('k')
-
-# Starting expression
-expr1 = k**2 * (k+1)**2 / 4 + (k+1)**3
-
-# Target expression after transformation
-expr2 = (k+1)**2 * (k+2)**2 / 4
-
-# Expand both expressions for comparison
-expanded1 = simplify(expr1)
-expanded2 = simplify(expr2)
-
-print("Expanded expr1:", expanded1)
-print("Expanded expr2:", expanded2)
-
-# Verify they are equal
-if simplify(expanded1 - expanded2) == 0:
-    print("Expressions are equivalent")
-else:
-    print("Expressions differ")
-```
-
-## Template Library
-
-Z3 mode includes templates for common modeling patterns:
-
-```python
-from mcp_solver.z3.templates import (
-    # Array and sequence properties
-    array_is_sorted,    # Array elements are in non-decreasing order
-    all_distinct,       # All elements in array are different
-    
-    # Cardinality constraints
-    exactly_k,          # Exactly k elements equal to value
-    at_most_k,          # At most k elements equal to value
-    
-    # Optimization templates
-    smallest_subset_with_property  # Find minimal subset with a property
-)
-```
-
-## Example Model: Sudoku Solver
-
-```python
-from z3 import *
-from mcp_solver.z3 import export_solution  # Import the export_solution function
-
-def build_model():
-    # Sudoku puzzle (3x3 for simplicity)
-    # 0 represents empty cells
-    puzzle = [
-        [5, 3, 0],
-        [6, 0, 0],
-        [0, 9, 8]
-    ]
-    
-    # Create 3x3 matrix of integer variables
-    cells = [[Int(f"cell_{i}_{j}") for j in range(3)] for i in range(3)]
-    
-    # Create solver
-    s = Solver()
-    
-    # Add constraints
-    for i in range(3):
-        for j in range(3):
-            # Domain constraints
-            s.add(cells[i][j] >= 1, cells[i][j] <= 9)
-            
-            # Fixed cells
-            if puzzle[i][j] != 0:
-                s.add(cells[i][j] == puzzle[i][j])
-    
-    # All distinct in rows, columns
-    for i in range(3):
-        s.add(all_distinct([cells[i][j] for j in range(3)]))  # Rows
-        s.add(all_distinct([cells[j][i] for j in range(3)]))  # Columns
-    
-    variables = {f"cell_{i}_{j}": cells[i][j] for i in range(3) for j in range(3)}
-    return s, variables
-
-# Solve the model and export the solution
-solver, variables = build_model()
-
-# Always check if a solution exists before exporting
-if solver.check() == sat:
-    # This line is REQUIRED to extract the solution
-    export_solution(solver=solver, variables=variables)
-else:
-    print("No solution found")
 ```
 
 ## Function Scope and Variable Access
@@ -325,6 +494,7 @@ if solver.check() == sat:
     export_solution(solver=solver, variables=variables)
 else:
     print("No solution")
+    export_solution(satisfiable=False, variables=variables)
 ```
 
 ### Nested Functions and Complex Scope Management
@@ -367,6 +537,7 @@ if solver.check() == sat:
     export_solution(solver=solver, variables=variables)
 else:
     print("No solution found")
+    export_solution(satisfiable=False, variables=variables)
 ```
 
 ### Troubleshooting Variable Scope Issues
@@ -377,172 +548,6 @@ If you encounter scope-related errors:
 2. Create a dictionary mapping variable names to Z3 variables
 3. Pass both solver and variables to `export_solution`
 4. Prefer the function-based approach shown above
-
-## Export Solution Formats
-
-```python
-# CORRECT way to export a solution - both parameters required
-export_solution(solver=solver, variables=variables)
-
-# INCORRECT - missing parameters
-# export_solution()  # This will fail
-# export_solution(solver=solver)  # This will fail
-# export_solution(variables=variables)  # This will fail
-
-# INCORRECT - unsupported parameters
-# export_solution(solver=solver, variables=variables, solution_data={})  # This will fail
-```
-
-The `export_solution` function formats solutions differently depending on the scenario:
-
-1. **For satisfiable constraint problems**: Returns variable assignments that satisfy all constraints
-2. **For optimization problems**: Returns the optimal solution values
-3. **For proofs by contradiction (unsat results)**: When unsat is expected and proves the theorem, you may need to state explicitly in your output that the proof has succeeded
-
-## Working with Rational Arithmetic
-
-When dealing with divisions and fractions, use caution with integer vs. real types:
-
-```python
-# For formula like n²(n+1)²/4 where division is involved:
-
-# Option 1: Use integer division and ensure divisibility
-n = Int('n')
-formula_expr = (n * n * (n + 1) * (n + 1)) / 4  # Z3 will use integer division
-
-# Option 2: Use Real type for exact rational arithmetic
-n = Real('n')
-formula_expr = (n * n * (n + 1) * (n + 1)) / 4  # Exact rational result
-```
-
-## Multi-part Proofs
-
-For models that combine specific case verification with general proofs:
-
-```python
-# RECOMMENDED APPROACH - Separate solvers for different parts of proof
-# First solver for specific case (e.g., n=5)
-solver1 = Solver()
-n5 = Int('n5')
-solver1.add(n5 == 5)
-# Add specific case constraints...
-
-# Second solver for general proof
-solver2 = Solver()
-n = Int('n')
-# Add general proof constraints...
-
-# Check and export each part separately
-if solver1.check() == sat:
-    export_solution(solver=solver1, variables={"n5": n5})
-
-# For general proofs that prove by contradiction (expecting UNSAT)
-if solver2.check() == unsat:
-    print("General proof succeeded")
-else:
-    # Export counterexample if found
-    export_solution(solver=solver2, variables={"n": n})
-```
-
-## End-to-End Workflow Example: Sum of Cubes
-
-Here's a complete example showing how to prove that the sum of cubes from 1 to n equals n²(n+1)²/4:
-
-```python
-from z3 import *
-from mcp_solver.z3 import export_solution
-
-def prove_sum_of_cubes():
-    # Create solver
-    solver = Solver()
-    
-    # 1. Verify concrete examples first
-    print("CONCRETE EXAMPLES VERIFICATION:")
-    for n_val in range(1, 6):
-        # Calculate sum of cubes
-        sum_cubes = sum(i**3 for i in range(1, n_val+1))
-        # Calculate formula result
-        formula = (n_val**2 * (n_val+1)**2) // 4
-        
-        print(f"n = {n_val}: sum = {sum_cubes}, formula = {formula}")
-        if sum_cubes != formula:
-            print(f"MISMATCH at n = {n_val}")
-    
-    # 2. Base case verification (n=1)
-    print("\nBASE CASE (n=1):")
-    base_sum = 1  # 1³ = 1
-    base_formula = (1**2 * (1+1)**2) // 4  # 1²*2²/4 = 1
-    print(f"Base case: {base_sum} = {base_formula}")
-    
-    # 3. Inductive step - symbolic verification
-    print("\nINDUCTIVE STEP:")
-    
-    # Symbolic variables
-    k = Int('k')
-    
-    # Inductive hypothesis: sum of cubes from 1 to k = k²(k+1)²/4
-    sum_k = k*k*(k+1)*(k+1) / 4
-    
-    # Next term (k+1)³
-    next_term = (k+1)*(k+1)*(k+1)
-    
-    # Sum for k+1: sum for k + (k+1)³ 
-    sum_k_plus_1 = sum_k + next_term
-    
-    # Formula for k+1: (k+1)²(k+2)²/4
-    formula_k_plus_1 = (k+1)*(k+1)*(k+2)*(k+2) / 4
-    
-    # Check if they are equal by trying to find a counterexample
-    ind_solver = Solver()
-    ind_solver.add(k > 0)
-    ind_solver.add(simplify(sum_k_plus_1) != simplify(formula_k_plus_1))
-    
-    if ind_solver.check() == unsat:
-        print("Inductive step verified: No counterexample found")
-        
-        # 4. Show algebraic expansion for clarity
-        print("\nALGEBRAIC VERIFICATION:")
-        print("Starting with sum_k + (k+1)³ where sum_k = k²(k+1)²/4")
-        print("= k²(k+1)²/4 + (k+1)³")
-        print("= k²(k+1)²/4 + 4(k+1)³/4")
-        print("= [k²(k+1)² + 4(k+1)³]/4")
-        
-        print("\nExpanding k²(k+1)²:")
-        print("= k²(k² + 2k + 1) = k⁴ + 2k³ + k²")
-        
-        print("\nExpanding 4(k+1)³:")
-        print("= 4(k³ + 3k²k + 3k + 1) = 4k³ + 12k² + 12k + 4")
-        
-        print("\nCombining terms in the numerator:")
-        print("= [k⁴ + 2k³ + k² + 4k³ + 12k² + 12k + 4]/4")
-        print("= [k⁴ + 6k³ + 13k² + 12k + 4]/4")
-        
-        print("\nFactoring to match (k+1)²(k+2)²/4:")
-        print("= [(k+1)²(k+2)²]/4")
-        print("= (k+1)²(k+2)²/4")
-        
-        # Create Z3 boolean for the result
-        proof_verified = Bool('proof_verified')
-        result_solver = Solver()
-        result_solver.add(proof_verified == True)
-        
-        return result_solver, {"proof_verified": proof_verified}
-    else:
-        print(f"Counterexample found: k = {ind_solver.model()[k]}")
-        
-        # Create Z3 boolean for the result
-        proof_verified = Bool('proof_verified')
-        result_solver = Solver()
-        result_solver.add(proof_verified == False)
-        
-        return result_solver, {"proof_verified": proof_verified}
-
-# Call the proof function
-solver, variables = prove_sum_of_cubes()
-
-# Export the result
-export_solution(solver=solver, variables=variables)
-```
 
 ## Model Tracking
 
@@ -563,10 +568,14 @@ If your solution isn't being properly captured:
    from mcp_solver.z3 import export_solution
    ```
 
-2. ✅ Did you call export_solution with both required parameters?
+2. ✅ Did you call export_solution with the appropriate parameters?
 
    ```python
+   # For satisfiable results
    export_solution(solver=solver, variables=variables)
+   
+   # For unsatisfiable results
+   export_solution(satisfiable=False, variables=variables)
    ```
 
 3. ✅ Did you check if the solver found a solution before calling export_solution?
@@ -574,6 +583,8 @@ If your solution isn't being properly captured:
    ```python
    if solver.check() == sat:
        export_solution(solver=solver, variables=variables)
+   else:
+       export_solution(satisfiable=False, variables=variables)
    ```
 
 4. ✅ Did you collect all variables in a dictionary and pass them correctly?
@@ -595,26 +606,11 @@ If your solution isn't being properly captured:
            print(f"Warning: {var_name} is not a Z3 variable!")
    ```
 
-   7. ✅ If you get "Missing required parameter 'content'" errors:
-
-      - **Problem**: Your content might be too large or contain special characters
-      - **Solution**: Split your code into smaller, logical items using multiple add_item calls
-      
-      ```python
-      # Instead of one large item:
-      # add_item(index=1, content=very_large_code)
-      
-      # Use multiple smaller items:
-      add_item(index=1, content="# Item 1: Setup and imports")
-      add_item(index=2, content="# Item 2: Core logic")
-      add_item(index=3, content="# Item 3: Results and export")
-      ```
-
 7. ✅ If you get "Missing required parameter 'content'" errors:
 
    - **Problem**: Your content might be too large or contain special characters
    - **Solution**: Split your code into smaller, logical items using multiple add_item calls
-   
+
    ```python
    # Instead of one large item:
    # add_item(index=1, content=very_large_code)
@@ -623,19 +619,23 @@ If your solution isn't being properly captured:
    add_item(index=1, content="# Item 1: Setup and imports")
    add_item(index=2, content="# Item 2: Core logic")
    add_item(index=3, content="# Item 3: Results and export")
-
-
+   ```
 
 ## Common Error Patterns and Solutions
 
 1. **"'bool' object has no attribute 'as_ast'"**:
 
    - **Problem**: Using Python boolean instead of Z3 Bool variable
-   - **Solution**: Create a Z3 Bool variable and connect it to your Python result
+   - **Solution**: Create a Z3 Bool variable and connect it to your Python result or use the explicit satisfiable parameter
 
    ```python
+   # Option 1: Use Z3 Bool variable
    verified = Bool('verified')
    solver.add(verified == your_python_boolean)
+   export_solution(solver=solver, variables={"verified": verified})
+   
+   # Option 2: Use explicit satisfiable parameter
+   export_solution(satisfiable=your_python_boolean, variables={})
    ```
 
 2. **"'int' object has no attribute 'as_ast'"**:
@@ -648,12 +648,32 @@ If your solution isn't being properly captured:
    solver.add(x == 5)  # Instead of x = 5
    ```
 
-3. **"Solver returned unknown"**:
+3. **Contradictory solution output (satisfiable=True but message says "No solution exists")**:
 
-   - **Problem**: Problem may be too complex or timeouts
-   - **Solution**: Simplify constraints, increase timeout, or check for inconsistent constraints
+   - **Problem**: Using a secondary solver to express impossibility
+   - **Solution**: Use the explicit satisfiable parameter instead
 
-4. **Empty results even with sat solution**:
+   ```python
+   # INCORRECT approach
+   is_possible = Bool('is_possible')
+   result_solver = Solver()
+   result_solver.add(is_possible == False)
+   export_solution(solver=result_solver, variables={"is_possible": is_possible})
+   
+   # CORRECT approach
+   export_solution(satisfiable=False, variables=variables)
+   ```
+
+4. **"NameError: name 'original_export_solution' is not defined"**:
+
+   - **Problem**: Internal wrapper issue with export_solution
+   - **Solution**: Always explicitly import export_solution at the top of your code
+
+   ```python
+   from mcp_solver.z3 import export_solution
+   ```
+
+5. **Empty results even with sat solution**:
 
    - **Problem**: Missing export_solution call or wrong variables dictionary
-   - **Solution**: Ensure export_solution is called with the correct solver and variables
+   - **Solution**: Ensure export_solution is called with the correct parameters
