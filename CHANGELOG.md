@@ -4,6 +4,12 @@
 
 ---
 
+### [3.1.0] - 2025-04-03
+
+- **Improvement:** Enhanced test client with additional features for better usability and testing workflows.
+- **Improvement:** Improved solution export for Z3 mode, providing better data representation and accessibility.
+- **Update:** Enhanced installation documentation with more detailed setup notes and requirements
+
 ### [3.0.0] - 2025-03-28
 
 - **Major Change:** Added PySAT mode and Z3 mode, expanding the supported constraint programming paradigms.
