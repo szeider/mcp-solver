@@ -101,12 +101,12 @@ Restart your shell if needed and ensure `uv` is in your PATH.
 
 ## Step 3: Set up the MCP Solver project
 
-### Clone project
+### Clone the main barnch of the project
 
 ```bash
 mkdir -p ~/projects/mcp-solver
 cd ~/projects/mcp-solver
-git clone --branch z3 https://github.com/szeider/mcp-solver.git .
+git clone https://github.com/szeider/mcp-solver.git .
 ```
 
 ### Create and activate virtual environment
@@ -322,9 +322,9 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 
 ---
 
-### Usage:
 
-- We strongly recommend to use the [Claude Pro](https://claude.ai/) subscription to run the Claude 3.7 Sonnet.  
-- When you start Claude Desktop, you should see a *hammer symbol* counting at least 6 tools.
-- You shoukld also see an *electrical plugs* symbol. Click it, select *choose an integration*, then *MCP Solver instructions*. This shoudl add a prompt file `instructions.txt` to appear as an attachment. 
-- No you are ready to type your query to the MCP solver.
+### Usage:
+- We strongly recommend using the [Claude Pro](https://claude.ai/) subscription to access Claude 3.7 Sonnet model capabilities.
+- Upon launching Claude Desktop, verify that the interface displays a hammer symbol indicating at least 6 available tools.
+- Locate the electrical plug symbol in the interface. Select this icon, then choose "choose an integration" followed by "MCP Solver instructions." This action should result in the attachment of a prompt file named `instructions.txt`.
+- Once these prerequisites are satisfied, you may proceed to submit your query to the MCP solver.
