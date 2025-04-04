@@ -101,7 +101,7 @@ Restart your shell if needed and ensure `uv` is in your PATH.
 
 ## Step 3: Set up the MCP Solver project
 
-### Clone the main barnch of the project
+### Clone the project
 
 ```bash
 mkdir -p ~/projects/mcp-solver
