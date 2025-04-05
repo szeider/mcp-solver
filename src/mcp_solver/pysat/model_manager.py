@@ -16,7 +16,11 @@ from ..core.base_manager import SolverManager
 from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_pysat_code
 from .error_handling import PySATError, format_solution_error
-from ..core.validation import validate_index, validate_content, validate_python_code_safety, ValidationError, get_standardized_response, validate_timeout
+from ..core.validation import (
+    validate_index, validate_content, validate_python_code_safety, 
+    ValidationError, get_standardized_response, validate_timeout,
+    DictionaryMisuseValidator
+)
 
 # Validation constants are now imported from validation module
 
@@ -39,6 +43,7 @@ class PySATModelManager(SolverManager):
         self.last_solve_time: float = 0.0
         self.initialized = True
         self.logger = logging.getLogger(__name__)
+        self.dict_validator = DictionaryMisuseValidator()  # Initialize the dictionary misuse validator
         self.logger.info("PySAT model manager initialized")
     
     async def clear_model(self) -> Dict[str, Any]:
@@ -51,6 +56,10 @@ class PySATModelManager(SolverManager):
         self.code_items = []
         self.last_result = None
         self.last_solution = None
+        
+        # Reset the dictionary misuse validator
+        self.dict_validator = DictionaryMisuseValidator()
+        
         self.logger.info("Model cleared")
         return {"message": "Model cleared successfully"}
     
@@ -82,6 +91,10 @@ class PySATModelManager(SolverManager):
             validate_index(index, self.code_items, one_based=True)
             validate_content(content)
             validate_python_code_safety(content)
+            
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
             
             # Check if an item with the same index already exists
             for i, (idx, _) in enumerate(self.code_items):
@@ -183,6 +196,10 @@ class PySATModelManager(SolverManager):
             validate_content(content)
             validate_python_code_safety(content)
             
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
+            
             # Check if the item exists
             for i, (idx, _) in enumerate(self.code_items):
                 if idx == index:
@@ -242,6 +259,28 @@ class PySATModelManager(SolverManager):
             
             # Validate timeout
             validate_timeout(timeout, MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT)
+            
+            # Validate code fragments for dictionary misuse
+            dict_validation_result = self.dict_validator.validate()
+            if dict_validation_result["has_errors"]:
+                # Dictionary misuse detected, format errors for user
+                error_messages = []
+                for error in dict_validation_result["errors"]:
+                    item_index = error.get("item", "?")
+                    line_num = error.get("fragment_line", error.get("line", "?"))
+                    error_messages.append(f"Item {item_index}, Line {line_num}: {error['message']} {error['suggestion']}")
+                
+                self.logger.warning(f"Dictionary misuse detected: {error_messages}")
+                
+                return get_standardized_response(
+                    success=False,
+                    message="Your code contains a common dictionary usage error that will cause unexpected behavior.",
+                    error="Dictionary misuse detected",
+                    error_details={
+                        "errors": error_messages,
+                        "suggestion": "Check how you're updating dictionary variables. Use var_dict[key] = value instead of var_dict = value."
+                    }
+                )
             
             # Sort code items by index
             sorted_items = sorted(self.code_items, key=lambda x: x[0])
