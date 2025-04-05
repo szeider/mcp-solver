@@ -412,35 +412,25 @@ class PySATModelManager(SolverManager):
             if last_solution_match:
                 try:
                     last_solution_str = last_solution_match.group(1)
-                    # Clean up the string to make it valid Python syntax
-                    last_solution_str = last_solution_str.replace("'", '"').replace("True", "true").replace("False", "false")
+                    # Preprocess string to improve JSON compatibility
+                    last_solution_str = self._prepare_solution_string_for_json(last_solution_str)
+                    
                     # Try to parse as JSON
                     import json
                     try:
                         last_solution_data = json.loads(last_solution_str)
                         if isinstance(last_solution_data, dict):
-                            # Copy all dictionaries from last_solution_data to self.last_solution
-                            # to preserve custom dictionaries like 'casting', 'schedule', etc.
-                            for key, value in last_solution_data.items():
-                                if isinstance(value, dict):
-                                    # Copy custom dictionaries directly to last_solution
-                                    self.last_solution[key] = value
-                                    self.logger.debug(f"Copied custom dictionary '{key}' to solution")
-                                    
-                            # Also populate values dictionary from individual value fields
-                            if "values" in last_solution_data:
-                                self.logger.debug(f"Found values in _LAST_SOLUTION: {last_solution_data['values']}")
-                                # Convert JSON booleans back to Python booleans
-                                for key, value in last_solution_data["values"].items():
-                                    if value is True or value == "true":
-                                        self.last_solution["values"][key] = True
-                                    elif value is False or value == "false":
-                                        self.last_solution["values"][key] = False
-                                    else:
-                                        self.last_solution["values"][key] = value
+                            # Enhanced copy mechanism for all solution data
+                            self._merge_solution_data(last_solution_data)
                     except json.JSONDecodeError as e:
                         self.logger.error(f"Error parsing solution JSON: {str(e)}")
-                        self.last_solution["warning"] = f"Solution parsing error: {str(e)}"
+                        self.logger.debug(f"Problematic JSON string: {last_solution_str[:100]}...")
+                        
+                        # Attempt alternative parsing using ast.literal_eval which is more forgiving
+                        self._try_alternative_parsing(last_solution_str)
+                        
+                        # Even with parsing error, we'll keep the solution data we have
+                        self.last_solution["warning"] = f"Solution parsing warning: {str(e)}"
                 except Exception as e:
                     self.logger.error(f"Error extracting solution: {str(e)}")
                     self.last_solution["warning"] = f"Solution extraction error: {str(e)}"
@@ -488,6 +478,120 @@ class PySATModelManager(SolverManager):
                 message=f"Error solving model: {str(e)}",
                 error="Internal error"
             )
+            
+    def _prepare_solution_string_for_json(self, solution_str):
+        """
+        Prepare a solution string for JSON parsing by handling common formatting issues.
+        
+        Args:
+            solution_str: The solution string extracted from output
+            
+        Returns:
+            A cleaned string ready for JSON parsing
+        """
+        # Replace Python syntax with JSON syntax
+        clean_str = solution_str.replace("'", '"')
+        clean_str = clean_str.replace("True", "true").replace("False", "false")
+        
+        # Fix common tuple formatting issues (convert Python tuples to JSON arrays)
+        clean_str = re.sub(r'\((\d+),\s*(\d+)\)', r'[\1, \2]', clean_str)
+        
+        # Remove trailing commas which are valid in Python but not in JSON
+        clean_str = re.sub(r',\s*([}\]])', r'\1', clean_str)
+        
+        return clean_str
+    
+    def _merge_solution_data(self, solution_data):
+        """
+        Merge solution data from extracted output into the last_solution dictionary.
+        
+        Args:
+            solution_data: Dictionary containing solution data
+        """
+        # Copy all fields, not just dictionaries
+        for key, value in solution_data.items():
+            # Special handling for dictionaries
+            if isinstance(value, dict):
+                if key not in self.last_solution or not isinstance(self.last_solution[key], dict):
+                    self.last_solution[key] = {}
+                
+                # Merge dictionaries rather than replace
+                for inner_key, inner_value in value.items():
+                    self.last_solution[key][inner_key] = inner_value
+                
+                self.logger.debug(f"Merged dictionary '{key}' into solution")
+            # Special handling for list fields (like 'queens' or 'knights')
+            elif isinstance(value, list):
+                self.last_solution[key] = value
+                self.logger.debug(f"Copied list '{key}' to solution")
+            # For primitive values
+            else:
+                self.last_solution[key] = value
+                self.logger.debug(f"Copied value '{key}' to solution")
+        
+        # Ensure values are properly formatted
+        if "values" in solution_data:
+            self.logger.debug(f"Found values in solution_data: {solution_data['values']}")
+            # Convert JSON booleans back to Python booleans
+            for key, value in solution_data["values"].items():
+                if value is True or value == "true":
+                    self.last_solution["values"][key] = True
+                elif value is False or value == "false":
+                    self.last_solution["values"][key] = False
+                else:
+                    self.last_solution["values"][key] = value
+    
+    def _try_alternative_parsing(self, solution_str):
+        """
+        Try alternative parsing methods when JSON parsing fails.
+        
+        Args:
+            solution_str: The solution string that failed JSON parsing
+        """
+        try:
+            # Try using Python's literal_eval which can handle more Python-like syntax
+            import ast
+            solution_data = ast.literal_eval(solution_str)
+            
+            if isinstance(solution_data, dict):
+                self.logger.info("Successfully parsed solution using ast.literal_eval fallback")
+                self._merge_solution_data(solution_data)
+                return True
+        except Exception as e:
+            self.logger.debug(f"Alternative parsing also failed: {str(e)}")
+            
+            # Even if both parsing methods fail, try to extract any useful data using regex
+            self._extract_data_with_regex(solution_str)
+            
+        return False
+    
+    def _extract_data_with_regex(self, solution_str):
+        """
+        Extract critical data using regex patterns when all parsing fails.
+        
+        Args:
+            solution_str: The solution string that failed parsing
+        """
+        # Try to extract satisfiability
+        sat_match = re.search(r"'satisfiable':\s*(true|false)", solution_str, re.IGNORECASE)
+        if sat_match:
+            is_sat = sat_match.group(1).lower() == "true"
+            self.last_solution["satisfiable"] = is_sat
+            self.last_solution["status"] = "sat" if is_sat else "unsat"
+            
+        # Try to extract lists like 'queens' or 'knights' positions
+        for list_type in ["queens", "knights", "board_representation"]:
+            list_match = re.search(f"'{list_type}':\\s*(\\[.*?\\])", solution_str, re.DOTALL)
+            if list_match:
+                try:
+                    import ast
+                    # Clean up the list string and convert Python to JSON syntax
+                    list_str = list_match.group(1).replace("'", '"')
+                    list_data = ast.literal_eval(list_str)
+                    self.last_solution[list_type] = list_data
+                    self.logger.debug(f"Extracted {list_type} list using regex")
+                except Exception:
+                    pass  # If this fails, we still continue with other extractions
             
     def _enhance_code_for_debugging(self, code_string: str) -> str:
         """
@@ -622,4 +726,4 @@ class PySATModelManager(SolverManager):
             "message": "Solve time retrieved",
             "success": True,
             "solve_time": f"{self.last_solve_time:.6f} seconds"
-        } 
+        }
