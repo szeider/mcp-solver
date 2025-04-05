@@ -295,19 +295,34 @@ class PySATModelManager(SolverManager):
                 
                 for i, line in enumerate(code_lines):
                     # Check for variables = var_id pattern (common mistake)
-                    if re.search(r'variables\s*=\s*var_id', line):
+                    # This pattern detects direct assignment to mapping dictionaries
+                    var_dict_pattern = r'(var_mapping|variables|mapping|var_dict|node_colors)\s*=\s*\w+(?!\s*\{)'
+                    exclude_pattern = r'\bdef\b.*=|=\s*\{\}|=\s*dict\(|=\s*defaultdict\('
+                    
+                    if re.search(var_dict_pattern, line) and not re.search(exclude_pattern, line):
+                        var_name = re.search(r'(\w+)\s*=', line).group(1)
                         line_issues.append({
                             "line": i + 1,
                             "code": line.strip(),
-                            "issue": "Incorrect assignment to variables dictionary. Use variables[key] = var_id instead of variables = var_id"
+                            "issue": f"Critical error: Dictionary overwrite detected. Use {var_name}[key] = value instead of {var_name} = value"
+                        })
+                    
+                    # Check for direct integer assignment to dictionaries
+                    if re.search(r'(var_mapping|variables|mapping|var_dict)\s*=\s*\d+', line):
+                        var_name = re.search(r'(\w+)\s*=', line).group(1)
+                        line_issues.append({
+                            "line": i + 1,
+                            "code": line.strip(),
+                            "issue": f"Critical error: Attempting to assign an integer to {var_name} dictionary. Use {var_name}[key] = value instead."
                         })
                     
                     # Check for variables in list comprehension without indexing
-                    if re.search(r'\[\s*variables\s+for', line):
+                    if re.search(r'\[\s*(variables|var_mapping|mapping|var_dict)\s+for', line):
+                        var_name = re.search(r'\[\s*(\w+)\s+for', line).group(1)
                         line_issues.append({
                             "line": i + 1,
                             "code": line.strip(),
-                            "issue": "Incorrect use of variables in list comprehension. Use variables[key] instead of just variables"
+                            "issue": f"Incorrect use of {var_name} in list comprehension. Use {var_name}[key] instead of just {var_name}"
                         })
                 
                 if line_issues:
@@ -611,6 +626,21 @@ class PySATModelManager(SolverManager):
         )
         
         modified_code = debug_header + code_string
+        
+        # Add validation for create_var function 
+        # Find if there's a create_var function in the code
+        if re.search(r'def\s+create_var\s*\(', code_string):
+            # Add pattern matching for common create_var implementations
+            lines = code_string.split('\n')
+            for i, line in enumerate(lines):
+                # Look for "var_mapping = var_count" type errors
+                if (re.search(r'def\s+create_var', line) and 
+                    i+5 < len(lines) and 
+                    re.search(r'(var_mapping|variables)\s*=\s*\w+_count', '\n'.join(lines[i:i+5]))):
+                    self.logger.warning(
+                        "CRITICAL ERROR in create_var function: Variable mapping overwrite detected. "
+                        "Use var_mapping[name] = var_count instead of var_mapping = var_count"
+                    )
         
         # Modify the code to add debug info around solver.solve() calls
         modified_lines = []

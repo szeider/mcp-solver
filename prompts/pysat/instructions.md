@@ -72,6 +72,7 @@ solver.delete()
 ## ⚠️ Common Pitfalls
 
 - **Incomplete Variables**: Always complete variable assignments (e.g., `node_color_vars = [has_color(node, color) for color in colors]`)
+- **Variable Mapping**: Always use `var_mapping[name] = var_count` (NOT `var_mapping = var_count` which overwrites the entire dictionary)
 - **Dictionary Updates**: Use `node_colors[node] = color` (not `node_colors = color`)
 - **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`
 - **Memory Management**: Always call `solver.delete()` to free memory
