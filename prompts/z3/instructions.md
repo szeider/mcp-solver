@@ -62,6 +62,53 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 - **Optimization**: Optimize with respect to objective functions
 - **Quantifiers**: Express constraints with universal and existential quantifiers
 
+## Incremental Model Building
+
+The MCP Solver is designed for incremental model building with separate "items". This approach is **strongly recommended** as it allows you to:
+
+1. **Receive early feedback** on syntax errors or logic problems
+2. **Modify specific parts** of your model later without resubmitting everything
+3. **Debug more effectively** by identifying exactly which part of your model has issues
+4. **Build complex models** gradually and verify each part before moving to the next
+
+To use this approach:
+
+1. **Split your code into logical sections** (e.g., imports, variable declarations, constraints, solution export)
+2. **Submit each section separately** using the `add_item` tool with incrementing index values
+
+For example, instead of submitting all your code at once, break it into logical components:
+
+```python
+# The following example shows how to split your model into separate items
+# The "# Item X:" comments below are for illustration only and show where 
+# you would split the code for separate add_item calls
+
+# Item 1: Setup and imports
+from z3 import *
+from mcp_solver.z3 import export_solution
+
+# Item 2: Variable declarations
+x = Int('x')
+y = Int('y')
+variables = {'x': x, 'y': y}
+
+# Item 3: Constraints
+solver = Solver()
+solver.add(x > 0)
+solver.add(y > 0)
+solver.add(x + y == 10)
+
+# Item 4: Solve and export solution
+if solver.check() == sat:
+    export_solution(solver=solver, variables=variables)
+else:
+    export_solution(satisfiable=False, variables=variables)
+```
+
+Submit each section separately using `add_item` with the corresponding index (1, 2, 3, 4). The solver will automatically combine these items into a complete model. 
+
+**Note:** The "# Item X:" comments in the examples are for illustration only to show where you would split the code for separate submissions. You don't need to include these comments in your actual code - they're just to help you understand the incremental building approach.
+
 ## Best Practices for Problem Modeling
 
 1. **Translate all constraints correctly**:
@@ -74,7 +121,7 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 
    - Use descriptive variable names for readability
    - Group related constraints together
-   - Build long code incrementally by adding smaller items, so you get validation feedback and detect an error early
+   - Build long code incrementally by splitting it into separate items (as described above)
    - Comment complex constraint logic
 
 3. **Use the correct export_solution call**:
@@ -616,10 +663,180 @@ If your solution isn't being properly captured:
    # add_item(index=1, content=very_large_code)
    
    # Use multiple smaller items:
-   add_item(index=1, content="# Item 1: Setup and imports")
-   add_item(index=2, content="# Item 2: Core logic")
-   add_item(index=3, content="# Item 3: Results and export")
+   add_item(index=1, content="""
+   from z3 import *
+   from mcp_solver.z3 import export_solution
+   """)
+   
+   add_item(index=2, content="""
+   x = Int('x')
+   y = Int('y')
+   variables = {'x': x, 'y': y}
+   """)
+   
+   add_item(index=3, content="""
+   solver = Solver()
+   solver.add(x > 0, y > 0, x + y == 10)
+   """)
+   
+   add_item(index=4, content="""
+   if solver.check() == sat:
+       export_solution(solver=solver, variables=variables)
+   else:
+       export_solution(satisfiable=False, variables=variables)
+   """)
    ```
+   
+   Note: The "# Item X:" comments in examples are for illustration only to show where you would split the code. You don't need to include these comments in your actual submissions.
+
+## Working with Arrays in Z3
+
+Z3 offers two approaches for modeling array problems. Choose the approach that best fits your problem:
+
+### 1. Python Lists of Z3 Variables (recommended for fixed-size arrays)
+
+This approach uses individual Z3 variables for each array element and a Python list to organize them:
+
+```python
+# Approach 1: Create individual Z3 variables
+a0 = Int("a0")  # First element
+a1 = Int("a1")  # Second element
+a2 = Int("a2")  # Third element
+
+# Create a Python list for easier access (not a Z3 array)
+array_vars = [a0, a1, a2]
+
+# Apply array constraints using list indexing
+solver.add(array_vars[0] <= array_vars[1])  # Ascending order constraint
+solver.add(array_vars[1] <= array_vars[2])  
+solver.add(Sum(array_vars) == 15)           # Sum constraint
+
+# IMPORTANT: Export each variable separately
+variables = {
+    "a0": a0,  # Include each variable individually
+    "a1": a1,
+    "a2": a2
+}
+# Alternative dictionary comprehension for larger arrays:
+# variables = {f"a{i}": array_vars[i] for i in range(len(array_vars))}
+
+# Solution extraction using a list comprehension
+if solver.check() == sat:
+    model = solver.model()
+    # Use a descriptive name like result_array (not solution or array)
+    result_array = [model.evaluate(var).as_long() for var in array_vars]
+    print(f"Array values: {result_array}")
+```
+
+### 2. Z3's Native Array Type (for symbolic indexing and unbounded arrays)
+
+This approach uses Z3's built-in Array theory:
+
+```python
+# Create a Z3 array from integers to integers
+arr = Array('arr', IntSort(), IntSort())
+
+# Apply constraints using Select(arr, index) to access elements
+for i in range(3):
+    # Set bounds for each element
+    solver.add(Select(arr, i) >= 0)
+    solver.add(Select(arr, i) <= 10)
+    
+# Add ordering constraints
+solver.add(Select(arr, 0) <= Select(arr, 1))
+solver.add(Select(arr, 1) <= Select(arr, 2))
+
+# Add a sum constraint
+solver.add(Select(arr, 0) + Select(arr, 1) + Select(arr, 2) == 15)
+
+# Variable export - include the array itself
+variables = {'arr': arr}
+
+# Solution extraction for Z3 arrays
+if solver.check() == sat:
+    model = solver.model()
+    # Extract values into a Python list
+    array_values = []
+    for i in range(3):
+        # Use Select to get each element from the array
+        value = model.evaluate(Select(arr, i)).as_long()
+        array_values.append(value)
+    print(f"Array values: {array_values}")
+```
+
+### Common Array Operations and Constraints
+
+Here are examples of common array operations:
+
+```python
+# Sum of array elements (using Python list of Z3 variables)
+total = Sum(array_vars)
+solver.add(total == 100)
+
+# Product of array elements
+from operator import mul
+from functools import reduce
+product = reduce(mul, array_vars)
+solver.add(product == 24)
+
+# Maximum/minimum element
+max_element = array_vars[0]
+for var in array_vars[1:]:
+    # Use If for max comparison
+    max_element = If(var > max_element, var, max_element)
+solver.add(max_element <= 10)
+
+# Finding elements matching a condition
+count_evens = Sum([If(var % 2 == 0, 1, 0) for var in array_vars])
+solver.add(count_evens == 2)  # Exactly 2 even numbers
+
+# No duplicate values
+solver.add(Distinct(array_vars))
+```
+
+### Best Practices and Error Prevention
+
+To avoid common errors when working with arrays:
+
+1. **Use distinct variable names for different concepts**:
+   ```python
+   # GOOD: clear, separate names
+   array_vars = [Int(f"a{i}") for i in range(5)]  # List of Z3 variables
+   result_values = []  # List for storing results
+   
+   # BAD: reusing names causes confusion
+   array = [Int(f"a{i}") for i in range(5)]  # Don't name variables same as Z3 types
+   solution = []  # Don't use "solution" for arrays as it might trigger dictionary warnings
+   ```
+
+2. **Keep code organized with clear variable types**:
+   ```python
+   # For fixed-size arrays (approach 1)
+   a0, a1, a2, a3 = Int("a0"), Int("a1"), Int("a2"), Int("a3")
+   array_elements = [a0, a1, a2, a3]  # Python list of Z3 Int variables
+   
+   # For Z3 arrays (approach 2)
+   z3_array = Array('array', IntSort(), IntSort())  # Z3 Array type
+   ```
+
+3. **Extract array values appropriately**:
+   ```python
+   # For Python lists of Z3 variables
+   model = solver.model()
+   values = [model.evaluate(var).as_long() for var in array_elements]
+   
+   # For Z3 arrays
+   values = [model.evaluate(Select(z3_array, i)).as_long() for i in range(size)]
+   ```
+
+4. **Use separate names for solution containers**:
+   ```python
+   # Avoid false positives in dictionary misuse detector
+   result_list = []  # For storing array values
+   output_data = {}  # For storing dictionary data
+   ```
+
+By following these patterns, you'll avoid common errors and ensure your array-based constraints work correctly with the export_solution system.
 
 ## Common Error Patterns and Solutions
 
@@ -633,9 +850,6 @@ If your solution isn't being properly captured:
    verified = Bool('verified')
    solver.add(verified == your_python_boolean)
    export_solution(solver=solver, variables={"verified": verified})
-   
-   # Option 2: Use explicit satisfiable parameter
-   export_solution(satisfiable=your_python_boolean, variables={})
    ```
 
 2. **"'int' object has no attribute 'as_ast'"**:
@@ -648,6 +862,7 @@ If your solution isn't being properly captured:
    solver.add(x == 5)  # Instead of x = 5
    ```
 
+<<<<<<< HEAD
 3. **Contradictory solution output (satisfiable=True but message says "No solution exists")**:
 
    - **Problem**: Using a secondary solver to express impossibility
@@ -660,20 +875,52 @@ If your solution isn't being properly captured:
    result_solver.add(is_possible == False)
    export_solution(solver=result_solver, variables={"is_possible": is_possible})
    
+=======
+3. **"'list' object has no attribute 'get'"**:
+
+   - **Problem**: Using a Python list where a dictionary is expected
+   - **Solution**: Use different names for different data types
+
+   ```python
+   variables = {...}           # Dictionary for export_solution
+   result_array = [...]        # Different name for list results
+   ```
+
+4. **Contradictory solution output**:
+
+   - **Problem**: Using a secondary solver to express impossibility
+   - **Solution**: Use the explicit satisfiable parameter instead
+
+   ```python
+>>>>>>> dev
    # CORRECT approach
    export_solution(satisfiable=False, variables=variables)
    ```
 
+<<<<<<< HEAD
 4. **"NameError: name 'original_export_solution' is not defined"**:
 
    - **Problem**: Internal wrapper issue with export_solution
    - **Solution**: Always explicitly import export_solution at the top of your code
+=======
+5. **"NameError: name 'original_export_solution' is not defined"**:
+
+   - **Problem**: Internal wrapper issue with export_solution
+   - **Solution**: Always explicitly import export_solution at the top
+>>>>>>> dev
 
    ```python
    from mcp_solver.z3 import export_solution
    ```
 
+<<<<<<< HEAD
 5. **Empty results even with sat solution**:
 
    - **Problem**: Missing export_solution call or wrong variables dictionary
    - **Solution**: Ensure export_solution is called with the correct parameters
+=======
+6. **Empty results even with sat solution**:
+
+   - **Problem**: Missing export_solution call or wrong variables dictionary
+   - **Solution**: Ensure export_solution is called with correct parameters
+>>>>>>> dev

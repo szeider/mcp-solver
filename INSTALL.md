@@ -322,8 +322,8 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 
 ---
 
-
 ### Usage:
+
 - We strongly recommend using the [Claude Pro](https://claude.ai/) subscription to access Claude 3.7 Sonnet model capabilities.
 - Upon launching Claude Desktop, verify that the interface displays a hammer symbol indicating at least 6 available tools.
 - Locate the electrical plug symbol in the interface. Select this icon, then choose "choose an integration" followed by "MCP Solver instructions." This action should result in the attachment of a prompt file named `instructions.txt`.

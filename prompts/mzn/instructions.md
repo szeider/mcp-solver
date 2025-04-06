@@ -80,6 +80,9 @@ These tools let you construct your model incrementally and solve it using the Ch
 - **Incremental Changes:**  
   Use `add_item`, `replace_item`, and `delete_item` to modify your model incrementally. This allows you to maintain consistency in item numbering without needing to clear the entire model.
 
+- **Making Small Changes:**
+  When a user requests a small change to the model (like changing a parameter value or modifying a constraint), use `replace_item` to update just the relevant item rather than rebuilding the entire model. This maintains the model structure and is more efficient.
+
 - **When to Clear the Model:**  
   Use `clear_model` only when extensive changes are required and starting over is necessary.
 

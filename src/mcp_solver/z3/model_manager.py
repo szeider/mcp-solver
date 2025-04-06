@@ -16,7 +16,11 @@ import z3
 from ..core.base_manager import SolverManager
 from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
 from .environment import execute_z3_code
-from ..core.validation import validate_index, validate_content, validate_python_code_safety, validate_timeout, ValidationError, get_standardized_response
+from ..core.validation import (
+    validate_index, validate_content, validate_python_code_safety, 
+    ValidationError, get_standardized_response, validate_timeout,
+    DictionaryMisuseValidator
+)
 
 class Z3ModelManager(SolverManager):
     """
@@ -41,6 +45,7 @@ class Z3ModelManager(SolverManager):
             "solver": None
         }
         self.logger = logging.getLogger(__name__)
+        self.dict_validator = DictionaryMisuseValidator()  # Initialize the dictionary misuse validator
         self.logger.info("Z3 model manager initialized")
     
     async def clear_model(self) -> Dict[str, Any]:
@@ -53,6 +58,8 @@ class Z3ModelManager(SolverManager):
         self.code_items = []
         self.last_result = None
         self.last_solution = None
+        # Reset the dictionary misuse validator
+        self.dict_validator = DictionaryMisuseValidator()
         # Clear the registry when model is cleared
         self._registry = {
             "variables": {},
@@ -89,6 +96,10 @@ class Z3ModelManager(SolverManager):
             validate_index(index, [(i+1, c) for i, c in enumerate(self.code_items)], one_based=True)
             validate_content(content)
             validate_python_code_safety(content)
+            
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
             
             # Adjust index to 0-based for internal storage
             index_0 = max(0, min(len(self.code_items), index - 1))
@@ -194,6 +205,10 @@ class Z3ModelManager(SolverManager):
             validate_content(content)
             validate_python_code_safety(content)
             
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
+            
             # Adjust index to 0-based for internal storage
             index_0 = index - 1
             
@@ -256,6 +271,27 @@ class Z3ModelManager(SolverManager):
             
             # Validate timeout
             validate_timeout(timeout, MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT)
+            
+            # Perform dictionary misuse validation before executing the code
+            dict_validation_result = self.dict_validator.validate()
+            if dict_validation_result["has_errors"]:
+                error_messages = []
+                for error in dict_validation_result["errors"]:
+                    item_index = error.get("item", "?")
+                    line_num = error.get("fragment_line", error.get("line", "?"))
+                    error_messages.append(f"Item {item_index}, Line {line_num}: {error['message']} {error['suggestion']}")
+                
+                self.logger.warning(f"Dictionary misuse detected: {error_messages}")
+                
+                return get_standardized_response(
+                    success=False,
+                    message="Your code contains a common dictionary usage error that will cause unexpected behavior.",
+                    error="Dictionary misuse detected",
+                    error_details={
+                        "errors": error_messages,
+                        "suggestion": "Check how you're updating dictionary variables. Use var_dict[key] = value instead of var_dict = value."
+                    }
+                )
             
             # Combine code items into a single string
             combined_code = "\n".join(self.code_items)
@@ -326,16 +362,20 @@ export_solution = wrapped_export_solution
                         
                         # Extract values for variables
                         for var_name, var in stored_variables.items():
+                            # Evaluate the variable in the model
+                            val = model.eval(var)
+                            # Try to convert to appropriate type (int, fraction, bool, or string)
                             try:
-                                solution[var_name] = model.eval(var).as_long()
-                            except:
+                                solution[var_name] = val.as_long()
+                            except (AttributeError, z3.Z3Exception):
                                 try:
-                                    solution[var_name] = model.eval(var).as_fraction()
-                                except:
+                                    solution[var_name] = val.as_fraction()
+                                except (AttributeError, z3.Z3Exception):
                                     try:
-                                        solution[var_name] = bool(model.eval(var))
-                                    except:
-                                        solution[var_name] = str(model.eval(var))
+                                        solution[var_name] = bool(val)
+                                    except (ValueError, TypeError):
+                                        # Fall back to string representation
+                                        solution[var_name] = str(val)
                         
                         # Update the result
                         result["status"] = "success"
@@ -349,17 +389,21 @@ export_solution = wrapped_export_solution
                         self.last_solution = result.get("solution")
             
             # For success case, also update our registry from the solution
-            if result.get("solution") and result.get("solution").get("values"):
-                self._registry["variables"] = result.get("solution").get("values", {})
+            if result.get("solution"):
+                # Check if solution is a dictionary with a 'values' field
+                if isinstance(result.get("solution"), dict) and result.get("solution").get("values"):
+                    self._registry["variables"] = result.get("solution").get("values", {})
             
             # Store the solution if available
             if result.get("solution"):
                 self.last_solution = result.get("solution")
             
-            # Format the result for the client
-            formatted_result = {
-                "success": True,
-                "message": "Model solved",
+            # Prepare base result information
+            success = not bool(result.get("error"))
+            message = "Model solved" if success else "Failed to solve model"
+            
+            # Start with a standardized response
+            response_data = {
                 "status": result.get("status", "unknown"),
                 "output": result.get("output", []),
                 "execution_time": result.get("execution_time", 0),
@@ -367,37 +411,42 @@ export_solution = wrapped_export_solution
             
             # Add error information if present
             if result.get("error"):
-                formatted_result["error"] = result.get("error")
-                formatted_result["success"] = False
-                formatted_result["message"] = "Failed to solve model"
+                response_data["error"] = result.get("error")
             
             # Add solution information if present
             if result.get("solution"):
                 solution = result.get("solution", {})
-                formatted_result["satisfiable"] = solution.get("satisfiable", False)
-                formatted_result["values"] = solution.get("values", {})
+                response_data["satisfiable"] = solution.get("satisfiable", False)
+                response_data["values"] = solution.get("values", {})
                 
                 # Add other solution fields if present
                 if solution.get("objective") is not None:
-                    formatted_result["objective"] = solution.get("objective")
+                    response_data["objective"] = solution.get("objective")
                 
                 # Include output field from solution if present (for property verification messages)
                 if solution.get("output") and isinstance(solution.get("output"), list):
                     # Append solution output to existing output
-                    formatted_result["output"].extend(solution.get("output"))
+                    response_data["output"].extend(solution.get("output"))
                 
                 # Add property_verified field if present (for property verification)
                 if "property_verified" in solution.get("values", {}):
                     property_verified = solution["values"]["property_verified"]
-                    formatted_result["property_verified"] = property_verified
+                    response_data["property_verified"] = property_verified
                     
                     # Add appropriate message based on property verification
                     if property_verified:
-                        if not any("verified" in line.lower() for line in formatted_result["output"]):
-                            formatted_result["output"].append("Property verified successfully.")
+                        if not any("verified" in line.lower() for line in response_data["output"]):
+                            response_data["output"].append("Property verified successfully.")
                     else:
-                        if not any("counterexample" in line.lower() for line in formatted_result["output"]):
-                            formatted_result["output"].append("Property verification failed. Counterexample found.")
+                        if not any("counterexample" in line.lower() for line in response_data["output"]):
+                            response_data["output"].append("Property verification failed. Counterexample found.")
+            
+            # Use standardized response format
+            formatted_result = get_standardized_response(
+                success=success,
+                message=message,
+                **response_data
+            )
             
             return formatted_result
             

@@ -8,6 +8,7 @@ This module provides shared validation functions for Python-based solver compone
 
 import re
 import logging
+import ast
 from typing import List, Tuple, Optional, Any, Dict, Union
 from datetime import timedelta
 
@@ -284,3 +285,428 @@ def get_standardized_response(success: bool, message: str, error: Optional[str] 
     response.update(kwargs)
         
     return response
+
+
+class DictMisuseVisitor(ast.NodeVisitor):
+    """
+    AST visitor that detects dictionary misuse.
+    
+    This visitor identifies variables used as dictionaries and then
+    detects when they are overwritten with non-dictionary values.
+    """
+    
+    def __init__(self):
+        """Initialize the visitor."""
+        self.dict_vars = set()  # Variables used as dictionaries
+        self.list_vars = set()  # Variables used as lists (to avoid false positives)
+        self.dict_assignments = {}  # Track where dictionaries are initialized
+        self.dict_misuses = []  # Detected misuses
+        
+    def visit_Subscript(self, node):
+        """
+        Identify variables used as subscriptable collections.
+        
+        We need to distinguish between dictionaries and lists:
+        - For dictionaries: d[key] with arbitrary key
+        - For lists: l[index] typically with numeric index
+        """
+        if isinstance(node.value, ast.Name):
+            var_name = node.value.id
+            
+            # Try to determine if this is a list or dictionary access
+            is_list_access = False
+            
+            # Check if index is a numeric literal (typical for lists)
+            if isinstance(node.slice, ast.Index) and isinstance(node.slice.value, ast.Num):
+                is_list_access = True
+            # In Python 3.9+, slice is direct
+            elif isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+                is_list_access = True
+            # Check for range access with numeric bounds (list slicing)
+            elif isinstance(node.slice, ast.Slice) and all(
+                isinstance(x, (ast.Num, ast.Constant)) 
+                for x in [node.slice.lower, node.slice.upper, node.slice.step] 
+                if x is not None
+            ):
+                is_list_access = True
+                
+            # If it looks like a list access and we don't already know it's a dict
+            if is_list_access and var_name not in self.dict_vars:
+                self.list_vars.add(var_name)
+            # Otherwise assume it might be a dictionary
+            elif var_name not in self.list_vars:
+                self.dict_vars.add(var_name)
+                
+        self.generic_visit(node)
+        
+    def visit_Compare(self, node):
+        """
+        Identify variables used as dictionaries via membership tests.
+        
+        Example: key in d indicates d is used as a dictionary.
+        """
+        for op in node.ops:
+            if isinstance(op, ast.In) or isinstance(op, ast.NotIn):
+                comparator = node.comparators[0]
+                if isinstance(comparator, ast.Name):
+                    var_name = comparator.id
+                    # Only add to dict_vars if not already known to be a list
+                    if var_name not in self.list_vars:
+                        self.dict_vars.add(var_name)
+        self.generic_visit(node)
+        
+    def visit_Assign(self, node):
+        """
+        Check for dictionary misuse in assignments.
+        
+        This detects:
+        1. Dictionary initialization (d = {})
+        2. Dictionary misuse (d = scalar)
+        3. List initialization (l = [])
+        """
+        # Check for dictionary initialization with {}
+        if isinstance(node.value, ast.Dict) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                var_name = node.targets[0].id
+                self.dict_vars.add(var_name)
+                # Remove from list_vars if it was there
+                self.list_vars.discard(var_name)
+                self.dict_assignments[var_name] = getattr(node, 'lineno', 0)
+        
+        # Detect dictionary initialization using dict() or defaultdict()
+        elif isinstance(node.value, ast.Call) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name) and isinstance(node.value.func, ast.Name):
+                var_name = node.targets[0].id
+                
+                if node.value.func.id in ('dict', 'defaultdict'):
+                    self.dict_vars.add(var_name)
+                    # Remove from list_vars if it was there
+                    self.list_vars.discard(var_name)
+                    self.dict_assignments[var_name] = getattr(node, 'lineno', 0)
+                # Detect list initialization with list() or []
+                elif node.value.func.id == 'list' or (
+                    isinstance(node.value, ast.List) or
+                    (isinstance(node.value, ast.ListComp))
+                ):
+                    self.list_vars.add(var_name)
+                    # Remove from dict_vars if it was there
+                    self.dict_vars.discard(var_name)
+        
+        # Detect list initialization with []
+        elif isinstance(node.value, ast.List) and len(node.targets) == 1:
+            if isinstance(node.targets[0], ast.Name):
+                var_name = node.targets[0].id
+                self.list_vars.add(var_name)
+                # Remove from dict_vars if it was there
+                self.dict_vars.discard(var_name)
+        
+        # Check for dictionary misuse - overwriting a dictionary with a non-dictionary
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            var_name = node.targets[0].id
+            
+            # Only check if this is a known dictionary and not a list
+            if var_name in self.dict_vars and var_name not in self.list_vars:
+                # Check if we're assigning a non-dictionary value
+                if not self._is_dict_value(node.value):
+                    line_num = getattr(node, 'lineno', '?')
+                    
+                    # Create user-friendly error message
+                    self.dict_misuses.append({
+                        "line": line_num,
+                        "var_name": var_name,
+                        "message": f"Error at line {line_num}: The variable '{var_name}' is being overwritten with a non-dictionary value.",
+                        "suggestion": f"Use '{var_name}[key] = value' instead of '{var_name} = value' to add items to the dictionary."
+                    })
+        
+        self.generic_visit(node)
+    
+    def _is_dict_value(self, node):
+        """
+        Check if a value is likely to be a dictionary.
+        
+        Args:
+            node: The AST node representing the value
+            
+        Returns:
+            True if the value is a dictionary, False otherwise
+        """
+        return (
+            # Dictionary literal: {}
+            isinstance(node, ast.Dict) or 
+            # dict() or defaultdict() call
+            (isinstance(node, ast.Call) and 
+             isinstance(node.func, ast.Name) and
+             node.func.id in ('dict', 'defaultdict')) or
+            # Variable that is known to be a dictionary
+            (isinstance(node, ast.Name) and 
+             node.id in self.dict_vars and
+             node.id not in self.list_vars)
+        )
+        
+    def visit_FunctionDef(self, node):
+        """
+        Process function definitions to catch var_mapping misuse pattern.
+        
+        This specifically looks for the var_mapping = var_count pattern
+        inside functions like create_var.
+        """
+        function_name = node.name
+        
+        # Check if this is a create_var function or similar
+        if function_name.lower().find('create_var') >= 0:
+            # Get the function body
+            for stmt in node.body:
+                # Check for var_mapping = var_count pattern
+                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+                    if isinstance(stmt.targets[0], ast.Name):
+                        target_name = stmt.targets[0].id
+                        # Check if target looks like a dict variable
+                        if ('map' in target_name.lower() or 
+                            'dict' in target_name.lower() or
+                            'vars' in target_name.lower()):
+                            
+                            # Check if value looks like a counter
+                            if isinstance(stmt.value, ast.Name):
+                                value_name = stmt.value.id
+                                if 'count' in value_name.lower() or 'id' in value_name.lower():
+                                    # This is likely the var_mapping = var_count bug
+                                    line_num = getattr(stmt, 'lineno', '?')
+                                    self.dict_misuses.append({
+                                        "line": line_num,
+                                        "var_name": target_name,
+                                        "message": f"Critical error at line {line_num}: The '{target_name}' dictionary is being overwritten with a number.",
+                                        "suggestion": f"Use '{target_name}[name] = {value_name}' instead of '{target_name} = {value_name}' to add a key-value pair to the dictionary."
+                                    })
+        
+        self.generic_visit(node)
+
+
+class DictUsageVisitor(ast.NodeVisitor):
+    """
+    AST visitor that identifies variables used as dictionaries or lists.
+    
+    This visitor tracks variables that are used with dictionary operations
+    and distinguishes between dictionaries and lists/arrays to avoid false positives.
+    """
+    
+    def __init__(self):
+        """Initialize the visitor with empty sets for tracking variables."""
+        self.dict_vars = set()  # Variables used as dictionaries
+        self.list_vars = set()  # Variables used as lists/arrays
+        self.dict_assignments = {}  # Track where dictionaries are initialized
+        
+    def visit_Subscript(self, node):
+        """
+        Identify variables used with subscript access and distinguish between lists and dicts.
+        
+        - For lists: typically use numeric indices like l[0], l[1:3]
+        - For dicts: typically use arbitrary expressions as keys
+        """
+        if isinstance(node.value, ast.Name):
+            var_name = node.value.id
+            
+            # Try to determine if this is a list or dictionary access
+            is_list_access = False
+            
+            # Check for numeric index or slice, which likely indicates a list
+            if hasattr(node, 'slice'):
+                # Python 3.9+ direct slice
+                if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+                    is_list_access = True
+                # Python 3.8 and earlier use Index wrapper
+                elif isinstance(node.slice, ast.Index):
+                    if isinstance(node.slice.value, ast.Num) or (
+                        isinstance(node.slice.value, ast.Constant) and 
+                        isinstance(node.slice.value.value, int)
+                    ):
+                        is_list_access = True
+                # Check for slice notation (list[1:5])
+                elif isinstance(node.slice, ast.Slice):
+                    is_list_access = True
+            
+            # If it looks like a list access and not already known to be a dict
+            if is_list_access and var_name not in self.dict_vars:
+                self.list_vars.add(var_name)
+            # If it's not clearly a list access and not known to be a list
+            elif not is_list_access and var_name not in self.list_vars:
+                self.dict_vars.add(var_name)
+        
+        self.generic_visit(node)
+        
+    def visit_Compare(self, node):
+        """
+        Identify variables used in membership tests.
+        
+        Example: key in d could be dictionary or list/set.
+        """
+        for op in node.ops:
+            if isinstance(op, ast.In) or isinstance(op, ast.NotIn):
+                comparator = node.comparators[0]
+                if isinstance(comparator, ast.Name):
+                    var_name = comparator.id
+                    # Only add to dict_vars if not already known to be a list
+                    if var_name not in self.list_vars:
+                        self.dict_vars.add(var_name)
+        
+        self.generic_visit(node)
+        
+    def visit_Assign(self, node):
+        """
+        Identify variables initialized as dictionaries or lists.
+        
+        Examples:
+        - d = {} or d = dict() indicates a dictionary
+        - l = [] or l = list() indicates a list
+        """
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            var_name = node.targets[0].id
+            
+            # Dictionary literal: {}
+            if isinstance(node.value, ast.Dict):
+                self.dict_vars.add(var_name)
+                self.list_vars.discard(var_name)  # Remove from list_vars if present
+                self.dict_assignments[var_name] = getattr(node, 'lineno', 0)
+            
+            # List literal: []
+            elif isinstance(node.value, ast.List):
+                self.list_vars.add(var_name)
+                self.dict_vars.discard(var_name)  # Remove from dict_vars if present
+            
+            # List comprehension: [x for x in range(10)]
+            elif isinstance(node.value, ast.ListComp):
+                self.list_vars.add(var_name)
+                self.dict_vars.discard(var_name)
+            
+            # Function call: dict(), list(), etc.
+            elif isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+                func_name = node.value.func.id
+                
+                # Dictionary constructors
+                if func_name in ('dict', 'defaultdict', 'OrderedDict', 'Counter'):
+                    self.dict_vars.add(var_name)
+                    self.list_vars.discard(var_name)
+                    self.dict_assignments[var_name] = getattr(node, 'lineno', 0)
+                
+                # List/array constructors
+                elif func_name in ('list', 'array', 'tuple', 'set'):
+                    self.list_vars.add(var_name)
+                    self.dict_vars.discard(var_name)
+        
+        self.generic_visit(node)
+
+
+class DictionaryMisuseValidator:
+    """
+    Validator for detecting dictionary misuse in Python code.
+    
+    This validator stores code fragments as they are added, then combines them
+    for analysis to detect dictionary misuse errors, like overwriting a dictionary
+    with a non-dictionary value.
+    """
+    
+    def __init__(self):
+        """Initialize a new validator with an empty list of code fragments."""
+        self.code_fragments = []
+        self.fragment_indices = []  # Store corresponding item indices
+        
+    def add_fragment(self, code_fragment: str, item_index: int = None):
+        """
+        Add a new code fragment to the collection.
+        
+        Args:
+            code_fragment: The code fragment to add
+            item_index: Optional index of the item (for error reporting)
+        """
+        self.code_fragments.append(code_fragment)
+        self.fragment_indices.append(item_index)
+        
+    def get_combined_code(self) -> str:
+        """
+        Get all fragments combined into one string.
+        
+        Returns:
+            A string with all code fragments joined by newlines
+        """
+        return "\n".join(self.code_fragments)
+        
+    def validate(self) -> Dict[str, Any]:
+        """
+        Validate all collected code fragments for dictionary misuse.
+        
+        Returns:
+            A dictionary with validation results, including:
+            - has_errors: Whether any errors were found
+            - errors: A list of error dictionaries if has_errors is True
+        """
+        combined_code = self.get_combined_code()
+        
+        try:
+            tree = ast.parse(combined_code)
+            
+            # Find dictionary misuses using the visitor
+            misuse_visitor = DictMisuseVisitor()
+            misuse_visitor.visit(tree)
+            
+            # Use DictUsageVisitor to help identify arrays/lists vs dictionaries
+            usage_visitor = DictUsageVisitor()
+            usage_visitor.visit(tree)
+            
+            # Filter out false positives by checking for variables used as both dictionaries and lists
+            # We want to remove those from the dictionary misuse list
+            filtered_misuses = []
+            for error in misuse_visitor.dict_misuses:
+                var_name = error.get("var_name", "")
+                
+                # Skip if this variable is clearly used as a list elsewhere
+                if var_name in usage_visitor.list_vars:
+                    logger.debug(f"Skipping false positive for list variable: {var_name}")
+                    continue
+                
+                # Keep real dictionary misuses
+                filtered_misuses.append(error)
+            
+            # Process any filtered misuses
+            if filtered_misuses:
+                logger.info(f"Found {len(filtered_misuses)} dictionary misuses after filtering")
+                
+                # Add item index information to errors if available
+                for error in filtered_misuses:
+                    line_num = error.get("line", 0)
+                    if isinstance(line_num, int) and line_num > 0:
+                        # Find which fragment this line belongs to
+                        current_line = 0
+                        for i, fragment in enumerate(self.code_fragments):
+                            fragment_lines = fragment.count('\n') + 1
+                            if current_line + fragment_lines >= line_num:
+                                # This is the fragment containing the error
+                                fragment_line = line_num - current_line
+                                error["item"] = self.fragment_indices[i] if i < len(self.fragment_indices) else '?'
+                                error["fragment_line"] = fragment_line
+                                break
+                            current_line += fragment_lines
+                
+                return {
+                    "has_errors": True,
+                    "errors": filtered_misuses
+                }
+            
+            return {"has_errors": False, "errors": []}
+            
+        except SyntaxError as e:
+            # Handle syntax errors in the combined code
+            line_num = getattr(e, "lineno", "?")
+            col_num = getattr(e, "offset", "?")
+            error_text = getattr(e, "text", "").strip() if hasattr(e, "text") else "unknown"
+            
+            logger.error(f"Syntax error in combined code: Line {line_num}, Col {col_num}: {str(e)}")
+            
+            return {
+                "has_errors": True,
+                "errors": [{
+                    "message": f"Syntax error in your code: {str(e)}",
+                    "line": line_num,
+                    "column": col_num,
+                    "text": error_text,
+                    "suggestion": "Check your code syntax"
+                }]
+            }

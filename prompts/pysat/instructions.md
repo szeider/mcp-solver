@@ -15,14 +15,86 @@ The MCP Solver integrates PySAT solving with the Model Context Protocol, allowin
 - **replace_item**
 - **delete_item**
 - **solve_model**
+- **get_model**
 
 These tools let you construct your model incrementally and solve it using a SAT solver.
 
+## Incremental Model Building
+
+The MCP Solver is designed for incremental model building with separate "items". This approach is **strongly recommended** as it allows you to:
+
+1. **Receive early feedback** on syntax errors or logic problems
+2. **Modify specific parts** of your model later without resubmitting everything
+3. **Debug more effectively** by identifying exactly which part has issues
+4. **Build complex models** gradually and verify each part before moving to the next
+
+To use this approach:
+
+1. **Split your code into logical sections** (e.g., imports, variable declarations, constraints, solution export)
+2. **Submit each section separately** using the `add_item` tool with incrementing index values
+
+For example, instead of submitting all your code at once, break it into logical components:
+
+```python
+# The following example shows how to split your model into separate items
+# The "# Item X:" comments below are for illustration only and show where 
+# you would split the code for separate add_item calls
+
+# Item 1: Setup and imports
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+from pysat.card import *
+
+formula = CNF()
+var_mapping = {}
+var_count = 1
+
+def create_var(name):
+    global var_count
+    var_mapping[name] = var_count
+    var_count += 1
+    return var_mapping[name]
+
+# Item 2: Variable declarations and constraints
+x1 = create_var("x1")
+x2 = create_var("x2")
+x3 = create_var("x3")
+
+# Add exactly 2 of the 3 variables must be true
+for clause in exactly_k([x1, x2, x3], 2):
+    formula.append(clause)
+
+# Item 3: Solve and export solution
+solver = Glucose3()
+solver.append_formula(formula)
+
+if solver.solve():
+    model = solver.get_model()
+    result_dict = {name: (vid in model) for name, vid in var_mapping.items()}
+    
+    export_solution({
+        "satisfiable": True,
+        "assignment": result_dict
+    })
+else:
+    export_solution({
+        "satisfiable": False,
+        "message": "No solution exists"
+    })
+
+solver.delete()
+```
+
+Submit each section separately using `add_item` with the corresponding index (1, 2, 3). The system automatically combines these items into a complete model.
 
 
 ## Quick Start Example
 
 ```python
+# The following example includes "# Item X:" comments showing where you would split
+# the code when using the incremental building approach with separate add_item calls
+
+# Item 1: Setup and imports
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
 from pysat.card import *  # Import cardinality helpers
@@ -35,11 +107,13 @@ formula = CNF()
 # Define variables: 1=A, 2=B, 3=C
 A, B, C = 1, 2, 3
 
+# Item 2: Add constraints
 # Add clauses
 formula.append([A, B])        # A OR B
 formula.append([-A, C])       # NOT A OR C
 formula.append([-B, -C])      # NOT B OR NOT C
 
+# Item 3: Solve and export solution
 # Create solver and add formula
 solver = Glucose3()
 solver.append_formula(formula)
@@ -72,6 +146,7 @@ solver.delete()
 ## ⚠️ Common Pitfalls
 
 - **Incomplete Variables**: Always complete variable assignments (e.g., `node_color_vars = [has_color(node, color) for color in colors]`)
+- **Variable Mapping**: Always use `var_mapping[name] = var_count` (NOT `var_mapping = var_count` which overwrites the entire dictionary)
 - **Dictionary Updates**: Use `node_colors[node] = color` (not `node_colors = color`)
 - **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`
 - **Memory Management**: Always call `solver.delete()` to free memory
@@ -123,6 +198,10 @@ from pysat.card import *
 ### Example Using Cardinality Constraints
 
 ```python
+# The following example includes "# Item X:" comments showing where you would split
+# the code when using the incremental building approach with separate add_item calls
+
+# Item 1: Setup and imports
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
 from pysat.card import *
@@ -133,7 +212,7 @@ formula = CNF()
 a, b, c, d = 1, 2, 3, 4
 var_names = {1: "a", 2: "b", 3: "c", 4: "d"}
 
-# Add cardinality constraints
+# Item 2: Add basic cardinality constraints
 # At most 2 of these variables can be true
 for clause in at_most_k([a, b, c, d], 2):
     formula.append(clause)
@@ -141,12 +220,14 @@ for clause in at_most_k([a, b, c, d], 2):
 # Exactly one of these variables must be true
 for clause in exactly_one([a, b, c]):
     formula.append(clause)
-    
+
+# Item 3: Add combined constraints    
 # Combining constraints - If 'a' is true, then at most one of b,c,d can be true
 formula.append([-a, b, c, d])  # If a is true, at least one of b,c,d must be true
 for clause in at_most_one([b, c, d]):
     formula.append(clause)
 
+# Item 4: Solve and export solution
 # Solve
 solver = Glucose3()
 solver.append_formula(formula)
@@ -205,18 +286,21 @@ IMPORTANT: Always use the `global` keyword (not `nonlocal`) for counter variable
 # After solving
 if solver.solve():
     model = solver.get_model()
-    solution = interpret_model(model)
+    # Use a clear name for solution dictionaries
+    result_data = interpret_model(model)
     
     # Check specific variables
-    if solution.get("edge_a_b", False):
+    if result_data.get("edge_a_b", False):
         print("Edge between A and B exists")
     
     export_solution({
         "satisfiable": True,
-        "assignment": solution,
+        "assignment": result_data,
         "variable_mapping": var_mapping
     })
 ```
+
+> **Important**: Use distinct names for different data types. Avoid reusing the same variable name (e.g., `solution`) for both dictionaries and lists, as this can trigger false positives in the dictionary misuse validator.
 
 ### Namespacing Variables
 
@@ -252,19 +336,26 @@ formula.append([-a_id, -b_id, c_id])
 ## Standard Code Pattern
 
 ```python
-# 1. Create variables and formula
+# The following example includes "# Item X:" comments showing where you would split
+# the code when using the incremental building approach with separate add_item calls
+
+# Item 1: Setup and imports
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+from pysat.card import *
+
 formula = CNF()
 var_mapping = {}
 var_count = 1
 
 def create_var(name):
-    nonlocal var_count
-    var_mapping[name] = var_count
+    global var_count  # Use global for module-level variables
+    var_mapping[name] = var_count  # CRITICAL: Use dictionary[key] = value pattern
     var_count += 1
     return var_mapping[name]
 
-# 2. Add constraints using helper functions
-from pysat.card import *
+# Item 2: Define constraints
+# Add constraints using helper functions
 x1 = create_var("x1")
 x2 = create_var("x2")
 x3 = create_var("x3")
@@ -272,16 +363,17 @@ x3 = create_var("x3")
 for clause in exactly_k([x1, x2, x3], 2):
     formula.append(clause)
 
-# 3. Solve and process results
+# Item 3: Solve and process results
 solver = Glucose3()
 solver.append_formula(formula)
 if solver.solve():
     model = solver.get_model()
-    solution = {name: (vid in model) for name, vid in var_mapping.items()}
+    # Use descriptive name for the result dictionary
+    result_dict = {name: (vid in model) for name, vid in var_mapping.items()}
     
     export_solution({
         "satisfiable": True,
-        "assignment": solution
+        "assignment": result_dict
     })
 else:
     export_solution({
@@ -289,9 +381,14 @@ else:
         "message": "No solution exists"
     })
     
-# 4. Always free solver memory
+# Always free solver memory
 solver.delete()
 ```
+
+> ⚠️ **Common Errors to Avoid**:
+> 1. Never overwrite `var_mapping`: Use `var_mapping[key] = value` instead of `var_mapping = value`
+> 2. Use distinct variable names for dictionaries vs. lists/arrays
+> 3. Use `global var_count` instead of `nonlocal var_count` at module level
 
 ## Interpreting the Solver's Model
 
@@ -335,6 +432,10 @@ from pysat.card import *
 ## Example: Graph Coloring Problem
 
 ```python
+# The following example includes "# Item X:" comments showing where you would split
+# the code when using the incremental building approach with separate add_item calls
+
+# Item 1: Setup and imports
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
 from pysat.card import *
@@ -354,11 +455,12 @@ var_mapping = {}
 var_count = 1
 
 def create_var(name):
-    nonlocal var_count
+    global var_count
     var_mapping[name] = var_count
     var_count += 1
     return var_mapping[name]
 
+# Item 2: Create variables and formula
 # Create variables for node-color pairs
 node_colors = {}
 for node in graph:
@@ -374,6 +476,7 @@ for node in graph:
     for clause in exactly_one(node_color_vars):
         formula.append(clause)
 
+# Item 3: Add constraints for adjacent nodes
 # Adjacent nodes cannot have the same color
 for node in graph:
     for neighbor in graph[node]:
@@ -381,6 +484,7 @@ for node in graph:
             for color in colors:
                 formula.append([-node_colors[(node, color)], -node_colors[(neighbor, color)]])
 
+# Item 4: Solve and export solution
 # Create solver and add formula
 solver = Glucose3()
 solver.append_formula(formula)
@@ -423,7 +527,10 @@ solver.delete()
 
 - **Review Return Information:**  
   Carefully review the confirmation messages and the current model after each tool call.
-- **Split long code parts** into smaller items.
+- **Use the Incremental Building Approach:**  
+  Split your code into logical items and submit them separately with `add_item`. The "# Item X:" comments in examples show where you would split the code, but you don't need to include these comments in your actual submissions.
+- **Get Feedback Early:**  
+  Submit and validate each item separately to catch errors early.
 - **Verification:**  
   Always verify the solution after a solve operation by checking that all constraints are satisfied and justified.
 
