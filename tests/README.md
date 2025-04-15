@@ -8,13 +8,13 @@ For a quick end-to-end test after code changes, run any of these commands:
 
 ```bash
 # MiniZinc test 
-run-test mzn 
+uv run run-test mzn 
 
 # PySAT test 
-run-test pysat 
+uv run run-test pysat 
 
 # Z3 test - Cryptarithmetic puzzle
-run-test z3 
+uv run run-test z3 
 ```
 
 ## Test Structure
@@ -46,18 +46,18 @@ run-test z3
 
 ```bash
 cd /path/to/mcp-solver
-run-test mzn    # Run MiniZinc test.md by default if present, otherwise all MiniZinc tests
-run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
-run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
+uv run run-test mzn    # Run MiniZinc test.md by default if present, otherwise all MiniZinc tests
+uv run run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
+uv run run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
 ```
 
 ### Running a Specific Problem
 
 ```bash
 cd /path/to/mcp-solver
-run-test mzn --problem tests/problems/mzn/nqueens.md
-run-test pysat --problem tests/problems/pysat/graph_coloring.md
-run-test z3 --problem tests/problems/z3/cryptarithmetic.md
+uv run run-test mzn --problem tests/problems/mzn/nqueens.md
+uv run run-test pysat --problem tests/problems/pysat/graph_coloring.md
+uv run run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 ```
 
 Note: If no problem is specified, the system will look for a `test.md` file in the respective solver's problems directory and run that as a default test.
@@ -88,7 +88,7 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 
 Example:
 ```bash
-run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save --result ./json_results
+uv run run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save --result ./json_results
 ```
 
 ## Troubleshooting Common Issues
@@ -128,4 +128,4 @@ If you add new helper functions, make sure to include them in:
    - MiniZinc: `tests/problems/mzn/`
    - PySAT: `tests/problems/pysat/`
    - Z3: `tests/problems/z3/`
-2. Run the test with the run-test command 
+2. Run the test with the `uv run run-test` command 
