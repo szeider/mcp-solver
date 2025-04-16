@@ -122,7 +122,6 @@ class SetupTest:
         
         dependencies = [
             "langchain_core",
-            "langchain_mcp_adapters",
             "langgraph",
             "langchain_openai",
             "langchain_anthropic",
