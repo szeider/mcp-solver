@@ -57,6 +57,9 @@ mcp_solver.log
 uv.lock
 mcp-solver.txt
 tests/results/
+CLAUDE.md
+docs/
+tmp/
 
 # Distribution / packaging
 dist/

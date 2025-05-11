@@ -136,13 +136,13 @@ The client provides specialized commands for each solver backend:
 
 ```bash
 # MiniZinc mode
-uv run test-client --query <query_file>.md
+uv run run-test mzn --problem <path/to/problem.md>
 
 # PySAT mode
-uv run test-client-pysat --query <query_file>.md
+uv run run-test pysat --problem <path/to/problem.md>
 
 # Z3 mode
-uv run test-client-z3 --query <query_file>.md
+uv run run-test z3 --problem <path/to/problem.md>
 ```
 
 ------
