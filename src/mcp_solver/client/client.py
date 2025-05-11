@@ -357,6 +357,13 @@ def parse_arguments():
         help=f"Model to use (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
+        "--mc",
+        type=str,
+        help="Direct model code (e.g., OR:mistralai/ministral-3b). Format: '<platform>:<provider>/<model>'. "
+             "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google). "
+             "Overrides --model if provided.",
+    )
+    parser.add_argument(
         "--no-stats", action="store_true", help="Disable tool usage statistics"
     )
     parser.add_argument(
@@ -548,14 +555,20 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     args = state.get("args")
 
     # Set up the connection to the MCP server
-    # Get the model code from the model name
-    if model_name not in MODEL_CODES:
-        console.print(
-            f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]"
-        )
-        model_name = DEFAULT_MODEL
+    # Get the model code from either direct code (--mc) or model name (--model)
+    if args.mc:
+        # Use the direct model code provided via --mc
+        model_code = args.mc
+        console.print(f"[bold green]Using direct model code: {model_code}[/bold green]")
+    else:
+        # Use the predefined model code from MODEL_CODES
+        if model_name not in MODEL_CODES:
+            console.print(
+                f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]"
+            )
+            model_name = DEFAULT_MODEL
 
-    model_code = MODEL_CODES[model_name]
+        model_code = MODEL_CODES[model_name]
 
     # Check if required API key is present
     try:
