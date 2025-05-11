@@ -74,6 +74,7 @@ MODEL_CODES = {
     "MC9": "OR:google/gemini-2.5-pro-exp-03-25:free",  # Google Gemini via OpenRouter
     "MC10": "OR:anthropic/claude-3-7-sonnet:free",  # Claude 3.7 Sonnet via OpenRouter free tier
     "MC11": "GO:gemini-1.5-pro",  # Google Gemini 1.5 Pro with function calling support
+    "MC12": "LM:ministral-8b-instruct-2410@http://localhost:1234/v1",  # Local LM Studio model
 }
 DEFAULT_MODEL = "MC1"  # Default model to use
 
@@ -573,14 +574,20 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     # Check if required API key is present
     try:
         model_info = LLMFactory.parse_model_code(model_code)
-        api_key_name = model_info.api_key_name
-        api_key = os.environ.get(api_key_name)
 
-        if not api_key:
-            error_msg = f"Error: {api_key_name} not found in environment variables. Please set {api_key_name} in your .env file."
-            console.print(f"[bold red]{error_msg}[/bold red]")
-            state["messages"].append({"role": "assistant", "content": error_msg})
-            return state
+        # LM Studio doesn't require an API key
+        if model_info.platform == "LM":
+            # Skip API key check for LM Studio
+            pass
+        else:
+            api_key_name = model_info.api_key_name
+            api_key = os.environ.get(api_key_name)
+
+            if not api_key:
+                error_msg = f"Error: {api_key_name} not found in environment variables. Please set {api_key_name} in your .env file."
+                console.print(f"[bold red]{error_msg}[/bold red]")
+                state["messages"].append({"role": "assistant", "content": error_msg})
+                return state
     except Exception as e:
         console.print(f"[bold red]Error parsing model code: {str(e)}[/bold red]")
         state["messages"].append(

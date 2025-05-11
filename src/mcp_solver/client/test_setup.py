@@ -28,6 +28,8 @@ except ImportError:
 
 # Use the same default model as in client.py
 DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Same as "MC1" in client.py
+# LM Studio model for testing
+LMSTUDIO_MODEL = "LM:ministral-8b-instruct-2410@http://localhost:1234/v1"  # Same as "MC12" in client.py
 
 class SetupTest:
     def __init__(self):
@@ -260,10 +262,16 @@ def main():
     parser = argparse.ArgumentParser(description='Test the MCP-Solver client setup')
     parser.add_argument('--model', type=str, default=DEFAULT_MODEL,
                         help=f'Model code to test (default: {DEFAULT_MODEL})')
+    parser.add_argument('--lmstudio', action='store_true',
+                        help='Test LM Studio local model integration')
     args = parser.parse_args()
-    
+
     test = SetupTest()
-    test.run_all_tests(args.model)
+    if args.lmstudio:
+        print(f"Testing with LM Studio model: {LMSTUDIO_MODEL}")
+        test.run_all_tests(LMSTUDIO_MODEL)
+    else:
+        test.run_all_tests(args.model)
 
 if __name__ == "__main__":
     main() 
