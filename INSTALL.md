@@ -185,24 +185,60 @@ uv run test-setup-client
 
 ## Step 6: Test Client Setup
 
-If you want to run the test client, make sure you have an [**Anthropic API key**](https://www.anthropic.com/api). You can either export it as an environment variable or define it in a `.env` file.
+The client requires an **API key** from an LLM provider, unless you run a local model.
 
-### macOS / Linux
+### Anthropic API Key (Default)
+
+By default, the client uses Anthropic Claude. Make sure you have an [**Anthropic API key**](https://www.anthropic.com/api). The preferred method is to add it to a `.env` file in the project root:
+
+```env
+ANTHROPIC_API_KEY=sk-...
+```
+
+Alternatively, you can export it as an environment variable:
+
+#### macOS / Linux
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
 ```
 
-### Windows (PowerShell)
+#### Windows (PowerShell)
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-..."
 ```
 
-Or add to an `.env` file in the project root:
+### Using Other LLM Providers
+
+The client supports multiple LLM providers through the `--mc` model code flag. The syntax follows this pattern:
+
+```
+XY:model    # For cloud providers
+LM:model@url  # For local models via LM Studio
+```
+
+Where `XY` is a two-letter code representing the platform:
+- `OA`: OpenAI
+- `AT`: Anthropic
+- `OR`: OpenRouter
+- `GO`: Google (Gemini)
+- `LM`: LM Studio (local models)
+
+Examples:
+```
+OA:gpt-4.1-2025-04-14
+AT:claude-3-7-sonnet-20250219
+OR:google/gemini-2.5-pro-preview
+```
+
+For providers other than Anthropic, you'll need to add the corresponding API key to your `.env` file:
 
 ```env
-ANTHROPIC_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=sk-...
+# No API key needed for LM Studio
 ```
 
 Test the client setup:
@@ -324,7 +360,8 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 
 ### Usage:
 
-- We strongly recommend to use the [Claude Pro](https://claude.ai/) subscription to run the Claude 3.7 Sonnet.  
-- When you start Claude Desktop, you should see a *hammer symbol* counting at least 6 tools.
-- You shoukld also see an *electrical plugs* symbol. Click it, select *choose an integration*, then *MCP Solver instructions*. This shoudl add a prompt file `instructions.txt` to appear as an attachment. 
-- No you are ready to type your query to the MCP solver.
+- We strongly recommend using the [Claude Pro](https://claude.ai/) subscription to run the Claude 3.7 Sonnet.  
+- When you start Claude Desktop (version > 0.8.0), you should see a *Plus Icon* and to the right of it a *Settings Slicer Icon*.
+- When you click the Plus Icon, you should see "Add from MCP Solver", follow this, and add the instructions prompt to your conversations. 
+- When you click the Settings Slider Icon, you can access all the tools of the MCP Solver, and enable/disable them individually; we recommend having all enabled. 
+- Now you are ready to type your query to the MCP solver.
