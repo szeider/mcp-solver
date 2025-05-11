@@ -65,19 +65,28 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 ### Available Problems
 
 #### MiniZinc Problems:
-- `nqueens` - The N-Queens problem
-- `sudoku` - Sudoku solver
+- `carpet_cutting.md` - Carpet cutting optimization problem
+- `test.md` - Default test problem
+- `tsp.md` - Traveling Salesperson Problem
+- `university_scheduling.md` - University course scheduling problem
+- `university_scheduling_unsat.md` - Unsatisfiable variant of scheduling problem
+- `zebra.md` - Einstein's Zebra puzzle (Five Houses Puzzle)
 
 #### PySAT Problems:
-- `graph_coloring` - Graph coloring problem
-- `scheduling` - Scheduling problem
-- `furniture-arrangement` - Furniture arrangement problem
-- `mine-sweeper-hard` - Mine sweeper problem
-- `sudoku-16x16` - 16x16 Sudoku problem
+- `equitable_coloring_hajos.md` - Equitable graph coloring problem
+- `furniture_arrangement.md` - Furniture arrangement problem
+- `petersen_12_coloring_unsat.md` - Unsatisfiable Petersen graph coloring
+- `queens_and_knights_6x6.md` - Combined queens and knights placement puzzle
+- `sudoku_16x16.md` - 16x16 Sudoku problem
+- `test.md` - Default test problem
 
 #### Z3 Problems:
-- `bounded_sum` - Bounded sum problem
-- `cryptarithmetic` - Cryptarithmetic problem (SEND+MORE=MONEY)
+- `array_property_verifier.md` - Array property verification problem
+- `bounded_sum_unsat.md` - Unsatisfiable bounded sum problem
+- `cryptarithmetic.md` - Cryptarithmetic puzzle (SEND+MORE=MONEY)
+- `processor_verification.md` - Processor behavior verification
+- `sos_induction.md` - Sum-of-squares induction problem
+- `test.md` - Default test problem
 
 ### Test Options
 
@@ -85,10 +94,15 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 - `--timeout` or `-t`: Set timeout in seconds (default: 300)
 - `--save` or `-s`: Save test results to the results directory
 - `--result`: Save detailed JSON results to the specified directory
+- `--mc`: Specify direct model code (e.g., "AT:claude-3-7-sonnet-20250219")
 
-Example:
+Examples:
 ```bash
+# Run with all default options
 uv run run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save --result ./json_results
+
+# Run with specific LLM model (using direct model code)
+uv run run-test mzn --problem tests/problems/mzn/nqueens.md --mc "AT:claude-3-7-sonnet-20250219"
 ```
 
 ## Troubleshooting Common Issues

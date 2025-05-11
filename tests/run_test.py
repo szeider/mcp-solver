@@ -254,33 +254,34 @@ def validate_files_exist(config):
         
     return True
 
-def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_TIMEOUT, save_results=False, result_path=None):
+def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_TIMEOUT,
+            save_results=False, result_path=None, args=None):
     """Run a single problem through the appropriate test-client"""
     problem_name = os.path.basename(problem_file).replace('.md', '')
-    
+
     # Use the unified box formatting
     header_text = f"Testing problem [{solver_name.upper()}]: {problem_name}"
     print(format_box(header_text))
-    
+
     abs_problem_path = os.path.abspath(problem_file)
-    
+
     # Build the command with basic parameters
     cmd_params = {
         "mcp_client_dir": MCP_CLIENT_DIR,
         "query_path": abs_problem_path,
     }
-    
+
     # Use the command template directly (no prompt path needed)
     cmd = config["command_template"].format(**cmd_params)
 
     # Add common args: timeout and verbose if supported
     if verbose:
          print("Verbose flag enabled: Output will be printed in real-time.")
-    
+
     if timeout and timeout != DEFAULT_TIMEOUT:
         # Assume test-client accepts --timeout
         cmd += f" --timeout {timeout}"
-    
+
     # If result path provided, forward it to client.py
     if result_path:
         # Create a standardized filename for the JSON output
@@ -288,6 +289,11 @@ def run_test(problem_file, solver_name, config, verbose=False, timeout=DEFAULT_T
         os.makedirs(result_path, exist_ok=True)
         json_filename = os.path.join(result_path, f"{solver_name}_{problem_name}_{timestamp}.json")
         cmd += f" --result-path {json_filename}"
+
+    # Add direct model code parameter if provided
+    mc = getattr(args, 'mc', None)
+    if mc:
+        cmd += f" --mc \"{mc}\""
         
     # --- Setup for saving results ---
     output_dir = None
@@ -609,11 +615,13 @@ def main():
                        help="Specify the solver type to test (mzn, pysat, z3)")
     parser.add_argument("--problem", help="Path to specific problem file (.md)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output (prints output in real-time)")
-    parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT, 
+    parser.add_argument("--timeout", "-t", type=int, default=DEFAULT_TIMEOUT,
                        help=f"Timeout in seconds per problem (default: {DEFAULT_TIMEOUT})")
-    parser.add_argument("--save", "-s", action="store_true", 
+    parser.add_argument("--save", "-s", action="store_true",
                         help="Save model and response text files to default results directory")
     parser.add_argument("--result", help="Path to folder where JSON results should be saved")
+    parser.add_argument("--mc",
+                        help="Direct model code specification (e.g., AT:claude-3-7-sonnet-20250219)")
     args = parser.parse_args()
 
     solver_config = SOLVER_CONFIGS[args.solver]
@@ -665,11 +673,12 @@ def main():
         success, tool_counts = run_test(
             problem_file,
             solver_name,
-            solver_config, 
-            verbose=args.verbose, 
-            timeout=args.timeout, 
+            solver_config,
+            verbose=args.verbose,
+            timeout=args.timeout,
             save_results=args.save,
-            result_path=args.result
+            result_path=args.result,
+            args=args
         )
         if success:
             success_count += 1
