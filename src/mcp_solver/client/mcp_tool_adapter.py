@@ -2,7 +2,7 @@
 MCP Tool Adapter for MCP Solver
 
 This module provides functionality to convert MCP tools to LangChain tools.
-The code is based on langchain_mcp_adapters.tools but has been modified to 
+The code is based on langchain_mcp_adapters.tools but has been modified to
 ensure compatibility with mcp>=1.5.
 """
 
@@ -28,10 +28,10 @@ def _convert_call_tool_result(
 ) -> Tuple[Union[str, List[str]], Optional[List[NonTextContent]]]:
     """
     Convert a CallToolResult to a format suitable for LangChain tools.
-    
+
     Args:
         call_tool_result: The result from an MCP tool call
-        
+
     Returns:
         A tuple of (text_content, non_text_contents)
     """
@@ -88,12 +88,15 @@ def convert_mcp_tool_to_langchain_tool(
 async def load_mcp_tools(session: ClientSession) -> List[BaseTool]:
     """
     Load all available MCP tools and convert them to LangChain tools.
-    
+
     Args:
         session: The MCP client session
-        
+
     Returns:
         A list of LangChain tools
     """
     tools_response = await session.list_tools()
-    return [convert_mcp_tool_to_langchain_tool(session, tool) for tool in tools_response.tools] 
+    return [
+        convert_mcp_tool_to_langchain_tool(session, tool)
+        for tool in tools_response.tools
+    ]

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Tuple, Any
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+
 try:
     # Import Google chat model if available
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -16,9 +17,11 @@ import uuid
 # Load environment variables from .env file
 load_dotenv()
 
+
 @dataclass
 class ModelInfo:
     """Information about a model parsed from the model code."""
+
     platform: str  # OR, OA, AT, GO, LM
     provider: str  # openai, anthropic, google, lmstudio
     model_name: str  # The actual model name
@@ -28,7 +31,7 @@ class ModelInfo:
         if self.platform == "OR":
             base_string = f"{self.provider}/{self.model_name}"
             # Add tier if present
-            if hasattr(self, 'tier'):
+            if hasattr(self, "tier"):
                 return f"{base_string}:{self.tier}"
             return base_string
         return self.model_name
@@ -40,25 +43,26 @@ class ModelInfo:
             "OA": "OPENAI_API_KEY",
             "AT": "ANTHROPIC_API_KEY",
             "GO": "GOOGLE_API_KEY",
-            "LM": "LMSTUDIO_API_KEY"  # Not actually required for LM Studio
+            "LM": "LMSTUDIO_API_KEY",  # Not actually required for LM Studio
         }
         return platform_to_key[self.platform]
 
     @property
     def base_url(self) -> Optional[str]:
         """Get the API base URL for the platform."""
-        if self.platform == "LM" and hasattr(self, 'url'):
+        if self.platform == "LM" and hasattr(self, "url"):
             return self.url
         elif self.platform == "OR":
             return "https://openrouter.ai/api/v1"
         return None
 
+
 class LLMFactory:
     """Factory for creating LLM instances based on model code."""
-    
+
     # Store model info using unique IDs
     _model_info: Dict[str, ModelInfo] = {}
-    
+
     @staticmethod
     def parse_model_code(model_code: str) -> ModelInfo:
         try:
@@ -71,13 +75,17 @@ class LLMFactory:
             if platform == "LM":
                 match = re.match(r"(.+)@(.+)", remaining)
                 if not match:
-                    raise ValueError(f"Invalid LM Studio format. Expected 'LM:model@url', got '{model_code}'")
+                    raise ValueError(
+                        f"Invalid LM Studio format. Expected 'LM:model@url', got '{model_code}'"
+                    )
 
                 model_name = match.group(1)
                 url = match.group(2)
 
-                model_info = ModelInfo(platform=platform, provider="lmstudio", model_name=model_name)
-                setattr(model_info, 'url', url)
+                model_info = ModelInfo(
+                    platform=platform, provider="lmstudio", model_name=model_name
+                )
+                setattr(model_info, "url", url)
                 return model_info
             elif platform == "OR":
                 provider, model_name = remaining.split("/", 1)
@@ -87,23 +95,33 @@ class LLMFactory:
                     model_name = model_parts[0]
                     # Store additional parameter as an attribute
                     tier = model_parts[1]
-                    model_info = ModelInfo(platform=platform, provider=provider, model_name=model_name)
-                    setattr(model_info, 'tier', tier)
+                    model_info = ModelInfo(
+                        platform=platform, provider=provider, model_name=model_name
+                    )
+                    setattr(model_info, "tier", tier)
                     return model_info
             else:
-                provider = "openai" if platform == "OA" else "anthropic" if platform == "AT" else "google"
+                provider = (
+                    "openai"
+                    if platform == "OA"
+                    else "anthropic" if platform == "AT" else "google"
+                )
                 # Handle reasoning_effort parameter in model code (format: OA:o3-mini:high)
                 if platform == "OA" and ":" in remaining:
                     model_parts = remaining.split(":", 1)
                     model_name = model_parts[0]
                     # Store reasoning_effort as an additional attribute
                     reasoning_effort = model_parts[1]
-                    model_info = ModelInfo(platform=platform, provider=provider, model_name=model_name)
-                    setattr(model_info, 'reasoning_effort', reasoning_effort)
+                    model_info = ModelInfo(
+                        platform=platform, provider=provider, model_name=model_name
+                    )
+                    setattr(model_info, "reasoning_effort", reasoning_effort)
                     return model_info
                 else:
                     model_name = remaining
-            return ModelInfo(platform=platform, provider=provider, model_name=model_name)
+            return ModelInfo(
+                platform=platform, provider=provider, model_name=model_name
+            )
         except Exception as e:
             raise ValueError(
                 f"Invalid model code format: {model_code}. "
@@ -137,64 +155,64 @@ class LLMFactory:
                 model=model_info.model_string,
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
-                **kwargs
+                **kwargs,
             )
 
         elif model_info.platform == "OA":
             model_kwargs = kwargs.copy()
 
             # Add reasoning_effort if specified in the model code
-            if hasattr(model_info, 'reasoning_effort'):
-                model_kwargs['model_kwargs'] = model_kwargs.get('model_kwargs', {})
-                model_kwargs['model_kwargs']['reasoning_effort'] = model_info.reasoning_effort
+            if hasattr(model_info, "reasoning_effort"):
+                model_kwargs["model_kwargs"] = model_kwargs.get("model_kwargs", {})
+                model_kwargs["model_kwargs"][
+                    "reasoning_effort"
+                ] = model_info.reasoning_effort
 
             model = ChatOpenAI(
-                model=model_info.model_string,
-                api_key=api_key,
-                **model_kwargs
+                model=model_info.model_string, api_key=api_key, **model_kwargs
             )
         elif model_info.platform == "AT":
             # Set default max_tokens for Anthropic models if not specified in kwargs
             anthropic_kwargs = kwargs.copy()
-            if 'max_tokens' not in anthropic_kwargs:
-                anthropic_kwargs['max_tokens'] = 4096
+            if "max_tokens" not in anthropic_kwargs:
+                anthropic_kwargs["max_tokens"] = 4096
 
             model = ChatAnthropic(
                 model=model_info.model_string,
                 anthropic_api_key=api_key,
-                **anthropic_kwargs
+                **anthropic_kwargs,
             )
         elif model_info.platform == "GO":
             model = ChatGoogleGenerativeAI(
-                model=model_info.model_string,
-                api_key=api_key,
-                **kwargs
+                model=model_info.model_string, api_key=api_key, **kwargs
             )
         elif model_info.platform == "LM":
             # For LM Studio, use ChatOpenAI with the provided base_url
-            base_url = getattr(model_info, 'url', None)
+            base_url = getattr(model_info, "url", None)
             if not base_url:
-                raise ValueError("LM Studio models require a URL (format: LM:model@url)")
+                raise ValueError(
+                    "LM Studio models require a URL (format: LM:model@url)"
+                )
 
             model = ChatOpenAI(
                 model=model_info.model_name,
                 api_key=api_key,  # This will be "lm-studio"
                 base_url=base_url,
-                **kwargs
+                **kwargs,
             )
         else:
             raise ValueError(f"Unsupported platform: {model_info.platform}")
 
         # Generate a unique ID and store it as an attribute of the model
         model_id = str(uuid.uuid4())
-        setattr(model, '_factory_id', model_id)
+        setattr(model, "_factory_id", model_id)
         cls._model_info[model_id] = model_info
         return model
 
     @classmethod
     def get_provider(cls, model: BaseChatModel) -> Optional[str]:
         """Get the provider name for a model instance."""
-        if hasattr(model, '_factory_id'):
+        if hasattr(model, "_factory_id"):
             if model_info := cls._model_info.get(model._factory_id):
                 return model_info.provider
         return None
@@ -202,12 +220,12 @@ class LLMFactory:
     @classmethod
     def get_model_info(cls, model: BaseChatModel) -> Optional[ModelInfo]:
         """Get the full ModelInfo for a model instance."""
-        if hasattr(model, '_factory_id'):
+        if hasattr(model, "_factory_id"):
             return cls._model_info.get(model._factory_id)
         return None
-        
+
     # ===== TESTING UTILITIES =====
-    
+
     @classmethod
     def check_api_key_available(cls, model_code: str) -> Tuple[bool, str]:
         """
@@ -263,10 +281,14 @@ class LLMFactory:
             elif model_info.provider == "anthropic":
                 return ChatAnthropic, "OpenRouter (Anthropic)"
             else:
-                raise ValueError(f"Unsupported provider for OpenRouter: {model_info.provider}")
-    
+                raise ValueError(
+                    f"Unsupported provider for OpenRouter: {model_info.provider}"
+                )
+
     @classmethod
-    def test_create_model(cls, model_code: str) -> Tuple[bool, str, Optional[BaseChatModel]]:
+    def test_create_model(
+        cls, model_code: str
+    ) -> Tuple[bool, str, Optional[BaseChatModel]]:
         """
         Test if a model can be created without making API calls.
 
@@ -299,36 +321,38 @@ class LLMFactory:
                 model = ChatOpenAI(
                     model=model_info.model_string,
                     api_key=os.environ.get(key_name),
-                    base_url="https://openrouter.ai/api/v1"
+                    base_url="https://openrouter.ai/api/v1",
                 )
             elif model_info.platform == "OA":
                 model = ChatOpenAI(
-                    model=model_info.model_string,
-                    api_key=os.environ.get(key_name)
+                    model=model_info.model_string, api_key=os.environ.get(key_name)
                 )
             elif model_info.platform == "AT":
                 model = ChatAnthropic(
                     model=model_info.model_string,
-                    anthropic_api_key=os.environ.get(key_name)
+                    anthropic_api_key=os.environ.get(key_name),
                 )
             elif model_info.platform == "GO":
                 model = ChatGoogleGenerativeAI(
-                    model=model_info.model_string,
-                    api_key=os.environ.get(key_name)
+                    model=model_info.model_string, api_key=os.environ.get(key_name)
                 )
             elif model_info.platform == "LM":
                 # For LM Studio, use the URL from model_info
-                base_url = getattr(model_info, 'url', None)
+                base_url = getattr(model_info, "url", None)
                 model = ChatOpenAI(
                     model=model_info.model_name,
                     api_key="lm-studio",  # Placeholder value
-                    base_url=base_url
+                    base_url=base_url,
                 )
 
             if model and isinstance(model, expected_type):
-                return True, f"Successfully created {provider_name} model instance", model
+                return (
+                    True,
+                    f"Successfully created {provider_name} model instance",
+                    model,
+                )
             else:
                 return False, f"Failed to create model instance of correct type", None
 
         except Exception as e:
-            return False, f"Error during model creation: {str(e)}", None 
+            return False, f"Error during model creation: {str(e)}", None

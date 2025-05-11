@@ -1,11 +1,14 @@
 """
 Shared configuration for all test files.
 """
+
 import os
 from pathlib import Path
 
 # Configuration
-MCP_CLIENT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # Use the current project directory
+MCP_CLIENT_DIR = os.path.abspath(
+    os.path.dirname(os.path.dirname(__file__))
+)  # Use the current project directory
 DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
 # Get absolute paths to key directories
@@ -16,15 +19,18 @@ PYSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "pysat")
 Z3_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "z3")
 RESULTS_DIR = os.path.join(ROOT_DIR, "test_results")
 
+
 def get_abs_path(rel_path):
     """Convert a path relative to the root directory to an absolute path."""
     return os.path.join(ROOT_DIR, rel_path)
+
 
 # Helper function to load a prompt using the centralized loader
 def load_prompt_for_test(mode, prompt_type="instructions"):
     """Load a prompt using the centralized prompt loader."""
     try:
         from mcp_solver.core.prompt_loader import load_prompt
+
         return load_prompt(mode, prompt_type)
     except ImportError:
         # If the prompt loader isn't available, fall back to file reading
@@ -36,12 +42,14 @@ def load_prompt_for_test(mode, prompt_type="instructions"):
         old_style_paths = {
             "mzn": {"instructions": "instructions_prompt_mzn.md"},
             "pysat": {"instructions": "instructions_prompt_pysat.md"},
-            "z3": {"instructions": "instructions_prompt_z3.md"}
+            "z3": {"instructions": "instructions_prompt_z3.md"},
         }
-        
+
         if mode in old_style_paths and prompt_type in old_style_paths[mode]:
             old_path = get_abs_path(old_style_paths[mode][prompt_type])
             with open(old_path, "r", encoding="utf-8") as f:
                 return f.read().strip()
         else:
-            raise ValueError(f"Could not load prompt for {mode}/{prompt_type}: {str(e)}") 
+            raise ValueError(
+                f"Could not load prompt for {mode}/{prompt_type}: {str(e)}"
+            )

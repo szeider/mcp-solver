@@ -12,7 +12,7 @@ except ImportError:
 ITEM_CHARS = None  # or None to show full items
 
 # Set to True to enable validation on model changes
-VALIDATE_ON_CHANGE = True  
+VALIDATE_ON_CHANGE = True
 
 # Timeouts (Note: asyncio.timeout requires Python 3.11+)
 MIN_SOLVE_TIMEOUT = timedelta(seconds=1)
