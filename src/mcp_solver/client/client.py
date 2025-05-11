@@ -61,22 +61,8 @@ def format_token_count(count):
             # For ≥10M, use integer representation
             return f"{int(scaled)}M"
 
-# Model codes mapping - single source of truth for available models
-MODEL_CODES = {
-    "MC1": "AT:claude-3-7-sonnet-20250219",  # Anthropic Claude 3.7 direct
-    "MC2": "OR:openai/o3-mini-high",  # OpenAI o3-mini-high via OpenRouter
-    "MC3": "OR:openai/o3-mini",  # OpenAI o3-mini via OpenRouter
-    "MC4": "OA:o3-mini:high",  # OpenAI o3-mini with high reasoning effort
-    "MC5": "OA:o3-mini",  # OpenAI o3-mini with default (medium) reasoning effort
-    "MC6": "OA:gpt-4o",  # OpenAI GPT-4o direct via OpenAI API
-    "MC7": "OR:openai/gpt-4o",  # OpenAI GPT-4o via OpenRouter
-    "MC8": "GO:gemini-2.5-pro-exp-03-25",  # Google Gemini Pro via Google API
-    "MC9": "OR:google/gemini-2.5-pro-exp-03-25:free",  # Google Gemini via OpenRouter
-    "MC10": "OR:anthropic/claude-3-7-sonnet:free",  # Claude 3.7 Sonnet via OpenRouter free tier
-    "MC11": "GO:gemini-1.5-pro",  # Google Gemini 1.5 Pro with function calling support
-    "MC12": "LM:ministral-8b-instruct-2410@http://localhost:1234/v1",  # Local LM Studio model
-}
-DEFAULT_MODEL = "MC1"  # Default model to use
+# Default model to use
+DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Anthropic Claude 3.7 direct
 
 # Default server configuration
 DEFAULT_SERVER_COMMAND = "uv"
@@ -353,16 +339,16 @@ def parse_arguments():
     parser.add_argument(
         "--model",
         type=str,
-        choices=list(MODEL_CODES.keys()),
         default=DEFAULT_MODEL,
-        help=f"Model to use (default: {DEFAULT_MODEL})",
+        help=f"Model code to use (default: {DEFAULT_MODEL}). Format: '<platform>:<model>' or '<platform>:<provider>/<model>'. "
+             "Examples: 'OA:gpt-4.1-2025-04-14', 'AT:claude-3-7-sonnet-20250219', 'OR:google/gemini-2.5-pro-preview'",
     )
     parser.add_argument(
         "--mc",
         type=str,
-        help="Direct model code (e.g., OR:mistralai/ministral-3b). Format: '<platform>:<provider>/<model>'. "
-             "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google). "
-             "Overrides --model if provided.",
+        help="Alternative way to specify model code. Same format as --model. "
+             "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google), LM (LM Studio). "
+             "For LM Studio use format 'LM:model@url'. Overrides --model if provided.",
     )
     parser.add_argument(
         "--no-stats", action="store_true", help="Disable tool usage statistics"
@@ -537,7 +523,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         }
 
 
-async def mcp_solver_node(state: dict, model_name: str) -> dict:
+async def mcp_solver_node(state: dict, model_code: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
 
@@ -548,28 +534,14 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     if "mem_model" not in state:
         state["mem_model"] = "No model captured yet"
 
-    # Get the model name
-    SOLVE_MODEL = model_name.lower()
-    print(f"Using model: {SOLVE_MODEL}")
+    # Use the model code directly
+    print(f"Using model code: {model_code}")
 
     # Extract args from state if available, otherwise use None
     args = state.get("args")
 
     # Set up the connection to the MCP server
-    # Get the model code from either direct code (--mc) or model name (--model)
-    if args.mc:
-        # Use the direct model code provided via --mc
-        model_code = args.mc
-        console.print(f"[bold green]Using direct model code: {model_code}[/bold green]")
-    else:
-        # Use the predefined model code from MODEL_CODES
-        if model_name not in MODEL_CODES:
-            console.print(
-                f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]"
-            )
-            model_name = DEFAULT_MODEL
-
-        model_code = MODEL_CODES[model_name]
+    console.print(f"[bold green]Using model code: {model_code}[/bold green]")
 
     # Check if required API key is present
     try:
@@ -1060,9 +1032,7 @@ async def main():
     print(f"Detected mode: {mode}")
 
     # Log the selected model code for reference
-    if args.model in MODEL_CODES:
-        model_code = MODEL_CODES[args.model]
-        print(f"Model code: {model_code}")
+    print(f"Model code: {args.mc if args.mc else DEFAULT_MODEL}")
 
     # Load initial state with prompts and query
     try:
@@ -1087,8 +1057,9 @@ async def main():
         state["server_command"] = command_parts[0]
         state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
 
-    # Run the solver once
-    await mcp_solver_node(state, args.model)
+    # Run the solver once with model code
+    model_code = args.mc if args.mc else DEFAULT_MODEL
+    await mcp_solver_node(state, model_code)
 
     # Return the state for printing in main_cli
     return state

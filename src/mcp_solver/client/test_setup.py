@@ -26,10 +26,10 @@ except ImportError:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
     from mcp_solver.client.llm_factory import LLMFactory, ModelInfo
 
-# Use the same default model as in client.py
-DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Same as "MC1" in client.py
+# Default model for testing
+DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"
 # LM Studio model for testing
-LMSTUDIO_MODEL = "LM:ministral-8b-instruct-2410@http://localhost:1234/v1"  # Same as "MC12" in client.py
+LMSTUDIO_MODEL = "LM:ministral-8b-instruct-2410@http://localhost:1234/v1"
 
 class SetupTest:
     def __init__(self):
@@ -262,12 +262,18 @@ def main():
     parser = argparse.ArgumentParser(description='Test the MCP-Solver client setup')
     parser.add_argument('--model', type=str, default=DEFAULT_MODEL,
                         help=f'Model code to test (default: {DEFAULT_MODEL})')
+    parser.add_argument('--mc', type=str,
+                        help='Direct model code (e.g., OR:mistralai/ministral-3b). Format: \'<platform>:<provider>/<model>\'. '
+                             'Overrides --model if provided.')
     parser.add_argument('--lmstudio', action='store_true',
                         help='Test LM Studio local model integration')
     args = parser.parse_args()
 
     test = SetupTest()
-    if args.lmstudio:
+    if args.mc:
+        print(f"Testing with custom model code: {args.mc}")
+        test.run_all_tests(args.mc)
+    elif args.lmstudio:
         print(f"Testing with LM Studio model: {LMSTUDIO_MODEL}")
         test.run_all_tests(LMSTUDIO_MODEL)
     else:
