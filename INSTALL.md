@@ -214,8 +214,17 @@ $env:ANTHROPIC_API_KEY = "sk-..."
 The client supports multiple LLM providers through the `--mc` model code flag. The syntax follows this pattern:
 
 ```
-XY:model    # For cloud providers
-LM:model@url  # For local models via LM Studio
+XY:model                     # For cloud providers
+LM:model@url                 # For local models via LM Studio (basic)
+LM:model(param=value)@url    # For local models with parameters
+```
+
+You can also use parameters to configure local models:
+
+```
+LM:model(format=json)@url                      # Request JSON output
+LM:model(temp=0.7)@url                         # Set temperature to 0.7
+LM:model(format=json,temp=0.7,max_tokens=1000)@url  # Multiple parameters
 ```
 
 Where `XY` is a two-letter code representing the platform:
