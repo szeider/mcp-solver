@@ -7,7 +7,7 @@ You are given a problem description, a Python Z3 encoding, and a solution. Verif
 ## Evaluation Criteria
 
 - **For satisfiable solutions**: Verify that all constraints in the problem description are satisfied. Answer *correct* if satisfied, otherwise *incorrect*. You do not need to verify optimality, only check if the solution satisfies all hard constraints.
-- **For unsatisfiable solutions**: Verify that all clauses produced by the encoding are actually required by the problem statement or are valid symmetry breaking constraints. Answer *correct* if valid, otherwise *incorrect*. 
+- **For unsatisfiable solutions**: Verify that all clauses produced by the encoding are actually required by the problem statement or are valid symmetry-breaking constraints. Answer *correct* if valid, otherwise *incorrect*. 
 
   Note that "unsatisfiable" is a perfectly fine result. So if all constraints added to the model are valid representations of the problem requirements,  then your verdict should be *correct*.
 - **For no solution/timeout/unverifiable cases**: Answer *unknown*.
