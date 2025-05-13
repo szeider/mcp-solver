@@ -405,6 +405,7 @@ class PySATModelManager(SolverManager):
             # Extract solver output to check for satisfiability
             output = self.last_result.get("output", "")
             satisfiable = False
+            has_maxsat = False
 
             # Parse output for explicit satisfiability result
             sat_match = re.search(
@@ -420,6 +421,21 @@ class PySATModelManager(SolverManager):
                 if "Is satisfiable: True" in output:
                     satisfiable = True
                     self.logger.debug("Found 'Is satisfiable: True' in output")
+                
+            # Check specifically for MaxSAT solution data in the output
+            maxsat_match = re.search(r"maxsat_result", output)
+            if maxsat_match:
+                has_maxsat = True
+                self.logger.debug("Found MaxSAT solution data in output")
+                
+                # For MaxSAT, if we see model data, it likely found a solution
+                # But we still need to check if all hard constraints were satisfied
+                # Look for specific satisfiability indicator in the MaxSAT output
+                maxsat_sat_match = re.search(r"\"satisfiable\":\s*(true|false)", output, re.IGNORECASE)
+                if maxsat_sat_match:
+                    maxsat_satisfiable = maxsat_sat_match.group(1).lower() == "true"
+                    self.logger.debug(f"Found MaxSAT satisfiability: {maxsat_satisfiable}")
+                    satisfiable = maxsat_satisfiable
 
             # Extract solution if available
             if self.last_result.get("solution"):
@@ -461,6 +477,22 @@ class PySATModelManager(SolverManager):
                         if isinstance(last_solution_data, dict):
                             # Enhanced copy mechanism for all solution data
                             self._merge_solution_data(last_solution_data)
+                            
+                            # Check if this is a MaxSAT problem result
+                            if "maxsat_result" in last_solution_data:
+                                has_maxsat = True
+                                self.logger.debug("Found MaxSAT result in _LAST_SOLUTION debug output")
+                                
+                                # Check if the MaxSAT result indicates satisfiability
+                                if isinstance(last_solution_data["maxsat_result"], dict):
+                                    maxsat_result = last_solution_data["maxsat_result"]
+                                    if "satisfiable" in maxsat_result:
+                                        satisfiable = maxsat_result["satisfiable"]
+                                        self.logger.debug(f"MaxSAT result satisfiability: {satisfiable}")
+                                        
+                                        # Update our solution's satisfiability flag
+                                        self.last_solution["satisfiable"] = satisfiable
+                                        self.last_solution["status"] = "sat" if satisfiable else "unsat"
                     except json.JSONDecodeError as e:
                         self.logger.error(f"Error parsing solution JSON: {str(e)}")
                         self.logger.debug(
@@ -468,8 +500,12 @@ class PySATModelManager(SolverManager):
                         )
 
                         # Attempt alternative parsing using ast.literal_eval which is more forgiving
-                        self._try_alternative_parsing(last_solution_str)
-
+                        if self._try_alternative_parsing(last_solution_str):
+                            # If alternative parsing succeeded, check for MaxSAT data
+                            if "maxsat_result" in self.last_solution:
+                                has_maxsat = True
+                                self.logger.debug("Found MaxSAT result after alternative parsing")
+                        
                         # Even with parsing error, we'll keep the solution data we have
                         self.last_solution["warning"] = (
                             f"Solution parsing warning: {str(e)}"
@@ -489,24 +525,95 @@ class PySATModelManager(SolverManager):
                     f"Line {issue['line']}: {issue['issue']}" for issue in line_issues
                 ]
 
+            # Check if this is a MaxSAT problem - use the explicit marker if present
+            is_maxsat_problem = ("_is_maxsat_solution" in self.last_solution) or has_maxsat or "maxsat_result" in self.last_solution or "maxsat_data" in self.last_solution
+            
             # Log the successful solve
             self.logger.info(
-                f"Model solved: {bool(self.last_result.get('success'))}, satisfiable: {satisfiable}"
+                f"Model solved: {bool(self.last_result.get('success'))}, satisfiable: {satisfiable}, MaxSAT problem: {is_maxsat_problem}"
             )
 
             # Prepare final response
+            # Override satisfiability for MaxSAT solutions based on the solution data, not just the solver output
+            if is_maxsat_problem:
+                # Direct marker takes precedence - if we have an explicit MaxSAT marker
+                if "_is_maxsat_solution" in self.last_solution:
+                    self.logger.debug("Found explicit MaxSAT solution marker")
+                    # Check if the MaxSAT solution itself indicates satisfiability
+                    if self.last_solution.get("satisfiable") is not None:
+                        # Trust the value set in the solution
+                        satisfiable = self.last_solution.get("satisfiable")
+                        self.logger.debug(f"Using explicit satisfiability from marker: {satisfiable}")
+                
+                # Otherwise, check the MaxSAT result data specifically
+                elif "maxsat_result" in self.last_solution and isinstance(self.last_solution["maxsat_result"], dict):
+                    maxsat_data = self.last_solution["maxsat_result"]
+                    if "satisfiable" in maxsat_data:
+                        maxsat_satisfiable = maxsat_data["satisfiable"] 
+                        self.logger.debug(f"Found explicit satisfiability in MaxSAT result: {maxsat_satisfiable}")
+                        # Override the general satisfiability with the MaxSAT-specific one
+                        satisfiable = maxsat_satisfiable
+                
+                # For MaxSAT problems, we want a detailed message about the optimization
+                message = "Model solved successfully"
+                if satisfiable:
+                    message += " (MaxSAT solution found)" 
+                    
+                    # Add optimization details if available
+                    if "maxsat_result" in self.last_solution and isinstance(self.last_solution["maxsat_result"], dict):
+                        # Include cost/objective info in the message if available
+                        maxsat_data = self.last_solution["maxsat_result"]
+                        if "cost" in maxsat_data:
+                            message += f" with cost: {maxsat_data['cost']}"
+                        elif "objective" in maxsat_data:
+                            message += f" with objective: {maxsat_data['objective']}"
+                        
+                        # Add status details if available
+                        if "status" in maxsat_data:
+                            max_status = maxsat_data["status"]
+                            if max_status == "optimal":
+                                message += " (optimal solution)"
+                else:
+                    # For unsatisfiable MaxSAT, be more precise about the reason
+                    message += " (unsatisfiable MaxSAT problem - hard constraints cannot be satisfied)"
+            else:
+                # Standard message for regular SAT problems
+                message = "Model solved successfully" + (" (satisfiable)" if satisfiable else " (unsatisfiable)")
+            
             response = {
-                "message": "Model solved successfully"
-                + (" (satisfiable)" if satisfiable else " (unsatisfiable)"),
+                "message": message,
                 "success": True,
                 "solve_time": f"{self.last_solve_time:.6f} seconds",
                 "output": output,
                 "satisfiable": satisfiable,
             }
 
-            # Include status and values
+            # Include status and values - ensure consistency
+            if satisfiable:
+                response["status"] = "sat"
+                response["satisfiable"] = True  # Ensure this is explicitly set
+            else:
+                response["status"] = "unsat"
+                response["satisfiable"] = False  # Ensure this is explicitly set
+                
+            # Override with solution-specific status if available
             if self.last_solution.get("status"):
                 response["status"] = self.last_solution["status"]
+                
+            # CRITICAL: For MaxSAT problems, ensure status and satisfiable are consistent
+            if is_maxsat_problem:
+                # For any MaxSAT solution that has values/results, consider it functionally satisfiable
+                if "values" in self.last_solution and self.last_solution["values"]:
+                    self.logger.debug("Found values in MaxSAT solution, marking as functionally satisfiable")
+                    # Override both status and satisfiable to ensure consistency
+                    response["status"] = "sat"
+                    response["satisfiable"] = True
+            
+            # For MaxSAT, include the maxsat_result in the response
+            if is_maxsat_problem and "maxsat_result" in self.last_solution:
+                response["maxsat_result"] = self.last_solution["maxsat_result"]
+                
+            # Include values dictionary
             if self.last_solution.get("values"):
                 response["values"] = self.last_solution["values"]
 
@@ -540,12 +647,41 @@ class PySATModelManager(SolverManager):
         # Replace Python syntax with JSON syntax
         clean_str = solution_str.replace("'", '"')
         clean_str = clean_str.replace("True", "true").replace("False", "false")
+        clean_str = clean_str.replace("None", "null")
 
         # Fix common tuple formatting issues (convert Python tuples to JSON arrays)
+        # Handle simple tuples with two numbers
         clean_str = re.sub(r"\((\d+),\s*(\d+)\)", r"[\1, \2]", clean_str)
+        
+        # Handle tuples with three numbers (e.g., in cut_edges)
+        clean_str = re.sub(r"\((\d+),\s*(\d+),\s*(\d+)\)", r"[\1, \2, \3]", clean_str)
+        
+        # Handle nested tuples in lists
+        clean_str = re.sub(r"\[\(", "[[", clean_str)
+        clean_str = re.sub(r"\)\]", "]]", clean_str)
+        clean_str = re.sub(r"\),\s*\(", "], [", clean_str)
 
         # Remove trailing commas which are valid in Python but not in JSON
         clean_str = re.sub(r",\s*([}\]])", r"\1", clean_str)
+        
+        # Handle MaxSAT specific patterns
+        # Fix any stray double quotes that might be inside strings
+        # Avoid using look-behind/look-ahead which can cause regex errors
+        clean_str = clean_str.replace('""', '\\"')
+        
+        # Replace NaN and Infinity with null (which is JSON compatible)
+        clean_str = re.sub(r"NaN", "null", clean_str)
+        clean_str = re.sub(r"Infinity", "null", clean_str)
+        
+        # Try to normalize any maxsat_data structure that might be causing issues
+        if "maxsat_data" in clean_str:
+            self.logger.debug("Found maxsat_data in solution, cleaning up structure")
+            
+            # Try to handle double quotes in maxsat_data fields
+            # This is tricky but helps with common extraction issues
+            clean_str = re.sub(r'(maxsat_data":\s*{"[^}]*})', 
+                              lambda m: m.group(1).replace('\\"', "'"), 
+                              clean_str)
 
         return clean_str
 
@@ -599,6 +735,9 @@ class PySATModelManager(SolverManager):
 
         Args:
             solution_str: The solution string that failed JSON parsing
+            
+        Returns:
+            Boolean indicating whether parsing succeeded
         """
         try:
             # Try using Python's literal_eval which can handle more Python-like syntax
@@ -616,7 +755,8 @@ class PySATModelManager(SolverManager):
             self.logger.debug(f"Alternative parsing also failed: {str(e)}")
 
             # Even if both parsing methods fail, try to extract any useful data using regex
-            self._extract_data_with_regex(solution_str)
+            if self._extract_data_with_regex(solution_str):
+                return True
 
         return False
 
@@ -626,7 +766,12 @@ class PySATModelManager(SolverManager):
 
         Args:
             solution_str: The solution string that failed parsing
+            
+        Returns:
+            Boolean indicating whether any useful data was extracted
         """
+        extracted_something = False
+        
         # Try to extract satisfiability
         sat_match = re.search(
             r"'satisfiable':\s*(true|false)", solution_str, re.IGNORECASE
@@ -635,9 +780,40 @@ class PySATModelManager(SolverManager):
             is_sat = sat_match.group(1).lower() == "true"
             self.last_solution["satisfiable"] = is_sat
             self.last_solution["status"] = "sat" if is_sat else "unsat"
+            extracted_something = True
+            self.logger.debug(f"Extracted satisfiability from regex: {is_sat}")
+
+        # Check for MaxSAT specific data
+        maxsat_match = re.search(r"'maxsat_result':", solution_str)
+        if maxsat_match:
+            self.logger.debug("Detected MaxSAT result through regex")
+            extracted_something = True
+            
+            # Try to extract cost or objective if available
+            cost_match = re.search(r"'cost':\s*(\d+)", solution_str)
+            if cost_match:
+                try:
+                    cost = int(cost_match.group(1))
+                    if "maxsat_result" not in self.last_solution:
+                        self.last_solution["maxsat_result"] = {}
+                    self.last_solution["maxsat_result"]["cost"] = cost
+                    self.logger.debug(f"Extracted MaxSAT cost: {cost}")
+                except ValueError:
+                    pass
+                
+            objective_match = re.search(r"'objective':\s*(-?\d+)", solution_str)
+            if objective_match:
+                try:
+                    objective = int(objective_match.group(1))
+                    if "maxsat_result" not in self.last_solution:
+                        self.last_solution["maxsat_result"] = {}
+                    self.last_solution["maxsat_result"]["objective"] = objective
+                    self.logger.debug(f"Extracted MaxSAT objective: {objective}")
+                except ValueError:
+                    pass
 
         # Try to extract lists like 'queens' or 'knights' positions
-        for list_type in ["queens", "knights", "board_representation"]:
+        for list_type in ["queens", "knights", "board_representation", "set_s", "set_complement", "cut_edges"]:
             list_match = re.search(
                 f"'{list_type}':\\s*(\\[.*?\\])", solution_str, re.DOTALL
             )
@@ -650,8 +826,11 @@ class PySATModelManager(SolverManager):
                     list_data = ast.literal_eval(list_str)
                     self.last_solution[list_type] = list_data
                     self.logger.debug(f"Extracted {list_type} list using regex")
+                    extracted_something = True
                 except Exception:
                     pass  # If this fails, we still continue with other extractions
+                    
+        return extracted_something
 
     def _enhance_code_for_debugging(self, code_string: str) -> str:
         """

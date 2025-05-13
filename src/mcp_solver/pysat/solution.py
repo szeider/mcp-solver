@@ -235,6 +235,9 @@ def export_maxsat_solution(
             "maxsat_data": maxsat_result
         }
         
+        # Add a special marker to indicate this is a MaxSAT solution
+        export_result["_is_maxsat_solution"] = True
+        
         # Don't call export_solution directly as it would overwrite _LAST_SOLUTION
         # Instead, process it and store it directly to preserve the MaxSAT data
         _LAST_SOLUTION = export_result
@@ -260,7 +263,8 @@ def export_maxsat_solution(
             "satisfiable": False,
             "message": f"MaxSAT error: {str(e)}",
             "error_type": type(e).__name__,
-            "maxsat_data": maxsat_error
+            "maxsat_data": maxsat_error,
+            "_is_maxsat_solution": True  # Mark this as MaxSAT even if it failed
         }
         
         # Store the formatted solution directly instead of calling export_solution
