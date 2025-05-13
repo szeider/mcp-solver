@@ -3,10 +3,11 @@ PySAT constraint helper functions.
 
 This module provides helper functions for creating common cardinality constraints
 with PySAT in a way that's reliable and always works, regardless of the constraint type.
+It also includes helper functions for working with MaxSAT soft constraints.
 """
 
 import itertools
-from typing import List, Union, Iterable
+from typing import List, Union, Iterable, Tuple, Any, Dict
 
 # Import the robust implementations from templates
 from .templates.cardinality_templates import at_most_k as _at_most_k_robust
@@ -156,3 +157,139 @@ def if_then_else(condition: int, then_var: int, else_var: int) -> List[List[int]
         [-condition, then_var],  # condition -> then_var
         [condition, else_var],  # !condition -> else_var
     ]
+
+
+# MaxSAT helper functions
+
+def soft_clause(literals: Union[int, List[int]], weight: int = 1) -> Tuple[List[int], int]:
+    """
+    Create a soft clause with a given weight for MaxSAT formulas.
+    
+    In MaxSAT, a soft clause is a constraint that we want to satisfy
+    but can be violated at a cost (the weight).
+    
+    Args:
+        literals: One or more literals (variable IDs) to include in the soft clause
+        weight: The weight of the clause (cost if violated)
+        
+    Returns:
+        A tuple of (clause, weight) for adding to a WCNF formula
+    """
+    if isinstance(literals, int):
+        literals = [literals]
+    return (literals, weight)
+
+
+def soft_at_most_k(variables: List[int], k: int, weight: int = 1) -> List[Tuple[List[int], int]]:
+    """
+    Create weighted soft at-most-k constraints for MaxSAT.
+    
+    Args:
+        variables: List of variable IDs
+        k: Maximum number of variables that should be true
+        weight: Weight of the soft constraint
+        
+    Returns:
+        List of (clause, weight) pairs for adding to a WCNF formula
+    """
+    if k >= len(variables):
+        return []  # Constraint is always satisfied
+        
+    soft_clauses = []
+    
+    # Generate all combinations of k+1 variables
+    for combo in itertools.combinations(variables, k+1):
+        # At least one variable in the combination should be false
+        soft_clauses.append(([-(var) for var in combo], weight))
+        
+    return soft_clauses
+
+
+def soft_at_least_k(variables: List[int], k: int, weight: int = 1) -> List[Tuple[List[int], int]]:
+    """
+    Create weighted soft at-least-k constraints for MaxSAT.
+    
+    Args:
+        variables: List of variable IDs
+        k: Minimum number of variables that should be true
+        weight: Weight of the soft constraint
+        
+    Returns:
+        List of (clause, weight) pairs for adding to a WCNF formula
+    """
+    if k <= 0:
+        return []  # Constraint is always satisfied
+        
+    soft_clauses = []
+    
+    # Generate all combinations of n-k+1 negative literals
+    negated_vars = [-var for var in variables]
+    for combo in itertools.combinations(negated_vars, len(variables)-k+1):
+        # At least one variable in the combination should be true
+        soft_clauses.append(([-lit for lit in combo], weight))
+        
+    return soft_clauses
+
+
+def soft_exactly_k(variables: List[int], k: int, weight: int = 1) -> List[Tuple[List[int], int]]:
+    """
+    Create weighted soft exactly-k constraints for MaxSAT.
+    
+    Args:
+        variables: List of variable IDs
+        k: Exact number of variables that should be true
+        weight: Weight of the soft constraint
+        
+    Returns:
+        List of (clause, weight) pairs for adding to a WCNF formula
+    """
+    return soft_at_most_k(variables, k, weight) + soft_at_least_k(variables, k, weight)
+
+
+def soft_implies(a: int, b: int, weight: int = 1) -> List[Tuple[List[int], int]]:
+    """
+    Create a weighted soft implication constraint (a -> b) for MaxSAT.
+    
+    Args:
+        a: The antecedent variable ID
+        b: The consequent variable ID
+        weight: Weight of the soft constraint
+        
+    Returns:
+        List containing one (clause, weight) pair for adding to a WCNF formula
+    """
+    return [([-a, b], weight)]
+
+
+def soft_if_then_else(condition: int, then_var: int, else_var: int, weight: int = 1) -> List[Tuple[List[int], int]]:
+    """
+    Create weighted soft if-then-else constraints for MaxSAT.
+    
+    Args:
+        condition: The condition variable ID
+        then_var: The 'then' variable ID
+        else_var: The 'else' variable ID
+        weight: Weight of the soft constraint
+        
+    Returns:
+        List of (clause, weight) pairs for adding to a WCNF formula
+    """
+    return [
+        ([-condition, then_var], weight),  # condition -> then_var
+        ([condition, else_var], weight),   # !condition -> else_var
+    ]
+
+
+def add_soft_clauses_to_wcnf(wcnf: 'WCNF', clauses: List[Tuple[List[int], int]]) -> None:
+    """
+    Add a list of soft clauses to a WCNF formula.
+    
+    Args:
+        wcnf: The WCNF formula to update
+        clauses: List of (clause, weight) pairs to add
+        
+    Returns:
+        None (modifies the wcnf in-place)
+    """
+    for clause, weight in clauses:
+        wcnf.append(clause, weight=weight)

@@ -56,7 +56,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Local imports - must be after path adjustment
-from .solution import export_solution, _LAST_SOLUTION
+from .solution import export_solution, export_maxsat_solution, _LAST_SOLUTION
 from .templates.cardinality_templates import at_most_k, at_least_k, exactly_k
 from .constraints import (
     at_most_one,
@@ -307,7 +307,9 @@ def exactly_k(variables, k):
             "Cadical153": Cadical153,  # Standard solver 2
             "CardEnc": CardEnc,
             "EncType": EncType,
+            "RC2": RC2,  # MaxSAT solver
             "export_solution": export_solution,
+            "export_maxsat_solution": export_maxsat_solution,
             "collections": collections,
             "itertools": itertools,
             "math": math,

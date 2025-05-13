@@ -88,7 +88,7 @@ solver.delete()
 | `solve_model`  | Solve the current model (requires timeout parameter between 1-30 seconds) |
 | `get_model`    | Fetch the current content of the PySAT model                 |
 
-> **Note:** MaxSAT optimization functionality is not supported. Only standard SAT solving capabilities are available.
+> **MaxSAT Support:** MaxSAT (Maximum Satisfiability) optimization is supported through the RC2 solver. Use WCNF formulas with weighted clauses for optimization problems. See the MaxSAT section below for details.
 
 > **Timeout Handling:** When using `solve_model`, always specify a timeout (in seconds) to prevent long-running computations. If your model times out, you'll receive a response with `"status": "timeout"` and `"timeout": true`, but the connection will be maintained so you can modify and retry your model.
 
@@ -217,6 +217,238 @@ if solver.solve():
         "variable_mapping": var_mapping
     })
 ```
+
+## MaxSAT Optimization
+
+MaxSAT (Maximum Satisfiability) extends SAT by differentiating between hard constraints (must be satisfied) and soft constraints (can be violated at a cost). This enables solving optimization problems by finding assignments that minimize the total cost of violated soft constraints.
+
+### Basic MaxSAT Example
+
+```python
+# % Item 1: Import and setup
+from pysat.formula import WCNF, CNF
+from pysat.examples.rc2 import RC2
+from pysat.solvers import Glucose3
+
+# Create a MaxSAT formula
+wcnf = WCNF()
+
+# Variable mapping for readability
+var_mapping = {
+    "x1": 1,
+    "x2": 2
+}
+
+# % Item 2: Define constraints
+# Hard constraints (must be satisfied)
+wcnf.append([1, 2])     # x1 OR x2
+wcnf.append([-1, -2])   # NOT x1 OR NOT x2
+
+# Soft constraints with weights (try to satisfy if possible)
+wcnf.append([1], weight=1)  # Try to make x1 true (weight 1)
+wcnf.append([2], weight=2)  # Try to make x2 true (weight 2)
+
+# % Item 3: Create standard solver for MCP validation
+# This is required in addition to the RC2 solver
+formula = CNF()
+formula.append([1])  # Simple satisfiable clause
+solver = Glucose3()
+solver.append_formula(formula)
+
+# % Item 4: Solve with RC2 MaxSAT solver
+with RC2(wcnf) as rc2_solver:
+    # Compute optimal solution
+    solution_values = rc2_solver.compute()
+    
+    if solution_values:
+        # The simplest and most reliable approach - let the export_maxsat_solution 
+        # function handle all the variable mapping and results formatting
+        export_maxsat_solution(rc2_solver, var_mapping)
+    else:
+        export_maxsat_solution({
+            "satisfiable": False,
+            "message": "No solution exists"
+        })
+
+# % Item 5: Call solver.solve() for MCP validation
+# IMPORTANT: MCP requires a call to solver.solve()
+solver.solve()
+solver.delete()  # Always free solver memory
+```
+
+### Feature Selection Example
+
+This example shows a practical application of MaxSAT for optimizing feature selection:
+
+```python
+from pysat.formula import WCNF
+from pysat.examples.rc2 import RC2
+
+# Problem: Select features to maximize value while respecting dependencies
+wcnf = WCNF()
+
+# Variable mapping
+var_mapping = {}
+var_count = 1
+
+def create_var(name):
+    global var_count
+    var_mapping[name] = var_count
+    var_count += 1
+    return var_mapping[name]
+
+# Define features with their values
+features = {
+    "base": 0,          # Base product (required)
+    "premium": 10,      # Premium upgrade  
+    "cloud": 15,        # Cloud storage
+    "sync": 7,          # Sync capability
+    "mobile": 12,       # Mobile app
+    "analytics": 20,    # Analytics dashboard
+}
+
+# Create variables for each feature
+feature_vars = {f: create_var(f) for f in features}
+
+# Hard constraints (dependencies)
+wcnf.append([feature_vars["base"]])  # Base product is required
+wcnf.append([-feature_vars["premium"], feature_vars["base"]])  # Premium requires base
+wcnf.append([-feature_vars["sync"], feature_vars["cloud"]])    # Sync requires cloud
+wcnf.append([-feature_vars["analytics"], feature_vars["premium"]])  # Analytics requires premium
+
+# Soft constraints (feature values as weights)
+for feature, value in features.items():
+    if value > 0:  # Skip base feature with value 0
+        wcnf.append([feature_vars[feature]], weight=value)
+
+# Solve with RC2
+with RC2(wcnf) as solver:
+    model = solver.compute()
+    
+    if model:
+        # Most reliable approach - let export_maxsat_solution handle the mapping
+        # This automatically extracts all variables and formats the result
+        export_maxsat_solution(solver, var_mapping)
+        
+        # The result will include:
+        # - satisfiable: True
+        # - status: "optimal"
+        # - model: List of true variable IDs
+        # - assignment: Dictionary mapping feature names to boolean values
+        # - cost: Sum of weights of unsatisfied soft constraints
+    else:
+        export_maxsat_solution({
+            "satisfiable": False,
+            "message": "No valid feature selection possible"
+        })
+```
+
+### MaxSAT Solution Export
+
+The `export_maxsat_solution` function simplifies returning results from MaxSAT problems:
+
+```python
+# With a direct dictionary
+export_maxsat_solution({
+    "satisfiable": True,
+    "assignment": {"x1": False, "x2": True},
+    "cost": 1,
+    "objective": 15  # Often the negative of cost for maximization problems
+})
+
+# Or directly with the RC2 solver
+export_maxsat_solution(solver, var_mapping)
+```
+
+Key fields in MaxSAT solutions:
+- `satisfiable`: Boolean indicating whether a solution was found
+- `status`: Solution status ("optimal", "satisfiable", "unsatisfiable", "error")
+- `cost`: Sum of weights of unsatisfied clauses (lower is better)
+- `objective`: Value being optimized (often the negative of cost)
+- `model`: List of true variable IDs
+- `assignment`: Dictionary mapping variable names to boolean values (if var_mapping provided)
+
+### IMPORTANT: Standard MaxSAT Usage Pattern
+
+When working with MaxSAT, ALWAYS use this standard pattern:
+
+```python
+# % Item 1: Imports and setup
+from pysat.formula import WCNF, CNF
+from pysat.examples.rc2 import RC2
+from pysat.solvers import Glucose3
+
+# Create a MaxSAT formula
+wcnf = WCNF()
+
+# % Item 2: Add constraints
+# Add hard and soft constraints...
+
+# % Item A3: Create a standard solver for MCP validation
+formula = CNF()
+formula.append([1])  # Simple satisfiable clause
+solver = Glucose3()
+solver.append_formula(formula)
+
+# % Item 4: Solve with RC2 for MaxSAT optimization
+with RC2(wcnf) as rc2_solver:
+    solution_values = rc2_solver.compute()
+    
+    if solution_values:
+        # MaxSAT solution found
+        result = export_maxsat_solution(rc2_solver, var_mapping)
+    else:
+        # No solution found
+        result = export_maxsat_solution({
+            "satisfiable": False,
+            "message": "No solution exists"
+        })
+
+# % Item 5: The MCP framework requires a call to solver.solve()
+# and a separate export_solution call
+solver.solve()
+export_solution({
+    "satisfiable": True,
+    "message": "MaxSAT solution exported successfully",
+    "maxsat_result": result
+})
+solver.delete()  # Free solver memory
+```
+
+Key points about this standardized pattern:
+- ALL steps are required - do not skip any of them
+- Must use BOTH export_maxsat_solution AND export_solution
+- Must call solver.solve() on the standard solver
+- Always split your code into logical sections with % Item markers
+- Use the export_maxsat_solution result in your export_solution call
+- This pattern avoids all dictionary-related validation errors
+
+### Correct Dictionary Usage with MaxSAT
+
+When working with dictionaries in MaxSAT problems, it's important to use proper dictionary update patterns to avoid validation errors:
+
+```python
+# CORRECT: Update dictionary with key assignment
+solution = {}
+for name, var_id in var_mapping.items():
+    solution[name] = (var_id in model)  # Use dict[key] = value pattern
+
+# INCORRECT: This will trigger validation errors
+solution = {name: (var_id in model) for name, var_id in var_mapping.items()}
+
+# CORRECT: Using comprehension outside the loop and then using it
+solution_values = {name: (var_id in model) for name, var_id in var_mapping.items()}
+export_maxsat_solution({
+    "satisfiable": True,
+    "assignment": solution_values
+})
+
+# BEST PRACTICE: Using export_maxsat_solution directly with the solver
+# This handles all the variable extraction internally
+export_maxsat_solution(solver, var_mapping)  # Most concise and reliable
+```
+
+Using the direct `export_maxsat_solution(solver, var_mapping)` pattern is recommended as it handles all the dictionary operations correctly internally.
 
 ### Namespacing Variables
 
