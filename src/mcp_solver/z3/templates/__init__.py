@@ -15,7 +15,7 @@ from .z3_templates import (
     at_most_k,
     at_least_k,
     function_is_injective,
-    function_is_surjective
+    function_is_surjective,
 )
 
 # Import and expose function templates
@@ -24,32 +24,28 @@ from .function_templates import (
     optimization_template,
     array_template,
     quantifier_template,
-    demo_template
+    demo_template,
 )
 
 # Import and expose subset templates
-from .subset_templates import (
-    smallest_subset_with_property
-)
+from .subset_templates import smallest_subset_with_property
 
 __all__ = [
     # Quantifier templates
-    'array_is_sorted',
-    'all_distinct',
-    'array_contains',
-    'exactly_k',
-    'at_most_k',
-    'at_least_k',
-    'function_is_injective',
-    'function_is_surjective',
-    
+    "array_is_sorted",
+    "all_distinct",
+    "array_contains",
+    "exactly_k",
+    "at_most_k",
+    "at_least_k",
+    "function_is_injective",
+    "function_is_surjective",
     # Function templates
-    'constraint_satisfaction_template',
-    'optimization_template',
-    'array_template',
-    'quantifier_template',
-    'demo_template',
-    
+    "constraint_satisfaction_template",
+    "optimization_template",
+    "array_template",
+    "quantifier_template",
+    "demo_template",
     # Subset templates
-    'smallest_subset_with_property'
-] 
+    "smallest_subset_with_property",
+]

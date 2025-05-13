@@ -1,6 +1,13 @@
 # Changelog
 
 
+### [3.2.0] - 2025-05-11
+
+- **Improvement:** Simplified model specification by removing internal model code shortcuts (MC1, MC2, etc.)
+- **Improvement:** Updated client to use direct model codes (AT:claude-3-7-sonnet-20250219, etc.) for better clarity
+- **Update:** Enhanced documentation for model code formats in README.md and INSTALL.md
+- **Update:** Added support for LM Studio local models
+
 
 ---
 

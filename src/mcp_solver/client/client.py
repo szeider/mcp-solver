@@ -31,12 +31,12 @@ from .token_counter import TokenCounter
 
 def format_token_count(count):
     """
-    Format token count with compact magnitude representation using perceptually 
+    Format token count with compact magnitude representation using perceptually
     significant digits.
-    
+
     Parameters:
         count (int): The token count to format
-        
+
     Returns:
         str: Formatted representation with appropriate magnitude suffix
     """
@@ -47,7 +47,7 @@ def format_token_count(count):
         scaled = count / 1000
         if scaled < 10:
             # For 1k-9.9k, maintain single decimal precision
-            return f"{scaled:.1f}".rstrip('0').rstrip('.') + 'k'
+            return f"{scaled:.1f}".rstrip("0").rstrip(".") + "k"
         else:
             # For ≥10k, use integer representation
             return f"{int(scaled)}k"
@@ -56,26 +56,14 @@ def format_token_count(count):
         scaled = count / 1000000
         if scaled < 10:
             # For 1M-9.9M, maintain single decimal precision
-            return f"{scaled:.1f}".rstrip('0').rstrip('.') + 'M'
+            return f"{scaled:.1f}".rstrip("0").rstrip(".") + "M"
         else:
             # For ≥10M, use integer representation
             return f"{int(scaled)}M"
 
-# Model codes mapping - single source of truth for available models
-MODEL_CODES = {
-    "MC1": "AT:claude-3-7-sonnet-20250219",  # Anthropic Claude 3.7 direct
-    "MC2": "OR:openai/o3-mini-high",  # OpenAI o3-mini-high via OpenRouter
-    "MC3": "OR:openai/o3-mini",  # OpenAI o3-mini via OpenRouter
-    "MC4": "OA:o3-mini:high",  # OpenAI o3-mini with high reasoning effort
-    "MC5": "OA:o3-mini",  # OpenAI o3-mini with default (medium) reasoning effort
-    "MC6": "OA:gpt-4o",  # OpenAI GPT-4o direct via OpenAI API
-    "MC7": "OR:openai/gpt-4o",  # OpenAI GPT-4o via OpenRouter
-    "MC8": "GO:gemini-2.5-pro-exp-03-25",  # Google Gemini Pro via Google API
-    "MC9": "OR:google/gemini-2.5-pro-exp-03-25:free",  # Google Gemini via OpenRouter
-    "MC10": "OR:anthropic/claude-3-7-sonnet:free",  # Claude 3.7 Sonnet via OpenRouter free tier
-    "MC11": "GO:gemini-1.5-pro",  # Google Gemini 1.5 Pro with function calling support
-}
-DEFAULT_MODEL = "MC1"  # Default model to use
+
+# Default model to use
+DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Anthropic Claude 3.7 direct
 
 # Default server configuration
 DEFAULT_SERVER_COMMAND = "uv"
@@ -144,7 +132,7 @@ def load_initial_state(query_path, mode):
         # Load both required prompts using the centralized loader
         instructions_prompt = load_prompt(mode, "instructions")
         review_prompt = load_prompt(mode, "review")
-        
+
         print(f"Loaded prompts for {mode} mode:")
         print(f"- Instructions: {len(instructions_prompt)} characters")
         print(f"- Review: {len(review_prompt)} characters")
@@ -219,7 +207,7 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
-                    
+
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
                     for available_tool in getattr(wrap_tool, "available_tools", []):
@@ -231,11 +219,13 @@ def wrap_tool(tool):
 
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
-                                
+
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
-                                log_system(f"Warning: Failed to capture model after solve: {str(e)}")
+                                log_system(
+                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                )
                                 pass  # Handle errors in get_model capture
 
                             break
@@ -287,7 +277,7 @@ def wrap_tool(tool):
                 if tool_name == "solve_model":
                     # Create a global variable to store the solution
                     wrap_tool.mem_solution = formatted
-                    
+
                     # We also want to capture the model state right after solve_model is called
                     # Find the get_model tool in the available tools
                     for available_tool in getattr(wrap_tool, "available_tools", []):
@@ -303,11 +293,13 @@ def wrap_tool(tool):
 
                                 # Store the model
                                 wrap_tool.mem_model = get_formatted
-                                
+
                                 # Record this call in tool stats
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
-                                log_system(f"Warning: Failed to capture model after solve: {str(e)}")
+                                log_system(
+                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                )
                                 pass  # Handle errors in get_model capture
 
                             break
@@ -352,9 +344,16 @@ def parse_arguments():
     parser.add_argument(
         "--model",
         type=str,
-        choices=list(MODEL_CODES.keys()),
         default=DEFAULT_MODEL,
-        help=f"Model to use (default: {DEFAULT_MODEL})",
+        help=f"Model code to use (default: {DEFAULT_MODEL}). Format: '<platform>:<model>' or '<platform>:<provider>/<model>'. "
+        "Examples: 'OA:gpt-4.1-2025-04-14', 'AT:claude-3-7-sonnet-20250219', 'OR:google/gemini-2.5-pro-preview'",
+    )
+    parser.add_argument(
+        "--mc",
+        type=str,
+        help="Alternative way to specify model code. Same format as --model. "
+        "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google), LM (LM Studio). "
+        "For LM Studio use format 'LM:model@url'. Overrides --model if provided.",
     )
     parser.add_argument(
         "--no-stats", action="store_true", help="Disable tool usage statistics"
@@ -372,14 +371,14 @@ def parse_arguments():
 
 def call_reviewer(state: Dict, model: Any) -> Dict:
     """Call a reviewer to assess the solution.
-    
+
     This function takes the current state, which includes the solution,
     and calls a reviewer to assess its correctness.
-    
+
     Args:
         state: The current state
         model: The language model to use
-        
+
     Returns:
         Updated state with review result added
     """
@@ -387,7 +386,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
 
     # Extract necessary information from state
     mem_problem = state.get("mem_problem", "No problem statement provided")
-    mem_model = state.get("mem_model", "No model code provided")  
+    mem_model = state.get("mem_model", "No model code provided")
     solution = state.get("mem_solution", "No solution generated yet")
 
     # Process the solution to make it more readable if it's in JSON format
@@ -396,26 +395,27 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         if isinstance(solution, str) and "solution" in solution:
             # Try using ast.literal_eval which is safer than eval for parsing Python literals
             import ast
+
             try:
                 # Convert the string representation of a dict to an actual dict
                 solution_dict = ast.literal_eval(solution)
-                
-                if isinstance(solution_dict, dict) and 'solution' in solution_dict:
-                    solution_values = solution_dict['solution']
-                    
+
+                if isinstance(solution_dict, dict) and "solution" in solution_dict:
+                    solution_values = solution_dict["solution"]
+
                     processed_solution = "Solution values found:\n"
                     for var, value in solution_values.items():
                         processed_solution += f"{var} = {value}\n"
-                    
+
                     # Add a clear statement about satisfiability
-                    if solution_dict.get('satisfiable', False):
+                    if solution_dict.get("satisfiable", False):
                         processed_solution += "\nThe model is satisfiable."
                     else:
                         processed_solution += "\nThe model is NOT satisfiable."
             except (SyntaxError, ValueError):
                 # If literal_eval fails, try regex approach
                 import json
-                
+
                 # Extract the solution part
                 solution_match = re.search(r"'solution'\s*:\s*({[^}]+})", solution)
                 if solution_match:
@@ -426,110 +426,111 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
                         processed_solution = "Solution values found:\n"
                         for var, value in solution_values.items():
                             processed_solution += f"{var} = {value}\n"
-                        
+
                         # Check for satisfiability
                         if "'satisfiable': True" in solution:
                             processed_solution += "\nThe model is satisfiable."
                     except json.JSONDecodeError:
                         # If JSON parsing fails, extract manually
-                        value_matches = re.findall(r"'([^']+)':\s*(\d+)", solution_match.group(1))
+                        value_matches = re.findall(
+                            r"'([^']+)':\s*(\d+)", solution_match.group(1)
+                        )
                         if value_matches:
                             processed_solution = "Solution values found:\n"
                             for var, value in value_matches:
                                 processed_solution += f"{var} = {value}\n"
     except Exception as e:
         # Log errors in solution processing but continue
-        print(f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True)
+        print(
+            f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True
+        )
         pass
-    
+
     # Create reviewer prompt using Template
     reviewer_template = Template(state.get("review_prompt", ""))
     reviewer_prompt = reviewer_template.substitute(
-        PROBLEM=mem_problem,
-        MODEL=mem_model,
-        SOLUTION=processed_solution
+        PROBLEM=mem_problem, MODEL=mem_model, SOLUTION=processed_solution
     )
-    
+
     # For debug, show just a preview of the prompt
     print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
-    
+
     try:
         # Track reviewer input tokens using the TokenCounter
         token_counter = TokenCounter.get_instance()
         token_counter.count_reviewer_input(reviewer_prompt)
-        
+
         # Create a human message with the prompt
         review_message = HumanMessage(content=reviewer_prompt)
-        
+
         print("Calling model for review...", flush=True)
-        
+
         # Invoke the model normally
         response = model.invoke([review_message])
         response_text = response.content
-        
+
         # Track reviewer output tokens
         token_counter.count_reviewer_output(response_text)
-        
+
         # Parse the verdict from the response using regex
-        verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', response_text, re.IGNORECASE)
-        
+        verdict_match = re.search(
+            r"<verdict>(correct|incorrect|unknown)</verdict>",
+            response_text,
+            re.IGNORECASE,
+        )
+
         if verdict_match:
             # Extract the verdict
             verdict = verdict_match.group(1).lower()
             print(f"Found verdict tag: {verdict}", flush=True)
-            
+
             # Get the explanation (everything before the verdict tag)
-            explanation_parts = response_text.split('<verdict>')
+            explanation_parts = response_text.split("<verdict>")
             explanation = explanation_parts[0].strip()
-            
+
             # Create the review result
-            review_result = {
-                "correctness": verdict,
-                "explanation": explanation
-            }
+            review_result = {"correctness": verdict, "explanation": explanation}
         else:
             # No explicit verdict tag, use "unknown"
             verdict = "unknown"
             print(f"No verdict tag found, using default: {verdict}", flush=True)
-            
+
             # Use the full response as the explanation
-            review_result = {
-                "correctness": verdict,
-                "explanation": response_text
-            }
-        
+            review_result = {"correctness": verdict, "explanation": response_text}
+
         # Store extracted values
         mem_review_verdict = review_result["correctness"]
         mem_review_text = response_text
-        
+
         print(f"Review complete: verdict is '{mem_review_verdict}'", flush=True)
-        
+
         # Return both the review result and keep existing messages
         return {
-            "review_result": review_result, 
+            "review_result": review_result,
             "mem_review_verdict": mem_review_verdict,
             "mem_review_text": mem_review_text,
-            "messages": state.get("messages", [])  # Preserve existing messages
+            "messages": state.get("messages", []),  # Preserve existing messages
         }
-        
+
     except Exception as e:
         print(f"Review process error: {str(e)}", flush=True)
         import traceback
+
         print(f"Traceback: {traceback.format_exc()}", flush=True)
-        
+
         # Return a default review result and keep existing messages
         return {
             "review_result": {
-                "correctness": "unknown", 
-                "explanation": f"Error running reviewer: {str(e)}"
+                "correctness": "unknown",
+                "explanation": f"Error running reviewer: {str(e)}",
             },
             "mem_review_verdict": "unknown",
             "mem_review_text": f"Error running reviewer: {str(e)}",
-            "messages": state.get("messages", [])  # Preserve existing messages
+            "messages": state.get("messages", []),  # Preserve existing messages
         }
 
 
-async def mcp_solver_node(state: dict, model_name: str) -> dict:
+async def mcp_solver_node(state: dict, model_code: str) -> dict:
     """Processes the conversation via the MCP solver with direct tool calling."""
     state["solver_visit_count"] = state.get("solver_visit_count", 0) + 1
 
@@ -540,34 +541,32 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     if "mem_model" not in state:
         state["mem_model"] = "No model captured yet"
 
-    # Get the model name
-    SOLVE_MODEL = model_name.lower()
-    print(f"Using model: {SOLVE_MODEL}")
+    # Use the model code directly
+    print(f"Using model code: {model_code}")
 
     # Extract args from state if available, otherwise use None
     args = state.get("args")
 
     # Set up the connection to the MCP server
-    # Get the model code from the model name
-    if model_name not in MODEL_CODES:
-        console.print(
-            f"[bold red]Error: Unknown model '{model_name}'. Using default: {DEFAULT_MODEL}[/bold red]"
-        )
-        model_name = DEFAULT_MODEL
-
-    model_code = MODEL_CODES[model_name]
+    console.print(f"[bold green]Using model code: {model_code}[/bold green]")
 
     # Check if required API key is present
     try:
         model_info = LLMFactory.parse_model_code(model_code)
-        api_key_name = model_info.api_key_name
-        api_key = os.environ.get(api_key_name)
 
-        if not api_key:
-            error_msg = f"Error: {api_key_name} not found in environment variables. Please set {api_key_name} in your .env file."
-            console.print(f"[bold red]{error_msg}[/bold red]")
-            state["messages"].append({"role": "assistant", "content": error_msg})
-            return state
+        # LM Studio doesn't require an API key
+        if model_info.platform == "LM":
+            # Skip API key check for LM Studio
+            pass
+        else:
+            api_key_name = model_info.api_key_name
+            api_key = os.environ.get(api_key_name)
+
+            if not api_key:
+                error_msg = f"Error: {api_key_name} not found in environment variables. Please set {api_key_name} in your .env file."
+                console.print(f"[bold red]{error_msg}[/bold red]")
+                state["messages"].append({"role": "assistant", "content": error_msg})
+                return state
     except Exception as e:
         console.print(f"[bold red]Error parsing model code: {str(e)}[/bold red]")
         state["messages"].append(
@@ -622,7 +621,11 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     sys.stdout.flush()
 
                     # Get recursion_limit from args (if provided), then from config, or default to 200
-                    recursion_limit = args.recursion_limit if args is not None and hasattr(args, 'recursion_limit') else None
+                    recursion_limit = (
+                        args.recursion_limit
+                        if args is not None and hasattr(args, "recursion_limit")
+                        else None
+                    )
                     if recursion_limit is None:
                         # Try to get from config
                         try:
@@ -649,13 +652,13 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     # Simplified agent start message
                     log_system("Entering ReAct Agent")
                     sys.stdout.flush()
-                    
+
                     # Ensure token counter is initialized before agent runs
                     token_counter = TokenCounter.get_instance()
                     # Do not reset token counts - this prevents proper tracking
                     # token_counter.main_input_tokens = 0
                     # token_counter.main_output_tokens = 0
-                    
+
                     try:
                         # Initialize the agent with tools
                         agent = create_react_agent(SOLVE_MODEL, wrapped_tools)
@@ -666,13 +669,12 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                         )
 
                         # Debug output - print response structure
-                        print(f"Agent response keys: {list(response.keys())}", flush=True)
-                        
+                        print(
+                            f"Agent response keys: {list(response.keys())}", flush=True
+                        )
+
                         # Extract and add the agent's response to state
-                        if (
-                            response.get("messages")
-                            and len(response["messages"]) > 0
-                        ):
+                        if response.get("messages") and len(response["messages"]) > 0:
                             agent_reply = response["messages"][-1].content
                             print(
                                 f"Agent reply received, length: {len(agent_reply)}",
@@ -681,7 +683,7 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                             state["messages"].append(
                                 {"role": "assistant", "content": agent_reply}
                             )
-                            
+
                             # Pass all relevant state updates from the response to the state object
                             # This ensures token counts and other metadata are preserved
                             for key, value in response.items():
@@ -689,33 +691,48 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                                     state[key] = value
                                     # Debug print only if needed
                                     # print(f"State update: {key} = {value}", flush=True)
-                            
+
                             # Explicitly update token counter from response
                             if "mem_main_input_tokens" in response:
                                 input_tokens = response.get("mem_main_input_tokens", 0)
                                 # print(f"Main agent input tokens: {input_tokens}", flush=True)
                                 if input_tokens > 0:
                                     token_counter.main_input_tokens = input_tokens
-                            
+
                             if "mem_main_output_tokens" in response:
-                                output_tokens = response.get("mem_main_output_tokens", 0)
+                                output_tokens = response.get(
+                                    "mem_main_output_tokens", 0
+                                )
                                 # print(f"Main agent output tokens: {output_tokens}", flush=True)
                                 if output_tokens > 0:
                                     token_counter.main_output_tokens = output_tokens
-                            
+
                             # If we didn't get explicit token counts but we got messages, estimate them
-                            if token_counter.main_input_tokens == 0 and response.get("messages"):
+                            if token_counter.main_input_tokens == 0 and response.get(
+                                "messages"
+                            ):
                                 # Estimate tokens from input messages
                                 # Don't print annoying message: print("No token counts found, estimating from messages...", flush=True)
-                                input_msgs = [msg for msg in response.get("messages", []) if not isinstance(msg, AIMessage)]
+                                input_msgs = [
+                                    msg
+                                    for msg in response.get("messages", [])
+                                    if not isinstance(msg, AIMessage)
+                                ]
                                 token_counter.count_main_input(input_msgs)
-                                
+
                                 # Estimate tokens from output messages
-                                output_msgs = [msg for msg in response.get("messages", []) if isinstance(msg, AIMessage)]
+                                output_msgs = [
+                                    msg
+                                    for msg in response.get("messages", [])
+                                    if isinstance(msg, AIMessage)
+                                ]
                                 token_counter.count_main_output(output_msgs)
-                            
+
                             # Log the final token counts
-                            print(f"Final token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}", flush=True)
+                            print(
+                                f"Final token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}",
+                                flush=True,
+                            )
                         else:
                             print(
                                 "Warning: No message content found in response",
@@ -748,38 +765,40 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
     # Update state with any get_model results we captured during execution
     if hasattr(wrap_tool, "mem_model"):
         state["mem_model"] = wrap_tool.mem_model
-    
+
     # Always print the current state's mem_solution before review
     # This ensures the value is available in the logs even if tools were never called
     # print(f"mem_solution: {state.get('mem_solution', 'No solution generated yet')}")
     # sys.stdout.flush()
-    
+
     # Display problem, model, and result before reviewing
     display_problem_model_result(state)
-        
+
     # Now that we have the updated state, run the reviewer directly
     # This ensures that the reviewer has access to the current state with the correct model and solution
     if SOLVE_MODEL and state.get("review_prompt"):
         try:
             # Simplified reviewer start message
             log_system("Entering Review Agent")
-            
+
             # Create a state object that mimics the AgentState expected by call_reviewer
             reviewer_state = {
                 "mem_problem": state.get("mem_problem", ""),
                 "mem_model": state.get("mem_model", ""),
                 "mem_solution": state.get("mem_solution", ""),
                 "review_prompt": state.get("review_prompt", ""),
-                "messages": state.get("messages", [])
+                "messages": state.get("messages", []),
             }
-            
+
             # Call the reviewer directly
             review_result = call_reviewer(reviewer_state, SOLVE_MODEL)
-            
+
             # Add the review result to the state
             if isinstance(review_result, dict) and "review_result" in review_result:
                 state["review_result"] = review_result["review_result"]
-                correctness = review_result["review_result"].get("correctness", "unknown")
+                correctness = review_result["review_result"].get(
+                    "correctness", "unknown"
+                )
                 # Add symbols based on correctness status
                 if correctness == "correct":
                     symbol = "✅"  # Green checkmark
@@ -787,9 +806,9 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
                     symbol = "❌"  # Red X
                 else:
                     symbol = "❓"  # Question mark
-                
+
                 print(f"Review complete: {symbol} {correctness}", flush=True)
-                
+
                 # Display review results immediately after completion
                 display_review_result(state)
             else:
@@ -797,14 +816,15 @@ async def mcp_solver_node(state: dict, model_name: str) -> dict:
         except Exception as e:
             print(f"Error running reviewer: {str(e)}", flush=True)
             state["review_result"] = {
-                "correctness": "unknown", 
-                "explanation": f"Error running reviewer: {str(e)}"
+                "correctness": "unknown",
+                "explanation": f"Error running reviewer: {str(e)}",
             }
-            
+
             # Display review results even if there was an error
             display_review_result(state)
 
     return state
+
 
 def display_problem_model_result(state):
     """Display problem, model, and result output."""
@@ -832,6 +852,7 @@ def display_problem_model_result(state):
         print(state["mem_solution"])
         print("=" * 60 + "\n")
 
+
 def display_review_result(state):
     """Display review result output."""
     # Print review_result if available
@@ -840,8 +861,10 @@ def display_review_result(state):
         print("REVIEW RESULT:")
         print("=" * 60)
         correctness = state["review_result"].get("correctness", "unknown")
-        explanation = state["review_result"].get("explanation", "No explanation provided")
-        
+        explanation = state["review_result"].get(
+            "explanation", "No explanation provided"
+        )
+
         # Add symbols based on correctness status
         if correctness == "correct":
             symbol = "✅"  # Green checkmark
@@ -849,149 +872,160 @@ def display_review_result(state):
             symbol = "❌"  # Red X
         else:
             symbol = "❓"  # Question mark
-            
+
         print(f"Correctness: {symbol} {correctness}")
         print(f"Explanation: {explanation}")
         print("=" * 60 + "\n")
+
 
 def display_combined_stats():
     """Display combined tool usage and token usage statistics."""
     from rich.console import Console
     from rich.table import Table
-    
+
     console = Console()
-    
+
     # Get tool statistics
     tool_stats = ToolStats.get_instance()
     if tool_stats.enabled and tool_stats.total_calls > 0:
         tool_table = Table(title="Tool Usage and Token Statistics")
-        
+
         # Add tool usage section
         tool_table.add_column("Category", style="cyan")
         tool_table.add_column("Item", style="green")
         tool_table.add_column("Count/Value", style="yellow")
-        
+
         # Add a header row for tool usage
         tool_table.add_row("TOOL USAGE", "", "", style="bold")
-        
+
         # List of all standard tools
-        standard_tools = ["clear_model", "add_item", "replace_item", "delete_item", "get_model", "solve_model"]
-        
+        standard_tools = [
+            "clear_model",
+            "add_item",
+            "replace_item",
+            "delete_item",
+            "get_model",
+            "solve_model",
+        ]
+
         # Make sure all standard tools are represented in tool_calls
         for tool_name in standard_tools:
             if tool_name not in tool_stats.tool_calls:
                 tool_stats.tool_calls[tool_name] = 0
-        
+
         # Sort tools by number of calls (descending)
-        sorted_tools = sorted(tool_stats.tool_calls.items(), key=lambda x: x[1], reverse=True)
-        
+        sorted_tools = sorted(
+            tool_stats.tool_calls.items(), key=lambda x: x[1], reverse=True
+        )
+
         for tool_name, count in sorted_tools:
             tool_table.add_row("Tool", tool_name, str(count))
-        
+
         # Add a total row for tools
         tool_table.add_row("Tool", "TOTAL", str(tool_stats.total_calls), style="bold")
-        
+
         # Get token statistics
         token_counter = TokenCounter.get_instance()
-        
+
         # Add a header row for token usage
         tool_table.add_row("TOKEN USAGE", "", "", style="bold")
-        
+
         # Main agent tokens
         main_total = token_counter.main_input_tokens + token_counter.main_output_tokens
         tool_table.add_row(
-            "Token", 
-            "ReAct Agent Input", 
-            format_token_count(token_counter.main_input_tokens)
+            "Token",
+            "ReAct Agent Input",
+            format_token_count(token_counter.main_input_tokens),
         )
         tool_table.add_row(
-            "Token", 
-            "ReAct Agent Output", 
-            format_token_count(token_counter.main_output_tokens)
+            "Token",
+            "ReAct Agent Output",
+            format_token_count(token_counter.main_output_tokens),
         )
         tool_table.add_row(
-            "Token", 
-            "ReAct Agent Total", 
-            format_token_count(main_total),
-            style="bold"
+            "Token", "ReAct Agent Total", format_token_count(main_total), style="bold"
         )
-        
+
         # Reviewer agent tokens
-        reviewer_total = token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
+        reviewer_total = (
+            token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
+        )
         if reviewer_total > 0:
             tool_table.add_row(
-                "Token", 
-                "Reviewer Input", 
-                format_token_count(token_counter.reviewer_input_tokens)
+                "Token",
+                "Reviewer Input",
+                format_token_count(token_counter.reviewer_input_tokens),
             )
             tool_table.add_row(
-                "Token", 
-                "Reviewer Output", 
-                format_token_count(token_counter.reviewer_output_tokens)
+                "Token",
+                "Reviewer Output",
+                format_token_count(token_counter.reviewer_output_tokens),
             )
             tool_table.add_row(
-                "Token", 
-                "Reviewer Total", 
+                "Token",
+                "Reviewer Total",
                 format_token_count(reviewer_total),
-                style="bold"
+                style="bold",
             )
-        
+
         # Grand total
         grand_total = main_total + reviewer_total
         tool_table.add_row(
-            "Token", 
-            "COMBINED TOTAL", 
-            format_token_count(grand_total),
-            style="bold"
+            "Token", "COMBINED TOTAL", format_token_count(grand_total), style="bold"
         )
-        
+
         console.print("\n")
         console.print(tool_table)
     else:
-        console.print("[yellow]No tool usage or token statistics available for this run.[/yellow]")
+        console.print(
+            "[yellow]No tool usage or token statistics available for this run.[/yellow]"
+        )
+
 
 def generate_result_json(state, json_path):
     """Generate and save JSON results file from state."""
     # Create directories if they don't exist
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
-    
+
     # Get token statistics
     token_counter = TokenCounter.get_instance()
     tokens = {
         "react_input": token_counter.main_input_tokens,
         "react_output": token_counter.main_output_tokens,
         "reviewer_input": token_counter.reviewer_input_tokens,
-        "reviewer_output": token_counter.reviewer_output_tokens
+        "reviewer_output": token_counter.reviewer_output_tokens,
     }
-    
+
     # Get tool usage statistics
     tool_stats = ToolStats.get_instance()
     tool_calls = tool_stats.tool_calls if tool_stats.enabled else {}
-    
+
     # Get the full explanation from the review result
     review_explanation = ""
     if isinstance(state.get("review_result"), dict):
         review_explanation = state["review_result"].get("explanation", "")
-    
+
     # If we have the full review text available, use that as a backup
     if not review_explanation and state.get("mem_review_text"):
         # Try to extract just the explanation part (before any verdict tag)
-        verdict_match = re.search(r'<verdict>(correct|incorrect|unknown)</verdict>', 
-                                 state.get("mem_review_text", ""), 
-                                 re.IGNORECASE)
+        verdict_match = re.search(
+            r"<verdict>(correct|incorrect|unknown)</verdict>",
+            state.get("mem_review_text", ""),
+            re.IGNORECASE,
+        )
         if verdict_match:
-            parts = state["mem_review_text"].split('<verdict>')
+            parts = state["mem_review_text"].split("<verdict>")
             review_explanation = parts[0].strip()
         else:
             # Use the full text as explanation
             review_explanation = state.get("mem_review_text", "")
-    
+
     # Extract the problem name from the query file path
     problem_name = ""
     if state.get("args") and hasattr(state["args"], "query"):
         query_path = state["args"].query
-        problem_name = os.path.basename(query_path).replace('.md', '')
-    
+        problem_name = os.path.basename(query_path).replace(".md", "")
+
     # Prepare JSON data
     json_data = {
         "problem": state.get("mem_problem", ""),
@@ -999,20 +1033,25 @@ def generate_result_json(state, json_path):
         "solution": state.get("mem_solution", "No solution generated"),
         "review_text": review_explanation,
         "review_verdict": state.get("review_result", {}).get("correctness", "unknown"),
-        "result": "correct" if state.get("review_result", {}).get("correctness") == "correct" else "incorrect",
+        "result": (
+            "correct"
+            if state.get("review_result", {}).get("correctness") == "correct"
+            else "incorrect"
+        ),
         "tool_calls": tool_calls,
         "tokens": tokens,
         "mode": state.get("mode", "unknown"),
-        "problem_name": problem_name
+        "problem_name": problem_name,
     }
-    
+
     # Save to file
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(json_data, f, indent=4, ensure_ascii=False)
         print(f"\nSaved JSON result to: {json_path}")
     except Exception as e:
         print(f"\nError saving JSON result: {str(e)}")
+
 
 async def main():
     """Main entry point for the client."""
@@ -1023,7 +1062,7 @@ async def main():
     tool_stats_enabled = not args.no_stats
     tool_stats = ToolStats.get_instance()
     tool_stats.enabled = tool_stats_enabled
-    
+
     # Initialize token counter (always enabled regardless of --no-stats flag)
     _ = TokenCounter.get_instance()
 
@@ -1040,9 +1079,7 @@ async def main():
     print(f"Detected mode: {mode}")
 
     # Log the selected model code for reference
-    if args.model in MODEL_CODES:
-        model_code = MODEL_CODES[args.model]
-        print(f"Model code: {model_code}")
+    print(f"Model code: {args.mc if args.mc else DEFAULT_MODEL}")
 
     # Load initial state with prompts and query
     try:
@@ -1053,7 +1090,7 @@ async def main():
 
     # Store args in state for later use
     state["args"] = args
-    
+
     # Store mode in state for later use in JSON output
     state["mode"] = mode
 
@@ -1067,8 +1104,9 @@ async def main():
         state["server_command"] = command_parts[0]
         state["server_args"] = command_parts[1:] if len(command_parts) > 1 else []
 
-    # Run the solver once
-    await mcp_solver_node(state, args.model)
+    # Run the solver once with model code
+    model_code = args.mc if args.mc else DEFAULT_MODEL
+    await mcp_solver_node(state, model_code)
 
     # Return the state for printing in main_cli
     return state
@@ -1078,17 +1116,17 @@ def main_cli():
     """Command line entrypoint."""
     try:
         state = asyncio.run(main())
-        
+
         # Get the parsed arguments to access result_path
         args = parse_arguments()
-        
+
         # Display statistics at the end
         display_combined_stats()
-        
+
         # Generate and save JSON if result path provided
         if args.result_path:
             generate_result_json(state, args.result_path)
-            
+
         return 0
     except KeyboardInterrupt:
         print("\nOperation interrupted by user", file=sys.stderr)

@@ -9,4 +9,5 @@ to make it easier to model problems with PySAT.
 from .basic_templates import *
 from .cardinality_templates import *
 from .mapping import VariableMap
-# MaxSAT functionality removed 
+
+# MaxSAT functionality removed

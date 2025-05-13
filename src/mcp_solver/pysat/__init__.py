@@ -16,21 +16,14 @@ from .error_handling import (
     pysat_error_handler,
     validate_variables,
     validate_formula,
-    format_solution_error
+    format_solution_error,
 )
 
 # Include common cardinality constraints from templates
-from .templates.cardinality_templates import (
-    at_most_k, 
-    at_least_k, 
-    exactly_k
-)
+from .templates.cardinality_templates import at_most_k, at_least_k, exactly_k
 
 # Include additional constraints from constraints.py
-from .constraints import (
-    at_most_one,
-    exactly_one
-)
+from .constraints import at_most_one, exactly_one
 
 __all__ = [
     "PySATModelManager",
@@ -43,9 +36,9 @@ __all__ = [
     "validate_formula",
     "format_solution_error",
     # Constraints
-    "at_most_k", 
-    "at_least_k", 
-    "exactly_k", 
-    "at_most_one", 
-    "exactly_one"
-] 
+    "at_most_k",
+    "at_least_k",
+    "exactly_k",
+    "at_most_one",
+    "exactly_one",
+]

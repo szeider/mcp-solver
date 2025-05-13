@@ -101,12 +101,12 @@ Restart your shell if needed and ensure `uv` is in your PATH.
 
 ## Step 3: Set up the MCP Solver project
 
-### Clone the project
+### Clone project
 
 ```bash
 mkdir -p ~/projects/mcp-solver
 cd ~/projects/mcp-solver
-git clone https://github.com/szeider/mcp-solver.git .
+git clone --branch z3 https://github.com/szeider/mcp-solver.git .
 ```
 
 ### Create and activate virtual environment
@@ -185,24 +185,69 @@ uv run test-setup-client
 
 ## Step 6: Test Client Setup
 
-If you want to run the test client, make sure you have an [**Anthropic API key**](https://www.anthropic.com/api). You can either export it as an environment variable or define it in a `.env` file.
+The client requires an **API key** from an LLM provider, unless you run a local model.
 
-### macOS / Linux
+### Anthropic API Key (Default)
+
+By default, the client uses Anthropic Claude. Make sure you have an [**Anthropic API key**](https://www.anthropic.com/api). The preferred method is to add it to a `.env` file in the project root:
+
+```env
+ANTHROPIC_API_KEY=sk-...
+```
+
+Alternatively, you can export it as an environment variable:
+
+#### macOS / Linux
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
 ```
 
-### Windows (PowerShell)
+#### Windows (PowerShell)
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-..."
 ```
 
-Or add to an `.env` file in the project root:
+### Using Other LLM Providers
+
+The client supports multiple LLM providers through the `--mc` model code flag. The syntax follows this pattern:
+
+```
+XY:model                     # For cloud providers
+LM:model@url                 # For local models via LM Studio (basic)
+LM:model(param=value)@url    # For local models with parameters
+```
+
+You can also use parameters to configure local models:
+
+```
+LM:model(format=json)@url                      # Request JSON output
+LM:model(temp=0.7)@url                         # Set temperature to 0.7
+LM:model(format=json,temp=0.7,max_tokens=1000)@url  # Multiple parameters
+```
+
+Where `XY` is a two-letter code representing the platform:
+- `OA`: OpenAI
+- `AT`: Anthropic
+- `OR`: OpenRouter
+- `GO`: Google (Gemini)
+- `LM`: LM Studio (local models)
+
+Examples:
+```
+OA:gpt-4.1-2025-04-14
+AT:claude-3-7-sonnet-20250219
+OR:google/gemini-2.5-pro-preview
+```
+
+For providers other than Anthropic, you'll need to add the corresponding API key to your `.env` file:
 
 ```env
-ANTHROPIC_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+OPENROUTER_API_KEY=sk-...
+# No API key needed for LM Studio
 ```
 
 Test the client setup:
@@ -211,17 +256,17 @@ Test the client setup:
 uv run test-setup-client
 ```
 
-You can now run a problem description:
+You can now run a problem description 
 
 ```bash
 # MiniZinc mode
-uv run run-test mzn --problem <path/to/problem.md>
+uv run test-client --query <query_file>.md
 
 # PySAT mode
-uv run run-test pysat --problem <path/to/problem.md>
+uv run test-client-pysat --query <query_file>.md
 
 # Z3 mode
-uv run run-test z3 --problem <path/to/problem.md>
+uv run test-client-z3 --query <query_file>.md
 ```
 
 
@@ -324,7 +369,8 @@ The config file is located at `~/.config/Claude/claude_desktop_config.json`
 
 ### Usage:
 
-- We strongly recommend using the [Claude Pro](https://claude.ai/) subscription to access Claude 3.7 Sonnet model capabilities.
-- Upon launching Claude Desktop, verify that the interface displays a hammer symbol indicating at least 6 available tools.
-- Locate the electrical plug symbol in the interface. Select this icon, then choose "choose an integration" followed by "MCP Solver instructions." This action should result in the attachment of a prompt file named `instructions.txt`.
-- Once these prerequisites are satisfied, you may proceed to submit your query to the MCP solver.
+- We strongly recommend using the [Claude Pro](https://claude.ai/) subscription to run the Claude 3.7 Sonnet.  
+- When you start Claude Desktop (version > 0.8.0), you should see a *Plus Icon* and to the right of it a *Settings Slicer Icon*.
+- When you click the Plus Icon, you should see "Add from MCP Solver", follow this, and add the instructions prompt to your conversations. 
+- When you click the Settings Slider Icon, you can access all the tools of the MCP Solver, and enable/disable them individually; we recommend having all enabled. 
+- Now you are ready to type your query to the MCP solver.

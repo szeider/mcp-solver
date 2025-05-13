@@ -60,6 +60,8 @@ tests/results/
 CLAUDE.md
 docs/
 tmp/
+.mcp.json
+LM_STUDIO_IMPLEMENTATION.md
 
 # Distribution / packaging
 dist/
