@@ -63,7 +63,7 @@ def format_token_count(count):
 
 
 # Default model to use
-DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Anthropic Claude 3.7 direct
+DEFAULT_MODEL = "AT:claude-sonnet-4-20250514"  # Anthropic Claude Sonnet 4
 
 # Default server configuration
 DEFAULT_SERVER_COMMAND = "uv"
