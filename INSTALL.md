@@ -180,6 +180,7 @@ Run the following tests to verify your MCP Solver setup:
 uv run test-setup-mzn
 uv run test-setup-z3
 uv run test-setup-pysat
+uv run test-setup-maxsat
 uv run test-setup-client
 ```
 
@@ -265,6 +266,9 @@ uv run test-client --query <query_file>.md
 # PySAT mode
 uv run test-client-pysat --query <query_file>.md
 
+# MaxSAT mode
+uv run test-client-maxsat --query <query_file>.md
+
 # Z3 mode
 uv run test-client-z3 --query <query_file>.md
 ```
@@ -307,7 +311,7 @@ xdg-settings set default-web-browser google-chrome.desktop # optionally
 
 ### Configure `claude_desktop_config.json`
 
-In the examples below, replace "mcp-solver-mzn" with "mcp-solver-pysat" or "mcp-solver-z3" depeding on the mode you want to run the MCP Solver in.
+In the examples below, replace "mcp-solver-mzn" with "mcp-solver-pysat", "mcp-solver-maxsat", or "mcp-solver-z3" depending on the mode you want to run the MCP Solver in.
 
 #### macOS
 

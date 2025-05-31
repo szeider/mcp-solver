@@ -13,6 +13,9 @@ uv run run-test mzn
 # PySAT test 
 uv run run-test pysat 
 
+# MaxSAT test
+uv run run-test maxsat 
+
 # Z3 test - Cryptarithmetic puzzle
 uv run run-test z3 
 ```
@@ -34,6 +37,8 @@ uv run run-test z3
 │   │   │   ├── furniture-arrangement.md  # Furniture arrangement problem
 │   │   │   ├── mine-sweeper-hard.md      # Mine sweeper problem
 │   │   │   └── sudoku-16x16.md    # 16x16 Sudoku problem
+│   │   ├── maxsat/                # MaxSAT problem definitions
+│   │   │   └── test.md            # Default test problem
 │   │   └── z3/                    # Z3 problem definitions
 │   │       ├── bounded_sum.md     # Bounded sum problem
 │   │       └── cryptarithmetic.md # Cryptarithmetic problem
@@ -48,6 +53,7 @@ uv run run-test z3
 cd /path/to/mcp-solver
 uv run run-test mzn    # Run MiniZinc test.md by default if present, otherwise all MiniZinc tests
 uv run run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
+uv run run-test maxsat # Run MaxSAT test.md by default if present, otherwise all MaxSAT tests
 uv run run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
 ```
 
@@ -57,6 +63,7 @@ uv run run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 
 cd /path/to/mcp-solver
 uv run run-test mzn --problem tests/problems/mzn/nqueens.md
 uv run run-test pysat --problem tests/problems/pysat/graph_coloring.md
+uv run run-test maxsat --problem tests/problems/maxsat/test.md
 uv run run-test z3 --problem tests/problems/z3/cryptarithmetic.md
 ```
 
@@ -78,6 +85,9 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 - `petersen_12_coloring_unsat.md` - Unsatisfiable Petersen graph coloring
 - `queens_and_knights_6x6.md` - Combined queens and knights placement puzzle
 - `sudoku_16x16.md` - 16x16 Sudoku problem
+- `test.md` - Default test problem
+
+#### MaxSAT Problems:
 - `test.md` - Default test problem
 
 #### Z3 Problems:
@@ -119,16 +129,21 @@ If you see "Error connecting to MCP server", check that:
 If you see a warning about missing prompt files, check that the instruction prompt files exist:
 - MiniZinc: `instructions_prompt_mzn.md`
 - PySAT: `instructions_prompt_pysat.md`
+- MaxSAT: `instructions_prompt_maxsat.md`
 - Z3: `instructions_prompt_z3.md`
 
-### PySAT Environment
+### PySAT and MaxSAT Environments
 
-The PySAT execution environment includes:
+The PySAT and MaxSAT execution environments include:
 
 1. Standard Python modules: `math`, `random`, `collections`, `itertools`, `re`, `json`
 2. PySAT modules: `pysat.formula`, `pysat.solvers`, `pysat.card`
 3. Constraint helpers: `at_most_one`, `exactly_one`, `implies`, etc.
 4. Cardinality templates: `at_most_k`, `at_least_k`, `exactly_k`
+
+The MaxSAT environment additionally includes:
+- MaxSAT solver: `pysat.examples.rc2.RC2`
+- Weighted CNF formulas: `pysat.formula.WCNF`
 
 If you add new helper functions, make sure to include them in:
 - `restricted_globals` dictionary in `environment.py`
