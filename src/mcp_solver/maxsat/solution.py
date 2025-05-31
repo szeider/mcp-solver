@@ -236,7 +236,7 @@ def extract_weights_mapping(wcnf: "WCNF") -> dict[int, int]:
         Dictionary mapping soft clause indices to weights
     """
     weights_mapping = {}
-    for i, (clause, weight) in enumerate(zip(wcnf.soft, wcnf.wght, strict=False)):
+    for i, (_, weight) in enumerate(zip(wcnf.soft, wcnf.wght, strict=False)):
         weights_mapping[i] = weight
     return weights_mapping
 

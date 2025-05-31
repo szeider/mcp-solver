@@ -902,7 +902,7 @@ class MaxSATModelManager(SolverManager):
         modified_lines = []
         lines = modified_code.split("\n")
 
-        for i, line in enumerate(lines):
+        for _, line in enumerate(lines):
             modified_lines.append(line)
 
             # Add debugging for if solver.compute():

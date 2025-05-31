@@ -128,47 +128,17 @@ def export_solution(
 
         return error_solution
 
-
-def export_maxsat_solution(
-    data: dict[str, Any] | Any | None = None,
-    variables: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    """
-    Export solution data from a MaxSAT optimization problem.
-
-    This is a simplified pass-through implementation for compatibility.
-
-    Args:
-        data: Either an RC2 solver instance or a dictionary with solution data
-        variables: Optional mapping from variable names to their numeric IDs
-
-    Returns:
-        Dictionary with the solution data from the input
-    """
-    # For dictionary data, process it directly
-    if isinstance(data, dict):
-        # Add to the last solution
-        global _LAST_SOLUTION
-        _LAST_SOLUTION = data
-
-        # Return the dictionary
-        return data
-
-    # If it's a solver instance or other data, create a minimal response
-    result = {"satisfiable": True, "status": "sat", "values": {}}
-
     # Add some model data if available
     if hasattr(data, "model") and data.model is not None:
         result["model"] = data.model
-
-    # Add cost data if available
-    if hasattr(data, "cost"):
-        result["cost"] = data.cost
 
     # Set the last solution
     _LAST_SOLUTION = result
 
     return result
+
+
+# Removed export_maxsat_solution function as it's now in the MaxSAT module
 
 
 def _process_input_data(
