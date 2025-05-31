@@ -96,26 +96,67 @@ solver.delete()
 - **Solution Verification:**  
   After solving, verify that the returned solution satisfies all specified constraints. If you get UNSAT, then check that all clauses are indeed justified from the problem description.
 
-## ⭐ Pre-Implemented Helper Functions
+## ⭐ Advanced Helper Functions and Templates
 
-Import these constraint helpers to simplify encoding common logical patterns:
+The MCP Solver provides two categories of helpers to make encoding easier:
+
+### 1. Pre-Implemented Constraint Helpers
+
+These functions simplify encoding common logical patterns:
 
 ```python
-from pysat.card import *
+# These are available by default
+at_most_one([1, 2, 3])        # At most one variable is true
+exactly_one([1, 2, 3])        # Exactly one variable is true
+implies(1, 2)                 # If var1 is true, then var2 must be true
+mutually_exclusive([1, 2, 3]) # Variables are mutually exclusive
+if_then_else(1, 2, 3)         # If var1 then var2 else var3
 ```
 
-| Function             | Description                                      | Usage Example                                                |
-| -------------------- | ------------------------------------------------ | ------------------------------------------------------------ |
-| `at_most_k`          | At most k variables are true                     | `for clause in at_most_k([1,2,3], 2): formula.append(clause)` |
-| `at_least_k`         | At least k variables are true                    | `for clause in at_least_k([1,2,3], 1): formula.append(clause)` |
-| `exactly_k`          | Exactly k variables are true                     | `for clause in exactly_k([1,2,3], 2): formula.append(clause)` |
-| `at_most_one`        | At most one variable is true (optimized)         | `for clause in at_most_one([1,2,3]): formula.append(clause)` |
-| `exactly_one`        | Exactly one variable is true (optimized)         | `for clause in exactly_one([1,2,3]): formula.append(clause)` |
-| `implies`            | If a is true, then b must be true                | `for clause in implies(1, 2): formula.append(clause)`        |
-| `mutually_exclusive` | Set of variables where at most one can be true   | `for clause in mutually_exclusive([1,2]): formula.append(clause)` |
-| `if_then_else`       | Implement if-then-else logic (condition ? a : b) | `for clause in if_then_else(5, 6, 7): formula.append(clause)` |
+### 2. Cardinality Constraint Templates
 
-**IMPORTANT:** These functions return clauses that must be added to your formula using the pattern shown above.
+For more advanced cardinality constraints:
+
+```python
+# These require explicit import
+from pysat.card import *
+
+# At most k variables are true
+for clause in at_most_k([1, 2, 3, 4], 2): 
+    formula.append(clause)
+
+# At least k variables are true
+for clause in at_least_k([1, 2, 3, 4], 2): 
+    formula.append(clause)
+
+# Exactly k variables are true
+for clause in exactly_k([1, 2, 3, 4], 2): 
+    formula.append(clause)
+```
+
+### 3. Variable Mapping Helper
+
+For simpler variable management, use the `VariableMap` helper:
+
+```python
+# Create a variable map for managing variables
+var_map = VariableMap()
+
+# Create variables with meaningful names
+x1 = var_map.create_var("x1")
+x2 = var_map.create_var("x2")
+
+# Create multiple variables at once
+features = var_map.create_vars(["premium", "basic", "cloud"])
+
+# After solving, get a readable solution
+if solver.solve():
+    model = solver.get_model()
+    solution = var_map.interpret_model(model)
+    # solution = {"x1": True, "x2": False, "premium": True, ...}
+```
+
+**IMPORTANT:** These helper functions return clauses that must be added to your formula using the pattern shown above.
 
 ### Example Using Cardinality Constraints
 
@@ -166,6 +207,33 @@ solver.delete()
 
 ## Variable Mapping for Readability
 
+You can use either the built-in `VariableMap` class or create your own variable mapping functions:
+
+### Option 1: Using the VariableMap Class (Recommended)
+
+```python
+# Create a variable map for managing variables
+var_map = VariableMap()
+
+# Create variables with meaningful names
+x1 = var_map.create_var("x1")
+edge_ab = var_map.create_var("edge_a_b")
+
+# Create variables for all nodes
+node_vars = var_map.create_vars(["node1", "node2", "node3"])
+
+# After solving, get a readable solution
+if solver.solve():
+    model = solver.get_model()
+    solution = var_map.interpret_model(model)
+    # solution = {"x1": True, "edge_a_b": False, "node1": True, ...}
+    
+    # Get the variable mapping for export
+    var_mapping = var_map.get_mapping()
+```
+
+### Option 2: Creating Your Own Mapping Functions
+
 ```python
 # Create a variable mapping dictionary
 var_mapping = {}
@@ -173,7 +241,7 @@ var_count = 1
 
 # Create variables with meaningful names
 def create_var(name):
-    nonlocal var_count
+    global var_count  # Use global for module-level variables
     var_mapping[name] = var_count
     var_count += 1
     return var_mapping[name]
@@ -248,20 +316,72 @@ formula.append([-a_id, -b_id, c_id])
 
 ## Standard Code Pattern
 
+Here are two recommended patterns for creating SAT encodings:
+
+### Pattern 1: Using VariableMap (Recommended)
+
+```python
+# 1. Create formula and variable mapping
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+
+formula = CNF()
+var_map = VariableMap()
+
+# 2. Create variables with meaningful names
+x1 = var_map.create_var("x1")
+x2 = var_map.create_var("x2")
+x3 = var_map.create_var("x3")
+
+# 3. Add constraints using helper functions
+# Add constraint: exactly 2 of x1, x2, x3 must be true
+for clause in exactly_k([x1, x2, x3], 2):
+    formula.append(clause)
+
+# Add constraint: if x1 then x2
+formula.append([-x1, x2])  # NOT x1 OR x2
+
+# 4. Solve and process results
+solver = Glucose3()
+solver.append_formula(formula)
+
+if solver.solve():
+    model = solver.get_model()
+    solution = var_map.interpret_model(model)
+    
+    export_solution({
+        "satisfiable": True,
+        "assignment": solution
+    })
+else:
+    export_solution({
+        "satisfiable": False,
+        "message": "No solution exists"
+    })
+    
+# 5. Always free solver memory
+solver.delete()
+```
+
+### Pattern 2: Traditional Approach
+
 ```python
 # 1. Create variables and formula
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+from pysat.card import *
+
 formula = CNF()
 var_mapping = {}
 var_count = 1
 
 def create_var(name):
-    nonlocal var_count
+    global var_count
     var_mapping[name] = var_count
     var_count += 1
     return var_mapping[name]
 
 # 2. Add constraints using helper functions
-from pysat.card import *
 x1 = create_var("x1")
 x2 = create_var("x2")
 x3 = create_var("x3")
@@ -272,6 +392,7 @@ for clause in exactly_k([x1, x2, x3], 2):
 # 3. Solve and process results
 solver = Glucose3()
 solver.append_formula(formula)
+
 if solver.solve():
     model = solver.get_model()
     solution = {name: (vid in model) for name, vid in var_mapping.items()}

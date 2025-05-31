@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 # Track the last solution - make it global and accessible
 _LAST_SOLUTION = None
 
+# Track whether an optimal RC2 solution has been set
+_RC2_SOLUTION_SET = False
+
 # Reserved keys that shouldn't be processed as custom dictionaries
 RESERVED_KEYS = {
     "satisfiable",
@@ -112,8 +115,12 @@ def export_maxsat_solution(
                 model = solver.compute()
                 export_maxsat_solution(solver, var_mapping)
             ```
+            
+    WARNING: Do not call both export_maxsat_solution with an RC2 solver AND
+    export_solution in the same program. This will overwrite your optimal
+    MaxSAT solution with a potentially different solution.
     """
-    global _LAST_SOLUTION
+    global _LAST_SOLUTION, _RC2_SOLUTION_SET
     try:
         solution_data = {}
 
@@ -204,6 +211,10 @@ def export_maxsat_solution(
 
         # Store the MaxSAT solution
         _LAST_SOLUTION = maxsat_result
+        
+        # Mark if this was an RC2 solver solution
+        if isinstance(data, RC2):
+            _RC2_SOLUTION_SET = True
 
         return maxsat_result
 
@@ -219,6 +230,7 @@ def export_maxsat_solution(
 
         # Store the error solution
         _LAST_SOLUTION = error_solution
+        _RC2_SOLUTION_SET = False
         logger.error(f"Error in export_maxsat_solution: {e!s}", exc_info=True)
         print(f"DEBUG - _LAST_SOLUTION set to error: {error_solution}")
 

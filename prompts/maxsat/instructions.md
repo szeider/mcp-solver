@@ -461,7 +461,7 @@ is_feature_enabled = var_mapping["premium"] in model
 solution = {name: (vid in model) for name, vid in var_mapping.items()}
 ```
 
-## Handling Imports
+## Handling Imports and Helper Functions
 
 Available imports:
 
@@ -477,6 +477,84 @@ import collections
 import itertools
 import re
 import json
+```
+
+### Template Helpers
+
+The MCP Solver provides built-in helper functions for common MaxSAT patterns:
+
+#### Variable Mapping
+
+```python
+# Create a variable map
+var_map = VariableMap()
+
+# Create variables with meaningful names
+x1 = var_map.create_var("x1")
+x2 = var_map.create_var("x2")
+
+# Create multiple variables at once
+features = var_map.create_vars(["base", "premium", "cloud"])
+
+# Extract solution
+with RC2(wcnf) as solver:
+    model = solver.compute()
+    if model:
+        # Convert to meaningful variable assignments
+        solution = var_map.interpret_model(model)
+        print(solution)  # {'x1': True, 'x2': False, ...}
+```
+
+#### Basic Templates
+
+```python
+# Add constraints
+add_hard_constraint(wcnf, [x1, x2])         # x1 OR x2
+add_soft_constraint(wcnf, [x1], weight=5)   # Prefer x1=True (weight 5)
+
+# Encode common patterns
+encode_binary_variable(wcnf, x1, soft_weight=3, preferred_value=True)
+encode_mutual_exclusion(wcnf, [x1, x2, x3])  # At most one can be true
+encode_dependency(wcnf, x1, x2)              # If x1 then x2
+
+# Quick solving
+result = solve_maxsat_problem(wcnf, var_map.get_mapping())
+```
+
+#### Complete Problem Templates
+
+For common optimization problems, you can use high-level templates:
+
+```python
+# Feature selection
+result = feature_selection_problem(
+    features={"base": 0, "premium": 10, "cloud": 15},
+    dependencies=[("premium", "base"), ("sync", "cloud")],
+    exclusions=[("basic", "premium")],
+    required_features=["base"]
+)
+
+# Maximum cut
+result = weighted_max_cut(
+    edges=[(1, 2, 5), (1, 3, 7), (2, 3, 9)]
+)
+
+# Set cover
+result = set_cover_problem(
+    universe=[1, 2, 3, 4, 5],
+    sets={"A": [1, 2, 3], "B": [2, 4], "C": [3, 5]},
+    costs={"A": 5, "B": 3, "C": 2}
+)
+
+# Knapsack
+result = knapsack_problem(
+    items={
+        "item1": {"weight": 5, "value": 10},
+        "item2": {"weight": 3, "value": 5}
+    },
+    capacity=10,
+    dependencies=[("item3", "item2")]
+)
 ```
 
 ## Solution Export
