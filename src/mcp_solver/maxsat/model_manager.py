@@ -421,6 +421,21 @@ class MaxSATModelManager(SolverManager):
                             'line': i + 1,
                             'issue': f"Incomplete assignment: Line ends with '=' but has no value assigned."
                         })
+                    
+                    # Check for incomplete wcnf.append() calls - a common error
+                    if re.search(r'wcnf\.append\(\s*,\s*weight', line):
+                        line_issues.append({
+                            'line': i + 1,
+                            'issue': f"Incomplete append: wcnf.append call is missing the list of literals. Use wcnf.append([x], weight=1) instead of wcnf.append(, weight=1)."
+                        })
+                    
+                    # Check for wcnf.append without literals list
+                    if re.search(r'wcnf\.append\([^[]', line) and 'weight=' in line:
+                        # If it has something other than a list but has weight=
+                        line_issues.append({
+                            'line': i + 1,
+                            'issue': f"Incorrect append format: Literals must be in a list. Use wcnf.append([x], weight=1) with square brackets."
+                        })
 
             except SyntaxError as e:
                 line_num = e.lineno if hasattr(e, "lineno") else "?"
@@ -432,17 +447,41 @@ class MaxSATModelManager(SolverManager):
                 self.logger.error(
                     f"Syntax error in code at line {line_num}, column {col_num}: {e!s}"
                 )
-                return get_standardized_response(
-                    success=False,
-                    message=f"Syntax error at line {line_num}, column {col_num}: {e!s}",
-                    error="Syntax error",
-                    error_details={
+                
+                # Find the actual line of code in the user's original code
+                # by looking at the line numbers in the original code items
+                original_line = "unknown"
+                original_item = None
+                if isinstance(line_num, int):
+                    line_count = 0
+                    for item_index, (_, item_content) in enumerate(sorted_items):
+                        item_lines = item_content.count('\n') + 1
+                        if line_count + item_lines >= line_num:
+                            # This is the item containing the error
+                            original_item = item_index + 1  # 1-based indexing
+                            relative_line = line_num - line_count
+                            item_lines_list = item_content.split('\n')
+                            if 0 <= relative_line - 1 < len(item_lines_list):
+                                original_line = item_lines_list[relative_line - 1]
+                            break
+                        line_count += item_lines
+                
+                # Create a detailed error response with original line information
+                error_response = {
+                    "success": False,
+                    "message": f"Syntax error at line {line_num}, column {col_num}: {e!s}",
+                    "error": "Syntax error",
+                    "status": "error",
+                    "error_details": {
                         "line": line_num,
                         "column": col_num,
                         "code": error_text,
                         "message": str(e),
+                        "original_item": original_item,
+                        "original_line": original_line,
                     },
-                )
+                }
+                return error_response
             except Exception as e:
                 self.logger.error(f"Error analyzing code: {e!s}")
                 # Continue despite analysis error

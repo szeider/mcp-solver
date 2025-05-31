@@ -339,8 +339,12 @@ def get_standardized_response(
     # Ensure consistency between success flag and error presence
     if error is not None and success:
         # This is inconsistent - if there's an error, success should be False
-        logger.warning(f"Inconsistent response: success={success} with error='{error}'")
-        success = False  # Override success to be False if there's an error
+        # Log this with a stack trace to identify the source
+        logger.error(f"CRITICAL INCONSISTENCY DETECTED: success=True with error='{error}'", 
+                    exc_info=True)
+        
+        # Always override success to be False if there's an error
+        success = False  # This ensures the response is consistent
     
     response = {"message": message, "success": success}
 
