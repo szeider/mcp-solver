@@ -327,21 +327,27 @@ class MaxSATModelManager(SolverManager):
 
                 if not maxsat_solver_found:
                     self.logger.warning("No MaxSAT solver found in the code")
-                    return get_standardized_response(
-                        success=False,
-                        message="No MaxSAT solver found in the code. For optimization problems, you need to use RC2 or another MaxSAT solver.",
-                        error="Missing MaxSAT solver",
-                        code_analysis="Missing RC2 solver instantiation",
-                    )
+                    # Create an error response with consistent success=False when there's an error
+                    response = {
+                        "message": "No MaxSAT solver found in the code. For optimization problems, you need to use RC2 or another MaxSAT solver.",
+                        "success": False,
+                        "error": "Missing MaxSAT solver",
+                        "status": "error",
+                        "code_analysis": "Missing RC2 solver instantiation",
+                    }
+                    return response
 
                 if not wcnf_found:
                     self.logger.warning("No WCNF formula found in the code")
-                    return get_standardized_response(
-                        success=False,
-                        message="No WCNF formula found in the code. MaxSAT optimization requires a WCNF formula with soft clauses.",
-                        error="Missing WCNF formula",
-                        code_analysis="Missing WCNF formula instantiation",
-                    )
+                    # Create an error response with consistent success=False when there's an error
+                    response = {
+                        "message": "No WCNF formula found in the code. MaxSAT optimization requires a WCNF formula with soft clauses.",
+                        "success": False,
+                        "error": "Missing WCNF formula",
+                        "status": "error",
+                        "code_analysis": "Missing WCNF formula instantiation",
+                    }
+                    return response
 
                 # Check for solver.compute() calls (for RC2)
                 compute_calls = 0
@@ -356,12 +362,15 @@ class MaxSATModelManager(SolverManager):
 
                 if compute_calls == 0:
                     self.logger.warning("No solver.compute() call found in the code")
-                    return get_standardized_response(
-                        success=False,
-                        message="No solver.compute() call found in the code. For MaxSAT optimization with RC2, use solver.compute() instead of solver.solve().",
-                        error="Missing compute call",
-                        code_analysis="Missing solver.compute() call",
-                    )
+                    # Create an error response with consistent success=False when there's an error
+                    response = {
+                        "message": "No solver.compute() call found in the code. For MaxSAT optimization with RC2, use solver.compute() instead of solver.solve().",
+                        "success": False,
+                        "error": "Missing compute call",
+                        "status": "error",
+                        "code_analysis": "Missing solver.compute() call",
+                    }
+                    return response
 
                 # Check for export_maxsat_solution calls
                 export_calls = 0
@@ -377,12 +386,15 @@ class MaxSATModelManager(SolverManager):
                     self.logger.warning(
                         "No export_maxsat_solution() call found in the code"
                     )
-                    return get_standardized_response(
-                        success=False,
-                        message="No export_maxsat_solution() call found in the code. For MaxSAT optimization, use export_maxsat_solution() to return results.",
-                        error="Missing export_maxsat_solution call",
-                        code_analysis="Missing export_maxsat_solution() call",
-                    )
+                    # Create an error response with consistent success=False when there's an error
+                    response = {
+                        "message": "No export_maxsat_solution() call found in the code. For MaxSAT optimization, use export_maxsat_solution() to return results.",
+                        "success": False,
+                        "error": "Missing export_maxsat_solution call",
+                        "status": "error",
+                        "code_analysis": "Missing export_maxsat_solution() call",
+                    }
+                    return response
                     
                 # Check for common logical errors in the code
                 line_issues = []
