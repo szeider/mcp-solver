@@ -30,9 +30,8 @@ for p in reversed(site_packages):
 
 # Now try to import PySAT
 try:
-    from pysat.formula import CNF, WCNF
+    from pysat.formula import CNF
     from pysat.solvers import Solver
-    from pysat.examples.rc2 import RC2
 except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
@@ -52,8 +51,6 @@ RESERVED_KEYS = {
     "model",
     "values",
     "status",
-    "objective",
-    "cost",
     "error_type",
     "error_message",
     "warnings",
@@ -131,203 +128,49 @@ def export_solution(
 
 
 def export_maxsat_solution(
-    data: Union[Dict[str, Any], 'RC2', None] = None,
+    data: Union[Dict[str, Any], Any, None] = None,
     variables: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """
     Export solution data from a MaxSAT optimization problem.
     
-    This function makes it easy to return results from a MaxSAT problem,
-    handling both directly provided dictionaries and RC2 solver instances.
-    It also automatically calls export_solution internally, so you don't need
-    to make a separate call to export_solution.
+    This is a simplified pass-through implementation for compatibility.
     
     Args:
         data: Either an RC2 solver instance or a dictionary with solution data
         variables: Optional mapping from variable names to their numeric IDs
     
     Returns:
-        Dictionary with the MaxSAT solution data and metadata.
-        
-    Examples:
-        Basic usage with a direct dictionary:
-            ```python
-            export_maxsat_solution({
-                "satisfiable": True,
-                "selected_features": {"base": True, "premium": True},
-                "total_value": 75
-            })
-            ```
-            
-        Usage with an RC2 solver:
-            ```python
-            with RC2(wcnf) as solver:
-                model = solver.compute()
-                export_maxsat_solution(solver, var_mapping)
-            ```
+        Dictionary with the solution data from the input
     """
-    global _LAST_SOLUTION
-    try:
-        solution_data = {}
+    # For dictionary data, process it directly
+    if isinstance(data, dict):
+        # Add to the last solution
+        global _LAST_SOLUTION
+        _LAST_SOLUTION = data
         
-        # Case 1: RC2 solver provided 
-        if isinstance(data, RC2):
-            solver = data
-            model = solver.model
-            
-            if model is not None:
-                # Solution found
-                solution_data["satisfiable"] = True
-                solution_data["status"] = "optimal" 
-                solution_data["model"] = model
-                solution_data["cost"] = solver.cost
-                
-                # For optimization problems, provide the objective value
-                # (negative cost since MaxSAT minimizes costs, but users often think in terms of maximizing value)
-                solution_data["objective"] = -solver.cost
-                
-                # Map variable names to values if a mapping was provided
-                if variables:
-                    solution_data["assignment"] = {
-                        name: (var_id in model) if var_id > 0 else ((-var_id) not in model)
-                        for name, var_id in variables.items()
-                    }
-            else:
-                # No model found, problem is unsatisfiable
-                solution_data["satisfiable"] = False
-                solution_data["status"] = "unsatisfiable"
-                
-        # Case 2: Dictionary data provided
-        elif isinstance(data, dict):
-            solution_data = data.copy()
-            
-            # Ensure required fields are present
-            if "satisfiable" not in solution_data:
-                solution_data["satisfiable"] = True
-                
-            if "status" not in solution_data:
-                solution_data["status"] = "optimal" if solution_data.get("satisfiable", True) else "unsatisfiable"
-        
-        # Case 3: No data provided
-        else:
-            solution_data = {
-                "satisfiable": False,
-                "status": "error",
-                "message": "No valid data provided"
-            }
-        
-        # Ensure values dictionary exists for the extraction process
-        if "values" not in solution_data:
-            solution_data["values"] = {}
-        
-        # Extract values from custom dictionaries
-        solution_data = _extract_values_from_dictionaries(solution_data)
-        
-        # Store the MaxSAT solution
-        maxsat_result = solution_data
-        logger.debug(f"MaxSAT solution exported: {maxsat_result}")
-        
-        # Also call export_solution to ensure compatibility with MCP framework
-        # This eliminates the need for agents to call export_solution separately
-        export_result = {
-            "satisfiable": maxsat_result.get("satisfiable", True),
-            "message": "MaxSAT solution exported successfully",
-            "maxsat_data": maxsat_result
-        }
-        
-        # Add a special marker to indicate this is a MaxSAT solution
-        export_result["_is_maxsat_solution"] = True
-        
-        # Don't call export_solution directly as it would overwrite _LAST_SOLUTION
-        # Instead, process it and store it directly to preserve the MaxSAT data
-        _LAST_SOLUTION = export_result
-        
-        return maxsat_result
-        
-    except Exception as e:
-        # Create a simple error solution
-        error_solution = {
-            "satisfiable": False,
-            "status": "error",
-            "error_type": type(e).__name__,
-            "error_message": str(e),
-            "values": {}
-        }
-        
-        # Store the error solution
-        maxsat_error = error_solution
-        logger.error(f"Error in export_maxsat_solution: {str(e)}", exc_info=True)
-        
-        # Create a solution in the format expected by the MCP framework
-        export_result = {
-            "satisfiable": False,
-            "message": f"MaxSAT error: {str(e)}",
-            "error_type": type(e).__name__,
-            "maxsat_data": maxsat_error,
-            "_is_maxsat_solution": True  # Mark this as MaxSAT even if it failed
-        }
-        
-        # Store the formatted solution directly instead of calling export_solution
-        _LAST_SOLUTION = export_result
-        
-        return maxsat_error
-
-
-def extract_weights_mapping(wcnf: 'WCNF') -> Dict[int, int]:
-    """
-    Extract mapping of soft clause indices to their weights.
+        # Return the dictionary
+        return data
     
-    Args:
-        wcnf: WCNF formula with soft clauses
+    # If it's a solver instance or other data, create a minimal response
+    result = {
+        "satisfiable": True,
+        "status": "sat",
+        "values": {}
+    }
     
-    Returns:
-        Dictionary mapping soft clause indices to weights
-    """
-    weights_mapping = {}
-    for i, (clause, weight) in enumerate(zip(wcnf.soft, wcnf.wght)):
-        weights_mapping[i] = weight
-    return weights_mapping
-
-
-def get_soft_clause_info(wcnf: 'WCNF', mapping: Optional[Dict[str, Any]] = None) -> Dict[int, Dict[str, Any]]:
-    """
-    Create a mapping of soft clause indices to their information.
-    
-    Args:
-        wcnf: WCNF formula with soft clauses
-        mapping: Optional mapping from variable IDs to names
-    
-    Returns:
-        Dictionary mapping clause indices to information about the clause
-    """
-    clause_info = {}
-    for i, (clause, weight) in enumerate(zip(wcnf.soft, wcnf.wght)):
-        info = {
-            "weight": weight,
-            "clause": clause,
-            "literals": []
-        }
+    # Add some model data if available
+    if hasattr(data, 'model') and data.model is not None:
+        result["model"] = data.model
         
-        # If variable mapping provided, add literal names
-        if mapping:
-            for lit in clause:
-                var_id = abs(lit)
-                is_positive = lit > 0
-                var_name = None
-                for name, vid in mapping.items():
-                    if vid == var_id:
-                        var_name = name
-                        break
-                
-                if var_name:
-                    info["literals"].append({
-                        "name": var_name,
-                        "positive": is_positive
-                    })
+    # Add cost data if available
+    if hasattr(data, 'cost'):
+        result["cost"] = data.cost
         
-        clause_info[i] = info
+    # Set the last solution
+    _LAST_SOLUTION = result
     
-    return clause_info
+    return result
 
 
 def _process_input_data(
