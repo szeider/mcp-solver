@@ -1,62 +1,53 @@
-# Review Checklist for MaxSAT Optimization Models
+# MaxSAT Solution Review Template
 
-When working with MaxSAT optimization models, use this review checklist to ensure correctness, efficiency, and interpretability.
+Your task is to review a MaxSAT solution for correctness, optimality, and quality.
 
-## Solution Verification
+## Problem Statement
 
-- [ ] All hard constraints are correctly encoded and satisfied in the solution
-- [ ] Soft constraints are correctly weighted according to their importance
-- [ ] Solution cost matches the sum of weights of violated soft constraints
-- [ ] Optimization objective is correctly calculated
-- [ ] Variable assignments make sense in the problem context
+${PROBLEM}
 
-## Encoding Correctness
+## Model Implementation
 
-- [ ] Using WCNF (not CNF) for MaxSAT optimization problems
-- [ ] Hard constraints have no weight specified
-- [ ] Soft constraints have appropriate positive weights
-- [ ] RC2 solver is used for MaxSAT optimization
-- [ ] Variables are correctly mapped to meaningful names
-- [ ] All problem constraints are properly encoded as clauses
+${MODEL}
 
-## Solution Export
+## Solution Results
 
-- [ ] Using `export_maxsat_solution()` to return results
-- [ ] Solution includes satisfiability status ("satisfiable"/"unsatisfiable")
-- [ ] Solution includes optimization information (cost/objective)
-- [ ] Problem-specific dictionaries are included (e.g., "selected_items")
-- [ ] Variable assignments are correctly extracted from the model
+${SOLUTION}
 
-## Performance Considerations
+## Review Guidelines
 
-- [ ] Number of variables and clauses is reasonable for the problem size
-- [ ] Constraints are simplified where possible
-- [ ] Solver timeout is appropriate for the problem complexity
-- [ ] Consider alternative encodings for large cardinality constraints
+Carefully review the solution and assess its correctness based on the following criteria:
 
-## Common Errors to Check
+1. **Encoding Correctness**
+   - Is the problem correctly formulated as a MaxSAT problem?
+   - Are hard constraints properly encoded (no weights)?
+   - Are soft constraints properly encoded with appropriate weights?
+   - Is the WCNF formula used correctly?
+   - Is the RC2 solver used for optimization?
 
-- [ ] All variables are properly declared and used
-- [ ] No dictionary assignment errors (use `dict[key] = value` pattern)
-- [ ] No misplaced hard/soft constraints
-- [ ] No weight scale inconsistencies (weights should be comparable)
-- [ ] All dependencies between variables are correctly encoded
-- [ ] No variables with ID 0 (must start from 1)
+2. **Solution Correctness**
+   - Are all hard constraints satisfied in the solution?
+   - Is the solution cost (sum of weights of violated soft constraints) correctly calculated?
+   - Is the objective value reasonable for the problem?
+   - Are the variable assignments consistent with the problem requirements?
 
-## Optimization Analysis
+3. **Implementation Quality**
+   - Is the code well-structured and readable?
+   - Are variables named meaningfully?
+   - Is the export_maxsat_solution function used correctly?
+   - Are there any potential issues or bugs in the implementation?
 
-- [ ] The objective function accurately represents the optimization goal
-- [ ] Weights reflect the relative importance of different constraints
-- [ ] Solution optimality can be verified independently
-- [ ] Trade-offs between conflicting objectives are appropriate
-- [ ] Corner cases are handled correctly
+4. **Optimality**
+   - Is the solution optimal (minimizing cost/maximizing objective)?
+   - Could there be a better solution that the solver missed?
+   - Are there any violated soft constraints that could be satisfied without violating hard constraints?
 
-## Code Structure and Readability
+## Final Verdict
 
-- [ ] Variable naming is clear and consistent
-- [ ] Code is well-structured and modular
-- [ ] Comments explain the encoding strategy
-- [ ] Problem formulation is clear and matches requirements
-- [ ] Solution interpretation is provided
+Based on your review, provide a final verdict with one of the following:
 
-For more details on MaxSAT optimization techniques, see the PySAT documentation.
+<verdict>correct</verdict> - If the solution is correct, optimal, and well-implemented
+<verdict>incorrect</verdict> - If there are significant issues with the solution
+<verdict>unknown</verdict> - If you cannot determine correctness based on the information provided
+
+Your review should be detailed, constructive, and focus on the MaxSAT aspects of the solution. Provide specific examples and suggestions for improvement where applicable.
