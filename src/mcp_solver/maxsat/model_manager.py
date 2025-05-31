@@ -486,8 +486,30 @@ class MaxSATModelManager(SolverManager):
                 self.logger.error(f"Error analyzing code: {e!s}")
                 # Continue despite analysis error
 
-            # Modify the code to enhance debugging
+            # Modify the code to enhance debugging and automatically add required imports
             modified_code = self._enhance_code_for_debugging(code_string)
+            
+            # Automatically inject the export_maxsat_solution import if it's missing
+            if "export_maxsat_solution" in modified_code and "from solution import export_maxsat_solution" not in modified_code:
+                # Add the import at the top of the code, after any existing imports
+                import_statement = "\n# Auto-injected import for MaxSAT solution export\nfrom solution import export_maxsat_solution\n\n"
+                
+                # Find a good position to insert the import - after existing imports
+                import_pos = 0
+                lines = modified_code.split("\n")
+                for i, line in enumerate(lines):
+                    if line.startswith("import ") or line.startswith("from "):
+                        import_pos = i + 1
+                
+                # Insert the import after the last import statement
+                if import_pos > 0:
+                    lines.insert(import_pos, import_statement)
+                else:
+                    # If no imports found, add it at the top after any debug headers
+                    lines.insert(0, import_statement)
+                
+                modified_code = "\n".join(lines)
+                self.logger.info("Auto-injected export_maxsat_solution import into the code")
 
             # Set timeout
             timeout_seconds = timeout.total_seconds()
@@ -524,21 +546,31 @@ class MaxSATModelManager(SolverManager):
                 
                 # Include any logical issues we found earlier in the error response
                 if line_issues:
-                    return get_standardized_response(
-                        success=False,
-                        message=f"Error executing code: {error_msg}",
-                        error="Execution error",
-                        error_details={
+                    error_response = {
+                        "success": False,
+                        "message": f"Error executing code: {error_msg}",
+                        "error": "Execution error",
+                        "status": "error",
+                        "error_details": {
                             "execution_error": error_msg,
                             "logical_issues": [f"Line {issue['line']}: {issue['issue']}" for issue in line_issues]
                         }
-                    )
+                    }
                 else:
-                    return get_standardized_response(
-                        success=False,
-                        message=f"Error executing code: {error_msg}",
-                        error="Execution error",
-                    )
+                    error_response = {
+                        "success": False,
+                        "message": f"Error executing code: {error_msg}",
+                        "error": "Execution error",
+                        "status": "error",
+                    }
+                
+                # Check if this is a NameError involving export_maxsat_solution
+                if "NameError" in error_msg and "export_maxsat_solution" in error_msg:
+                    error_response["message"] = "Missing export_maxsat_solution: You need to import this function explicitly. Add 'from solution import export_maxsat_solution' at the top of your code."
+                    error_response["error"] = "Missing export_maxsat_solution function"
+                    error_response["code_fix"] = "Add 'from solution import export_maxsat_solution' to imports"
+                
+                return error_response
 
             # Extract solver output to check for solution data
             output = self.last_result.get("output", "")

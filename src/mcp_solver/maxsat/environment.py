@@ -55,6 +55,7 @@ __all__ = [
     # Environment functions
     "execute_pysat_code",
     "DEFAULT_TIMEOUT_SECONDS",
+    "get_export_maxsat_solution",
     
     # Solution functions
     "export_maxsat_solution",
