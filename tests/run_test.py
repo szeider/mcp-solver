@@ -34,6 +34,7 @@ from tests.test_config import (
     MZN_PROBLEMS_DIR,
     PYSAT_PROBLEMS_DIR,
     Z3_PROBLEMS_DIR,
+    MAXSAT_PROBLEMS_DIR,
 )
 
 # ====================
@@ -245,6 +246,14 @@ SOLVER_CONFIGS = {
         "command_template": 'cd {mcp_client_dir} && uv run test-client --query {query_path} --server "uv run mcp-solver-z3"',
         "model_ext": ".py",
         "results_subdir": "z3",
+        "needs_server_arg": True,
+    },
+    "maxsat": {
+        "solver_mode": "maxsat",
+        "problems_dir": MAXSAT_PROBLEMS_DIR,
+        "command_template": 'cd {mcp_client_dir} && uv run test-client --query {query_path} --server "uv run mcp-solver-maxsat"',
+        "model_ext": ".py",
+        "results_subdir": "maxsat",
         "needs_server_arg": True,
     },
 }

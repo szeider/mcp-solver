@@ -17,6 +17,7 @@ PROBLEMS_DIR = os.path.join(os.path.dirname(__file__), "problems")
 MZN_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "mzn")
 PYSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "pysat")
 Z3_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "z3")
+MAXSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "maxsat")
 RESULTS_DIR = os.path.join(ROOT_DIR, "test_results")
 
 
@@ -43,6 +44,7 @@ def load_prompt_for_test(mode, prompt_type="instructions"):
             "mzn": {"instructions": "instructions_prompt_mzn.md"},
             "pysat": {"instructions": "instructions_prompt_pysat.md"},
             "z3": {"instructions": "instructions_prompt_z3.md"},
+            "maxsat": {"instructions": "instructions_prompt_maxsat.md"},
         }
 
         if mode in old_style_paths and prompt_type in old_style_paths[mode]:
