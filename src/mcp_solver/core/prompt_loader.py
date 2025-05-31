@@ -3,7 +3,7 @@ import logging
 from typing import Literal, Union
 
 # Type definitions for better type checking
-PromptMode = Literal["mzn", "pysat", "z3"]
+PromptMode = Literal["mzn", "pysat", "z3", "maxsat"]
 PromptType = Literal["instructions", "review"]
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") 
     Get the path to a prompt file based on mode and type, without loading its content.
 
     Args:
-        mode: The solver mode ("mzn", "pysat", or "z3")
+        mode: The solver mode ("mzn", "pysat", "z3", or "maxsat")
         prompt_type: The type of prompt ("instructions" or "review"), defaults to "instructions"
 
     Returns:
@@ -24,8 +24,8 @@ def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") 
         ValueError: If invalid mode or prompt type is provided
     """
     # Validate inputs
-    if mode not in ("mzn", "pysat", "z3"):
-        raise ValueError(f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3")
+    if mode not in ("mzn", "pysat", "z3", "maxsat"):
+        raise ValueError(f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3, maxsat")
 
     if prompt_type not in ("instructions", "review"):
         raise ValueError(
@@ -47,7 +47,7 @@ def load_prompt(mode: PromptMode, prompt_type: PromptType) -> str:
     Load a prompt file based on mode and type.
 
     Args:
-        mode: The solver mode ("mzn", "pysat", or "z3")
+        mode: The solver mode ("mzn", "pysat", "z3", or "maxsat")
         prompt_type: The type of prompt ("instructions" or "review")
 
     Returns:
