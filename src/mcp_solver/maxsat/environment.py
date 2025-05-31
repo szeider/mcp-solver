@@ -22,6 +22,14 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 # Import our solution functions instead
 from mcp_solver.maxsat.solution import export_maxsat_solution
 
+# Add a reference that will be available in the environment
+def get_export_maxsat_solution():
+    """
+    Helper function to get a reference to the export_maxsat_solution function.
+    This is needed because the function might not be directly importable in the environment.
+    """
+    return export_maxsat_solution
+
 # Import MaxSAT templates
 from mcp_solver.maxsat.templates import (
     # From basic_templates

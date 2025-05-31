@@ -25,6 +25,7 @@ These tools let you construct your model incrementally and solve it using the RC
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+from solution import export_maxsat_solution  # Always import this for MaxSAT mode
 
 # Simple MaxSAT optimization problem: 
 # Find values for A, B, C that maximize satisfied soft constraints while
@@ -78,6 +79,7 @@ with RC2(wcnf) as solver:
 
 ## ⚠️ Common Pitfalls
 
+- **Missing Import**: Always include `from solution import export_maxsat_solution` at the top of your code
 - **Incomplete Variables**: Always complete variable assignments (e.g., `item_vars = [has_item(i) for i in items]`)
 - **Dictionary Updates**: Use `selected_items[item] = value` (not `selected_items = value`)
 - **Export Solution**: Always use `export_maxsat_solution()` to return results
@@ -133,6 +135,7 @@ The MaxSAT solver finds an assignment that:
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+from solution import export_maxsat_solution  # Required for MaxSAT mode
 
 # Create a MaxSAT formula
 wcnf = WCNF()
@@ -257,6 +260,7 @@ This example shows a practical application of MaxSAT for optimizing feature sele
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+from solution import export_maxsat_solution  # Required for MaxSAT mode
 
 # Problem: Select features to maximize value while respecting dependencies
 wcnf = WCNF()
@@ -324,6 +328,7 @@ This example illustrates using MaxSAT for the weighted maximum cut problem:
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+from solution import export_maxsat_solution  # Required for MaxSAT mode
 
 # Problem: Find a cut that maximizes the total weight of edges crossing the cut
 wcnf = WCNF()
@@ -400,6 +405,7 @@ with RC2(wcnf) as solver:
 # 1. Create WCNF formula and variables
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+from solution import export_maxsat_solution  # Required for MaxSAT mode
 
 wcnf = WCNF()
 var_mapping = {}
