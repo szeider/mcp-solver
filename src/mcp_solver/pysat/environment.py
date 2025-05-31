@@ -306,7 +306,6 @@ def exactly_k(variables, k):
             "EncType": EncType,
             "RC2": RC2,  # MaxSAT solver
             "export_solution": export_solution,
-            "export_maxsat_solution": export_maxsat_solution,
             "collections": collections,
             "itertools": itertools,
             "math": math,

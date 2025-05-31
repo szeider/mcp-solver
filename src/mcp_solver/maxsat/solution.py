@@ -324,6 +324,39 @@ def get_unsatisfied_soft_clauses(wcnf: "WCNF", model: list[int]) -> dict[str, An
     }
 
 
+def get_maxsat_solution_status() -> dict[str, Any]:
+    """
+    Get the current MaxSAT solution status.
+    
+    Returns:
+        Dictionary with information about the last MaxSAT solution
+        or None if no solution is available
+    """
+    global _LAST_SOLUTION, _RC2_SOLUTION_SET
+    
+    if _LAST_SOLUTION is None:
+        return {
+            "available": False,
+            "message": "No MaxSAT solution available"
+        }
+    
+    # Return basic information about the solution
+    result = {
+        "available": True,
+        "satisfiable": _LAST_SOLUTION.get("satisfiable", False),
+        "status": _LAST_SOLUTION.get("status", "unknown"),
+        "optimal": _RC2_SOLUTION_SET,
+    }
+    
+    # Include cost and objective if available
+    if "cost" in _LAST_SOLUTION:
+        result["cost"] = _LAST_SOLUTION["cost"]
+    if "objective" in _LAST_SOLUTION:
+        result["objective"] = _LAST_SOLUTION["objective"]
+        
+    return result
+
+
 def _extract_values_from_dictionaries(solution_data: dict[str, Any]) -> dict[str, Any]:
     """
     Extract values from custom dictionaries into a flat values dictionary.

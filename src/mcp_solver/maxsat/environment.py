@@ -14,11 +14,7 @@ import traceback
 from typing import Any
 
 # Import specific PySAT environment utilities but not solution functions
-from mcp_solver.pysat.environment import (
-    execute_pysat_code, 
-    PySATEnvironment, 
-    handle_execution_errors
-)
+from mcp_solver.pysat.environment import execute_pysat_code
 
 # Define the default timeout
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -49,9 +45,7 @@ from mcp_solver.maxsat.templates import (
 # Hide pysat's export_solution to prevent confusion
 __all__ = [
     # Environment functions
-    "execute_pysat_code", 
-    "PySATEnvironment", 
-    "handle_execution_errors",
+    "execute_pysat_code",
     "DEFAULT_TIMEOUT_SECONDS",
     
     # Solution functions
