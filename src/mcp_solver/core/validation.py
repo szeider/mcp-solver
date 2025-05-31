@@ -336,10 +336,19 @@ def get_standardized_response(
     Returns:
         A dictionary with standardized response fields
     """
+    # Ensure consistency between success flag and error presence
+    if error is not None and success:
+        # This is inconsistent - if there's an error, success should be False
+        logger.warning(f"Inconsistent response: success={success} with error='{error}'")
+        success = False  # Override success to be False if there's an error
+    
     response = {"message": message, "success": success}
 
+    # Add error if provided
     if error:
         response["error"] = error
+        # Ensure status is also set for errors
+        response["status"] = "error" 
 
     # Add any additional keyword arguments to the response
     response.update(kwargs)
@@ -478,16 +487,19 @@ class DictMisuseVisitor(ast.NodeVisitor):
                 # Check if we're assigning a non-dictionary value
                 if not self._is_dict_value(node.value):
                     line_num = getattr(node, "lineno", "?")
-
-                    # Create user-friendly error message
-                    self.dict_misuses.append(
-                        {
-                            "line": line_num,
-                            "var_name": var_name,
-                            "message": f"Error at line {line_num}: The variable '{var_name}' is being overwritten with a non-dictionary value.",
-                            "suggestion": f"Use '{var_name}[key] = value' instead of '{var_name} = value' to add items to the dictionary.",
-                        }
-                    )
+                    
+                    # Avoid false positives for variable names like "solution" or "model"
+                    # which are commonly used for solver results and aren't dictionary misuse
+                    if var_name.lower() not in ["solution", "model", "result"]:
+                        # Create user-friendly error message
+                        self.dict_misuses.append(
+                            {
+                                "line": line_num,
+                                "var_name": var_name,
+                                "message": f"Error at line {line_num}: The variable '{var_name}' is being overwritten with a non-dictionary value.",
+                                "suggestion": f"Use '{var_name}[key] = value' instead of '{var_name} = value' to add items to the dictionary.",
+                            }
+                        )
 
         self.generic_visit(node)
 

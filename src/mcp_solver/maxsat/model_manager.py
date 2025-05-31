@@ -271,8 +271,8 @@ class MaxSATModelManager(SolverManager):
 
                 self.logger.warning(f"Dictionary misuse detected: {error_messages}")
 
-                return get_standardized_response(
-                    success=False,
+                error_response = get_standardized_response(
+                    success=False,  # This needs to be false to indicate an error
                     message="Your code contains a common dictionary usage error that will cause unexpected behavior.",
                     error="Dictionary misuse detected",
                     error_details={
@@ -280,6 +280,8 @@ class MaxSATModelManager(SolverManager):
                         "suggestion": "Check how you're updating dictionary variables. Use var_dict[key] = value instead of var_dict = value.",
                     },
                 )
+                # Return the error response with consistent error status flag
+                return error_response
 
             # Sort code items by index
             sorted_items = sorted(self.code_items, key=lambda x: x[0])
@@ -381,6 +383,32 @@ class MaxSATModelManager(SolverManager):
                         error="Missing export_maxsat_solution call",
                         code_analysis="Missing export_maxsat_solution() call",
                     )
+                    
+                # Check for common logical errors in the code
+                line_issues = []
+                
+                # Check for incorrect item value summation (a common error)
+                for node in ast.walk(ast_tree):
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sum':
+                        # Check if we're summing a dictionary directly instead of values
+                        if len(node.args) == 1 and isinstance(node.args[0], ast.Name):
+                            dict_name = node.args[0].id
+                            # If it looks like a dictionary with values
+                            if dict_name.endswith('_values') or dict_name.endswith('_weights'):
+                                line_num = getattr(node, 'lineno', '?')
+                                line_issues.append({
+                                    'line': line_num,
+                                    'issue': f"Incorrect summation: sum({dict_name}) will sum the dictionary keys, not values. Use sum({dict_name}.values()) instead."
+                                })
+                
+                # Check for incomplete assignments (like missing value after equals sign)
+                for i, line in enumerate(code_string.split('\n')):
+                    # Look for lines that end with an equals sign or have incomplete assignments
+                    if re.search(r'=\s*$', line) or re.search(r'=\s*#', line):
+                        line_issues.append({
+                            'line': i + 1,
+                            'issue': f"Incomplete assignment: Line ends with '=' but has no value assigned."
+                        })
 
             except SyntaxError as e:
                 line_num = e.lineno if hasattr(e, "lineno") else "?"
@@ -413,6 +441,24 @@ class MaxSATModelManager(SolverManager):
             # Set timeout
             timeout_seconds = timeout.total_seconds()
 
+            # If we found logical issues in static analysis, warn the user before executing
+            if line_issues:
+                # Format the issues into a warning message
+                warnings = [f"Line {issue['line']}: {issue['issue']}" for issue in line_issues]
+                warning_msg = "Potential logical issues detected in your code:\n" + "\n".join(warnings)
+                
+                self.logger.warning(f"Logical issues detected: {warnings}")
+                
+                # Include warnings but still proceed with execution
+                response = get_standardized_response(
+                    success=True,  # Not a fatal error
+                    message="Your code contains potential logical issues that may affect the result.",
+                    warnings=warnings,
+                    code_analysis="Potential logical issues detected"
+                )
+                
+                # Log the warning but proceed with execution
+
             # Execute code with timeout
             start_time = time.time()
             self.last_result = execute_pysat_code(
@@ -424,11 +470,24 @@ class MaxSATModelManager(SolverManager):
             if self.last_result.get("error"):
                 error_msg = self.last_result["error"]
                 self.logger.error(f"Error executing code: {error_msg}")
-                return get_standardized_response(
-                    success=False,
-                    message=f"Error executing code: {error_msg}",
-                    error="Execution error",
-                )
+                
+                # Include any logical issues we found earlier in the error response
+                if line_issues:
+                    return get_standardized_response(
+                        success=False,
+                        message=f"Error executing code: {error_msg}",
+                        error="Execution error",
+                        error_details={
+                            "execution_error": error_msg,
+                            "logical_issues": [f"Line {issue['line']}: {issue['issue']}" for issue in line_issues]
+                        }
+                    )
+                else:
+                    return get_standardized_response(
+                        success=False,
+                        message=f"Error executing code: {error_msg}",
+                        error="Execution error",
+                    )
 
             # Extract solver output to check for solution data
             output = self.last_result.get("output", "")
@@ -897,6 +956,21 @@ class MaxSATModelManager(SolverManager):
         )
 
         modified_code = debug_header + code_string
+        
+        # Add line number comments to help with error reporting
+        lines = modified_code.split("\n")
+        
+        # Add line number comments at the start of each line
+        lines_with_numbers = []
+        for i, line in enumerate(lines):
+            # Add comment with line number, but only to non-empty lines
+            if line.strip() and not line.strip().startswith("#"):
+                # Preserve indentation and add comment 
+                lines_with_numbers.append(f"{line}  # __LINE_NUMBER_{i+1}__")
+            else:
+                lines_with_numbers.append(line)
+        
+        modified_code = "\n".join(lines_with_numbers)
 
         # Modify the code to add debug info around solver.compute() calls
         modified_lines = []
