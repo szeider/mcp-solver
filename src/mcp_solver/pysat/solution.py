@@ -5,11 +5,11 @@ This module provides functions for extracting solution data from PySAT solvers
 and converting it to a standardized format.
 """
 
-import sys
-import os
-from typing import Dict, Any, Optional, Union, List, TypeVar, cast
 import logging
-import traceback
+import os
+import sys
+from typing import Any
+
 
 # IMPORTANT: Properly import the PySAT library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -22,6 +22,7 @@ if parent_dir in sys.path:
 
 # Add site-packages to the front of the path
 import site
+
 
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
@@ -38,6 +39,7 @@ except ImportError:
 
 # Import our error handling utilities
 from .error_handling import PySATError, validate_variables
+
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -70,10 +72,10 @@ class SolutionError(Exception):
 
 
 def export_solution(
-    data: Union[Dict[str, Any], Solver, None] = None,
-    variables: Optional[Dict[str, int]] = None,
-    objective: Optional[float] = None,
-) -> Dict[str, Any]:
+    data: dict[str, Any] | Solver | None = None,
+    variables: dict[str, int] | None = None,
+    objective: float | None = None,
+) -> dict[str, Any]:
     """
     Extract and format solutions from a PySAT solver or solution data.
 
@@ -121,25 +123,25 @@ def export_solution(
 
         # Store and return the error solution
         _LAST_SOLUTION = error_solution
-        logger.error(f"Error in export_solution: {str(e)}", exc_info=True)
+        logger.error(f"Error in export_solution: {e!s}", exc_info=True)
         print(f"DEBUG - _LAST_SOLUTION set to error: {error_solution}")
 
         return error_solution
 
 
 def export_maxsat_solution(
-    data: Union[Dict[str, Any], Any, None] = None,
-    variables: Optional[Dict[str, int]] = None,
-) -> Dict[str, Any]:
+    data: dict[str, Any] | Any | None = None,
+    variables: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """
     Export solution data from a MaxSAT optimization problem.
-    
+
     This is a simplified pass-through implementation for compatibility.
-    
+
     Args:
         data: Either an RC2 solver instance or a dictionary with solution data
         variables: Optional mapping from variable names to their numeric IDs
-    
+
     Returns:
         Dictionary with the solution data from the input
     """
@@ -148,36 +150,32 @@ def export_maxsat_solution(
         # Add to the last solution
         global _LAST_SOLUTION
         _LAST_SOLUTION = data
-        
+
         # Return the dictionary
         return data
-    
+
     # If it's a solver instance or other data, create a minimal response
-    result = {
-        "satisfiable": True,
-        "status": "sat",
-        "values": {}
-    }
-    
+    result = {"satisfiable": True, "status": "sat", "values": {}}
+
     # Add some model data if available
-    if hasattr(data, 'model') and data.model is not None:
+    if hasattr(data, "model") and data.model is not None:
         result["model"] = data.model
-        
+
     # Add cost data if available
-    if hasattr(data, 'cost'):
+    if hasattr(data, "cost"):
         result["cost"] = data.cost
-        
+
     # Set the last solution
     _LAST_SOLUTION = result
-    
+
     return result
 
 
 def _process_input_data(
-    data: Union[Dict[str, Any], Solver, None],
-    variables: Optional[Dict[str, int]] = None,
-    objective: Optional[float] = None,
-) -> Dict[str, Any]:
+    data: dict[str, Any] | Solver | None,
+    variables: dict[str, int] | None = None,
+    objective: float | None = None,
+) -> dict[str, Any]:
     """
     Process input data from various sources into a standardized solution dictionary.
 
@@ -193,18 +191,14 @@ def _process_input_data(
         SolutionError: If the input data cannot be processed
     """
     # Initialize solution data
-    solution_data: Dict[str, Any] = {}
+    solution_data: dict[str, Any] = {}
 
     # Case 1: Direct dictionary data
     if isinstance(data, dict):
         solution_data = data.copy()
 
     # Case 2: PySAT Solver object
-    elif (
-        data is not None
-        and hasattr(data, "get_model")
-        and callable(getattr(data, "get_model"))
-    ):
+    elif data is not None and hasattr(data, "get_model") and callable(data.get_model):
         # Extract model from solver (solver.solve() should have already been called)
         model = data.get_model()
 
@@ -256,7 +250,7 @@ def _process_input_data(
     return solution_data
 
 
-def _extract_values_from_dictionaries(solution_data: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_values_from_dictionaries(solution_data: dict[str, Any]) -> dict[str, Any]:
     """
     Extract values from custom dictionaries into a flat values dictionary.
 
@@ -273,10 +267,10 @@ def _extract_values_from_dictionaries(solution_data: Dict[str, Any]) -> Dict[str
         return solution_data
 
     # Create a new values dictionary
-    values: Dict[str, Any] = {}
+    values: dict[str, Any] = {}
 
     # First pass: collect all keys to detect potential collisions
-    key_counts: Dict[str, int] = {}
+    key_counts: dict[str, int] = {}
 
     for key, value in solution_data.items():
         if key not in RESERVED_KEYS and isinstance(value, dict):
@@ -302,7 +296,7 @@ def _extract_values_from_dictionaries(solution_data: Dict[str, Any]) -> Dict[str
     return solution_data
 
 
-def _create_error_solution(error: Exception) -> Dict[str, Any]:
+def _create_error_solution(error: Exception) -> dict[str, Any]:
     """
     Create a standardized error solution dictionary from an exception.
 

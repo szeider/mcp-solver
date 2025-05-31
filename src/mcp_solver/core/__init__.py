@@ -9,6 +9,7 @@ __version__ = "2.3.0"
 from .base_manager import SolverManager
 
 # Import server functionality
-from .server import serve, main
+from .server import main, serve
 
-__all__ = ["serve", "main", "SolverManager", "__version__"]
+
+__all__ = ["SolverManager", "__version__", "main", "serve"]

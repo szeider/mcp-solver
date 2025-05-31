@@ -5,24 +5,23 @@ This module provides a secure environment for executing PySAT code,
 with timeout handling and output capturing.
 """
 
-import sys
-import os
-import io
-import signal
-import traceback
-import time
-import contextlib
 import collections
+import io
 import itertools
-import math
 import json
-from typing import Dict, Any, Optional, List, Callable
-from contextlib import contextmanager, redirect_stdout, redirect_stderr
-import re
-import random
 import logging
-import multiprocessing
+import math
+import os
+import random
+import re
+import signal
+import sys
+import time
+import traceback
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from multiprocessing import Process, Queue
+from typing import Any
+
 
 # Import path management to ensure we get the correct PySAT
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -35,6 +34,7 @@ if parent_dir in sys.path:
 # Add site-packages to the front of the path
 import site
 
+
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
     if p not in sys.path:
@@ -42,30 +42,29 @@ for p in reversed(site_packages):
 
 # Import PySAT but protect against failure
 try:
-    from pysat.formula import CNF, WCNF
-    from pysat.solvers import Solver, Glucose3, Glucose4, Lingeling, Cadical153
+    import pysat
     from pysat.card import CardEnc, EncType
     from pysat.examples.rc2 import RC2
-    import pysat
+    from pysat.formula import CNF, WCNF
+    from pysat.solvers import Cadical153, Glucose3, Glucose4, Lingeling, Solver
 
     # Import our local solution module
     from . import solution
     from .solution import export_solution
-except ImportError as e:
+except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
 # Local imports - must be after path adjustment
-from .solution import export_solution, export_maxsat_solution, _LAST_SOLUTION
-from .templates.cardinality_templates import at_most_k, at_least_k, exactly_k
 from .constraints import (
     at_most_one,
     exactly_one,
+    if_then_else,
     implies,
     mutually_exclusive,
-    if_then_else,
 )
-from .templates.mapping import VariableMap
+from .solution import export_maxsat_solution, export_solution
+from .templates.cardinality_templates import at_least_k, at_most_k, exactly_k
 
 
 # Exception for timeouts
@@ -254,9 +253,7 @@ def exactly_k(variables, k):
     at_least = at_least_k(variables, k)
     return at_most + at_least
 
-""" + "\n".join(
-            regular_lines
-        )
+""" + "\n".join(regular_lines)
 
         # Setup restricted globals for execution (same as in original function)
         restricted_globals = {
@@ -336,7 +333,7 @@ def exactly_k(variables, k):
         restricted_globals["map_iterator"] = type(map(lambda x: x, []))
         restricted_globals["filter_iterator"] = type(filter(lambda x: x, []))
         restricted_globals["enumerate_iterator"] = type(enumerate([]))
-        restricted_globals["zip_iterator"] = type(zip())
+        restricted_globals["zip_iterator"] = type(zip(strict=False))
         restricted_globals["range_iterator"] = type(range(0))
 
         # Add logging capability so we can trace execution
@@ -368,7 +365,7 @@ def exactly_k(variables, k):
 
         except Exception as e:
             # Handle any exception
-            error_msg = f"Error: {type(e).__name__}: {str(e)}"
+            error_msg = f"Error: {type(e).__name__}: {e!s}"
             result["error"] = error_msg
             result["output"] = (
                 f"{error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
@@ -381,14 +378,14 @@ def exactly_k(variables, k):
         result_queue.put(
             {
                 "success": False,
-                "error": f"Process error: {str(e)}",
+                "error": f"Process error: {e!s}",
                 "output": traceback.format_exc(),
                 "solution": None,
             }
         )
 
 
-def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
+def execute_pysat_code(code: str, timeout: float = 10.0) -> dict[str, Any]:
     """
     Executes PySAT Python code in a secure environment with robust timeout handling.
 
@@ -478,12 +475,12 @@ def execute_pysat_code(code: str, timeout: float = 10.0) -> Dict[str, Any]:
         return result
 
     except Exception as e:
-        logger.error(f"Error in execute_pysat_code: {str(e)}", exc_info=True)
+        logger.error(f"Error in execute_pysat_code: {e!s}", exc_info=True)
         # Return a success=True result even for errors to maintain connection
         return {
             "success": True,  # Mark as successful to prevent disconnection
-            "output": f"Error executing PySAT code: {str(e)}",
-            "error": f"Execution error: {str(e)}",
+            "output": f"Error executing PySAT code: {e!s}",
+            "error": f"Execution error: {e!s}",
             "error_details": {"type": type(e).__name__, "message": str(e)},
             "solution": None,
             "status": "error",  # Indicate that there was an error even though success=True

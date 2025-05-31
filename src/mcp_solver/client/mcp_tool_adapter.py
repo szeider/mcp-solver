@@ -6,7 +6,7 @@ The code is based on langchain_mcp_adapters.tools but has been modified to
 ensure compatibility with mcp>=1.5.
 """
 
-from typing import Any, List, Tuple, Union, Optional
+from typing import Any, Union
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from mcp import ClientSession
@@ -15,17 +15,16 @@ from mcp.types import (
     EmbeddedResource,
     ImageContent,
     TextContent,
-)
-from mcp.types import (
     Tool as MCPTool,
 )
+
 
 NonTextContent = Union[ImageContent, EmbeddedResource]
 
 
 def _convert_call_tool_result(
     call_tool_result: CallToolResult,
-) -> Tuple[Union[str, List[str]], Optional[List[NonTextContent]]]:
+) -> tuple[str | list[str], list[NonTextContent] | None]:
     """
     Convert a CallToolResult to a format suitable for LangChain tools.
 
@@ -35,7 +34,7 @@ def _convert_call_tool_result(
     Returns:
         A tuple of (text_content, non_text_contents)
     """
-    text_contents: List[TextContent] = []
+    text_contents: list[TextContent] = []
     non_text_contents = []
     for content in call_tool_result.content:
         if isinstance(content, TextContent):
@@ -43,7 +42,7 @@ def _convert_call_tool_result(
         else:
             non_text_contents.append(content)
 
-    tool_content: Union[str, List[str]] = [content.text for content in text_contents]
+    tool_content: str | list[str] = [content.text for content in text_contents]
     if len(text_contents) == 1:
         tool_content = tool_content[0]
 
@@ -72,7 +71,7 @@ def convert_mcp_tool_to_langchain_tool(
 
     async def call_tool(
         **arguments: Any,
-    ) -> Tuple[Union[str, List[str]], Optional[List[NonTextContent]]]:
+    ) -> tuple[str | list[str], list[NonTextContent] | None]:
         call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
 
@@ -85,7 +84,7 @@ def convert_mcp_tool_to_langchain_tool(
     )
 
 
-async def load_mcp_tools(session: ClientSession) -> List[BaseTool]:
+async def load_mcp_tools(session: ClientSession) -> list[BaseTool]:
     """
     Load all available MCP tools and convert them to LangChain tools.
 

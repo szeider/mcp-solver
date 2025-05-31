@@ -5,9 +5,10 @@ This module provides a class for tracking token usage during a client run,
 separately for the main agent and reviewer agent.
 """
 
+from typing import Any
+
 from rich.console import Console
 from rich.table import Table
-from typing import Union, List, Any
 
 
 class TokenCounter:
@@ -36,7 +37,7 @@ class TokenCounter:
         """Set the characters per token ratio for estimation."""
         self.chars_per_token = ratio
 
-    def estimate_tokens(self, content: Union[str, List[Any]]) -> int:
+    def estimate_tokens(self, content: str | list[Any]) -> int:
         """Estimate the number of tokens based on characters.
 
         Args:

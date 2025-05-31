@@ -5,13 +5,14 @@ This module provides functions for executing Z3 code in a secure environment
 with timeout handling and restricted access to system resources.
 """
 
-import sys
 import os
-import time
 import signal
+import sys
+import time
 import traceback
 from contextlib import contextmanager
-from typing import Dict, Any, Optional, List, Union, Callable
+from typing import Any
+
 
 # IMPORTANT: Properly import the Z3 library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -24,6 +25,7 @@ if parent_dir in sys.path:
 
 # Add site-packages to the front of the path
 import site
+
 
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
@@ -92,7 +94,7 @@ def time_limit(seconds: float):
 
 def execute_z3_code(
     code_string: str, timeout: float = 4.0, auto_extract: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute Z3 Python code in a secure environment with timeout handling.
 
@@ -108,9 +110,7 @@ def execute_z3_code(
     from .solution import export_solution
 
     # Import templates modules
-    from .templates import z3_templates
-    from .templates import function_templates
-    from .templates import subset_templates
+    from .templates import function_templates, subset_templates, z3_templates
 
     # Reset last solution
     global _LAST_SOLUTION
@@ -301,7 +301,7 @@ z3_solver = None
         result["error"] = str(e)
     except Exception as e:
         result["status"] = "error"
-        result["error"] = f"{type(e).__name__}: {str(e)}"
+        result["error"] = f"{type(e).__name__}: {e!s}"
         result["traceback"] = traceback.format_exc()
     finally:
         # Restore stdout and record execution time

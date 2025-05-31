@@ -5,9 +5,10 @@ This module provides functions for extracting solution data from Z3 solvers
 and converting it to a standardized format.
 """
 
-import sys
 import os
-from typing import Dict, Any, Optional, Union, List
+import sys
+from typing import Any
+
 
 # IMPORTANT: Properly import the Z3 library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -20,6 +21,7 @@ if parent_dir in sys.path:
 
 # Add site-packages to the front of the path
 import site
+
 
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
@@ -37,7 +39,7 @@ except ImportError:
 _LAST_SOLUTION = None
 
 
-def _extract_variable_values(model, variables: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_variable_values(model, variables: dict[str, Any]) -> dict[str, Any]:
     """
     Helper function to extract variable values from a Z3 model.
 
@@ -73,7 +75,7 @@ def _extract_variable_values(model, variables: Dict[str, Any]) -> Dict[str, Any]
                     result[name] = str(val)
         except Exception as e:
             print(f"Error extracting value for {name}: {e}")
-            result[name] = f"Error: {str(e)}"
+            result[name] = f"Error: {e!s}"
 
     return result
 
@@ -102,7 +104,7 @@ def _extract_objective_value(model, objective):
             return str(obj_val)
     except Exception as e:
         print(f"Error extracting objective value: {e}")
-        return f"Error: {str(e)}"
+        return f"Error: {e!s}"
 
 
 def export_solution(
@@ -113,7 +115,7 @@ def export_solution(
     solution_dict=None,
     is_property_verification=False,
     property_verified=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Extract and format solutions from a Z3 solver.
 

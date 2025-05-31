@@ -2,9 +2,8 @@
 Main entry point for running the MCP Solver package.
 """
 
-import sys
 import logging
-import asyncio
+import sys
 
 
 def main():

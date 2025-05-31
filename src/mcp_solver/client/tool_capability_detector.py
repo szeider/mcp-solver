@@ -60,13 +60,14 @@ Based on our testing, these local models work well with MCP-Solver:
 - mistralai.ministral-8b-instruct-2410: 8B parameter model with good JSON capabilities
 """
 
-import re
 import json
-from typing import Dict, Any, Tuple, Optional, Union
+import re
+from typing import Any
 
 
 class ToolCallCapability:
     """Enum of tool calling capabilities a model might support."""
+
     NONE = "none"  # No tool calling support
     JSON_ONLY = "json_only"  # Model can output JSON but not invoke tools directly
     NATIVE = "native"  # Full native tool calling support
@@ -85,25 +86,25 @@ class ToolCapabilityDetector:
     calling support. This is due to differences in how LangChain wrappers implement
     the tool calling API for different model providers.
     """
-    
+
     def __init__(self):
-        self.model_capabilities: Dict[str, str] = {}  # model_id -> capability type
-        
+        self.model_capabilities: dict[str, str] = {}  # model_id -> capability type
+
     def detect_capability(self, model, model_code: str) -> str:
         """
         Detect what kind of tool calling capability a model has.
-        
+
         Args:
             model: LLM model instance
             model_code: Unique identifier for the model
-            
+
         Returns:
             str: The detected capability level (from ToolCallCapability)
         """
         # Check if we've already detected this model's capabilities
         if model_code in self.model_capabilities:
             return self.model_capabilities[model_code]
-            
+
         # First check if model can output JSON
         has_json = self._test_json_output(model)
         if not has_json:
@@ -116,10 +117,10 @@ class ToolCapabilityDetector:
             else:
                 # JSON output but no direct tool calling
                 capability = ToolCallCapability.JSON_ONLY
-                
+
         self.model_capabilities[model_code] = capability
         return capability
-        
+
     def _test_json_output(self, model) -> bool:
         """Test if the model can output JSON when instructed to."""
         try:
@@ -129,23 +130,25 @@ class ToolCapabilityDetector:
             {"answer": 42, "explanation": "This is the answer"}
             
             ONLY respond with valid JSON. Do not include any other text before or after the JSON."""
-            
+
             # Simple prompt
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "What is 2 plus 2?"}
+                {"role": "user", "content": "What is 2 plus 2?"},
             ]
-            
+
             # Invoke the model
             response = model.invoke(messages)
-            
+
             # Get the response content
-            content = response.content if hasattr(response, "content") else str(response)
-            
+            content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
             # Look for JSON patterns
-            json_pattern = r'\{.*\}'
+            json_pattern = r"\{.*\}"
             matches = re.findall(json_pattern, content, re.DOTALL)
-            
+
             if matches:
                 for match in matches:
                     try:
@@ -159,28 +162,33 @@ class ToolCapabilityDetector:
                             return True
                         except:
                             pass
-            
+
             return False
-            
-        except Exception as e:
-            # If we get an error (like "unordered_map::at: key not found"), 
+
+        except Exception:
+            # If we get an error (like "unordered_map::at: key not found"),
             # try a simpler test without system message
             try:
                 # User message asking for JSON
                 messages = [
-                    {"role": "user", "content": "Please respond with a simple JSON object like this: {\"answer\": 4}. Just return the JSON."}
+                    {
+                        "role": "user",
+                        "content": 'Please respond with a simple JSON object like this: {"answer": 4}. Just return the JSON.',
+                    }
                 ]
-                
+
                 # Invoke the model
                 response = model.invoke(messages)
-                
+
                 # Get the response content
-                content = response.content if hasattr(response, "content") else str(response)
-                
+                content = (
+                    response.content if hasattr(response, "content") else str(response)
+                )
+
                 # Look for JSON patterns
-                json_pattern = r'\{.*\}'
+                json_pattern = r"\{.*\}"
                 matches = re.findall(json_pattern, content, re.DOTALL)
-                
+
                 if matches:
                     for match in matches:
                         try:
@@ -194,32 +202,32 @@ class ToolCapabilityDetector:
                                 return True
                             except:
                                 pass
-                
+
                 return False
-                
-            except Exception as inner_e:
+
+            except Exception:
                 # Both approaches failed
                 return False
-            
+
     def _test_direct_tool_calling(self, model) -> bool:
         """Test if the model can directly call tools."""
         try:
             # Create a flag to track if the tool was called
             tool_called = False
-            
+
             # Define a simple tool
             def calculator(x: float, y: float, operation: str) -> float:
                 """Calculate the result of an operation on two numbers."""
                 nonlocal tool_called
                 tool_called = True
-                
+
                 if operation == "add":
                     return x + y
                 elif operation == "multiply":
                     return x * y
                 else:
                     return 0
-            
+
             # Create a tool definition
             calculator_tool = {
                 "name": "calculator",
@@ -229,66 +237,80 @@ class ToolCapabilityDetector:
                     "properties": {
                         "x": {"type": "number", "description": "First number"},
                         "y": {"type": "number", "description": "Second number"},
-                        "operation": {"type": "string", "description": "Operation to perform (add, multiply)"}
+                        "operation": {
+                            "type": "string",
+                            "description": "Operation to perform (add, multiply)",
+                        },
                     },
-                    "required": ["x", "y", "operation"]
-                }
+                    "required": ["x", "y", "operation"],
+                },
             }
-            
+
             # Check if model has the bind_tools method
             if not hasattr(model, "bind_tools"):
                 return False
-                
+
             # Try to bind the tool
             model_with_tools = model.bind_tools([calculator_tool])
-            
+
             # Create test messages
             messages = [
-                {"role": "system", "content": "You are a helpful assistant that can use tools. Use the calculator tool when asked to perform calculations."},
-                {"role": "user", "content": "What is 2 plus 3? Please use the calculator tool."}
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that can use tools. Use the calculator tool when asked to perform calculations.",
+                },
+                {
+                    "role": "user",
+                    "content": "What is 2 plus 3? Please use the calculator tool.",
+                },
             ]
-            
+
             # Call the model
             model_with_tools.invoke(messages)
-            
+
             # Return whether the tool was called
             return tool_called
-            
-        except Exception as e:
+
+        except Exception:
             # Failed to invoke tool
             return False
-            
-    def extract_tool_call(self, response_text: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+
+    def extract_tool_call(
+        self, response_text: str
+    ) -> tuple[bool, dict[str, Any] | None]:
         """
         Extract a tool call from the model's response text.
-        
+
         Args:
             response_text: The model's response text
-            
+
         Returns:
             Tuple[bool, Optional[Dict]]: Whether a tool call was found and the tool call info
         """
         # Look for JSON patterns
-        json_pattern = r'\{[\s\S]*\}'
+        json_pattern = r"\{[\s\S]*\}"
         matches = re.findall(json_pattern, response_text, re.DOTALL)
-        
+
         for match in matches:
             try:
                 parsed = json.loads(match)
-                
+
                 # Check different possible schema patterns for function/tool calls
                 if "function_call" in parsed:
                     return True, parsed["function_call"]
-                    
+
                 elif "tool_calls" in parsed:
                     # OpenAI format - get the first tool call
-                    if isinstance(parsed["tool_calls"], list) and len(parsed["tool_calls"]) > 0:
+                    if (
+                        isinstance(parsed["tool_calls"], list)
+                        and len(parsed["tool_calls"]) > 0
+                    ):
                         return True, parsed["tool_calls"][0]
-                        
+
                 elif "name" in parsed and "arguments" in parsed:
                     # Direct tool call format
                     return True, parsed
-                    
+
             except json.JSONDecodeError:
                 # Try cleaning up the JSON and try again
                 cleaned = match.replace("\n", "").replace("\\", "").strip()
@@ -298,23 +320,26 @@ class ToolCapabilityDetector:
                     if "function_call" in parsed:
                         return True, parsed["function_call"]
                     elif "tool_calls" in parsed:
-                        if isinstance(parsed["tool_calls"], list) and len(parsed["tool_calls"]) > 0:
+                        if (
+                            isinstance(parsed["tool_calls"], list)
+                            and len(parsed["tool_calls"]) > 0
+                        ):
                             return True, parsed["tool_calls"][0]
                     elif "name" in parsed and "arguments" in parsed:
                         return True, parsed
                 except:
                     pass
-                    
+
         # No tool call found
         return False, None
-        
+
     def get_enhanced_prompt(self, capability: str) -> str:
         """
         Get an enhanced system prompt based on the model's capability.
-        
+
         Args:
             capability: The model's capability type
-            
+
         Returns:
             str: A system prompt tailored to the model's capability
         """
@@ -322,7 +347,7 @@ class ToolCapabilityDetector:
             # For models with native tool calling support
             return """You are a helpful assistant that can use tools.
             When you need to use a tool, use the provided tool interface."""
-            
+
         else:  # JSON_ONLY or NONE
             # For models with limited tool calling abilities
             return """You are a helpful assistant that can use tools.

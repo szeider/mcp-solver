@@ -7,9 +7,9 @@ and structural inconsistency by encouraging a function-based approach where all 
 components are encapsulated within a single function.
 """
 
-import sys
 import os
-from typing import Dict, Any, Tuple, List, Union
+import sys
+
 
 # IMPORTANT: Properly import the Z3 library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -26,6 +26,7 @@ if parent_parent_dir in sys.path:
 # Add site-packages to the front of the path
 import site
 
+
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
     if p not in sys.path:
@@ -34,33 +35,33 @@ for p in reversed(site_packages):
 # Now try to import Z3
 try:
     from z3 import (
-        Solver,
-        Optimize,
-        Int,
-        Real,
-        Bool,
-        Array,
-        BitVec,
-        IntSort,
-        RealSort,
-        BoolSort,
-        BitVecSort,
         And,
-        Or,
-        Not,
-        Implies,
-        If,
-        Distinct,
-        Sum,
-        ForAll,
-        Exists,
-        Ints,
-        sat,
-        unsat,
-        unknown,
-        BoolRef,
+        Array,
         ArrayRef,
+        BitVec,
+        BitVecSort,
+        Bool,
+        BoolRef,
+        BoolSort,
+        Distinct,
+        Exists,
         ExprRef,
+        ForAll,
+        If,
+        Implies,
+        Int,
+        Ints,
+        IntSort,
+        Not,
+        Optimize,
+        Or,
+        Real,
+        RealSort,
+        Solver,
+        Sum,
+        sat,
+        unknown,
+        unsat,
     )
 except ImportError:
     print("Z3 solver not found. Install with: pip install z3-solver>=4.12.1")
@@ -236,7 +237,7 @@ def quantifier_template():
 
     # Import Z3 template helpers
     try:
-        from z3_templates import array_is_sorted, all_distinct
+        from z3_templates import all_distinct, array_is_sorted
     except ImportError:
         # Fallback if templates not available
         pass
@@ -265,10 +266,10 @@ def quantifier_template():
         i = Int("i")
         j = Int("j")
         unique_values = ForAll(
-            [i, j], Implies(And(0 <= i, i < j, j < n), arr[i] != arr[j])
+            [i, j], Implies(And(i >= 0, i < j, j < n), arr[i] != arr[j])
         )
         sorted_values = ForAll(
-            [i, j], Implies(And(0 <= i, i < j, j < n), arr[i] <= arr[j])
+            [i, j], Implies(And(i >= 0, i < j, j < n), arr[i] <= arr[j])
         )
         s.add(unique_values)
         s.add(sorted_values)
@@ -293,7 +294,7 @@ def demo_template():
 
     # [SECTION: IMPORTS]
     # Import everything you need at the top of your function
-    from z3 import Solver, Int, Real, Bool, And, Or, Not
+    from z3 import Bool, Int, Solver
 
     # [SECTION: PROBLEM PARAMETERS]
     n_items = 5

@@ -4,10 +4,12 @@ Subset-related template functions for Z3.
 This module provides helper functions for finding optimal subsets with specific properties.
 """
 
-import sys
 import os
-from typing import List, Callable, TypeVar, Optional, Any
+import sys
+from collections.abc import Callable
 from itertools import combinations
+from typing import TypeVar
+
 
 # IMPORTANT: Properly import the Z3 library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
@@ -24,6 +26,7 @@ if parent_parent_dir in sys.path:
 # Add site-packages to the front of the path
 import site
 
+
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
     if p not in sys.path:
@@ -31,7 +34,7 @@ for p in reversed(site_packages):
 
 # Now try to import Z3
 try:
-    from z3 import Solver, Bool, Int, And, Or, Not, sat, unsat
+    from z3 import And, Bool, Int, Not, Or, Solver, sat, unsat
 except ImportError:
     print("Z3 solver not found. Install with: pip install z3-solver>=4.12.1")
     sys.exit(1)
@@ -41,11 +44,11 @@ T = TypeVar("T")
 
 
 def smallest_subset_with_property(
-    items: List[T],
-    property_check_func: Callable[[List[T]], bool],
+    items: list[T],
+    property_check_func: Callable[[list[T]], bool],
     min_size: int = 1,
-    max_size: Optional[int] = None,
-) -> Optional[List[T]]:
+    max_size: int | None = None,
+) -> list[T] | None:
     """
     Find the smallest subset of items that satisfies a given property.
 
@@ -65,6 +68,7 @@ def smallest_subset_with_property(
             s = Solver()
             # ... set up scheduling constraints ...
             return s.check() == unsat
+
 
         # Find the smallest set of tasks that cannot be scheduled together
         result = smallest_subset_with_property(all_tasks, is_unschedulable, min_size=2)
@@ -95,8 +99,8 @@ def smallest_subset_with_property(
 
 
 def _minimize_subset(
-    subset: List[T], property_check_func: Callable[[List[T]], bool]
-) -> List[T]:
+    subset: list[T], property_check_func: Callable[[list[T]], bool]
+) -> list[T]:
     """Helper function to minimize a subset while maintaining the property"""
     minimal = subset.copy()
 

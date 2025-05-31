@@ -3,12 +3,14 @@
 Unified Test Runner for MCP Solvers (MiniZinc, PySAT, Z3)
 Runs problems through the appropriate test-client.
 """
-import os
-import subprocess
+
 import glob
-import sys
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
+
 
 # Add the project root to the Python path to enable imports from mcp_solver
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -16,26 +18,27 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import argparse
-from datetime import datetime
-from collections import Counter
-import threading
 import json
-
-# Now import the get_prompt_path function from the module
-from src.mcp_solver.core.prompt_loader import get_prompt_path
+import threading
+from collections import Counter
+from datetime import datetime
 
 # Import tool statistics
 from src.mcp_solver.client.tool_stats import ToolStats
 
+# Now import the get_prompt_path function from the module
+from src.mcp_solver.core.prompt_loader import get_prompt_path
+
 # Import test configuration constants (excluding prompt files)
 from tests.test_config import (
-    MCP_CLIENT_DIR,
     DEFAULT_TIMEOUT,
+    MAXSAT_PROBLEMS_DIR,
+    MCP_CLIENT_DIR,
     MZN_PROBLEMS_DIR,
     PYSAT_PROBLEMS_DIR,
     Z3_PROBLEMS_DIR,
-    MAXSAT_PROBLEMS_DIR,
 )
+
 
 # ====================
 # Shared Utility Functions
@@ -81,10 +84,10 @@ def format_box(text, width=None, style="single"):
 def read_problem_file(file_path):
     """Read content from a problem file"""
     try:
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             return f.read()
     except Exception as e:
-        print(f"Error reading problem file: {str(e)}")
+        print(f"Error reading problem file: {e!s}")
         return ""
 
 
@@ -107,7 +110,7 @@ def save_text_files(
                 f.write(model_content)
             print(f"\nSaved final model to: {model_file}")
         except Exception as e:
-            print(f"\nError saving model file to {model_file}: {str(e)}")
+            print(f"\nError saving model file to {model_file}: {e!s}")
 
     # Save agent response
     if agent_response:
@@ -116,7 +119,7 @@ def save_text_files(
                 f.write(agent_response)
             print(f"\nSaved agent response to: {response_file}")
         except Exception as e:
-            print(f"\nError saving response file to {response_file}: {str(e)}")
+            print(f"\nError saving response file to {response_file}: {e!s}")
 
     return model_file, response_file
 
@@ -682,9 +685,7 @@ def run_test(
 
     except Exception as e:
         # Catch potential errors during process setup or unexpected issues
-        print(
-            f"\n❌ An unexpected error occurred while testing {problem_name}: {str(e)}"
-        )
+        print(f"\n❌ An unexpected error occurred while testing {problem_name}: {e!s}")
         result_status = "error"
 
         return False, Counter()

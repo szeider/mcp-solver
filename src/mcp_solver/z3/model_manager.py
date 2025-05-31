@@ -5,25 +5,24 @@ This module provides the Z3ModelManager class, which implements the SolverManage
 interface for the Z3 SMT solver.
 """
 
-import asyncio
 import logging
-from typing import Dict, Optional, Any, List, Tuple
 from datetime import timedelta
+from typing import Any
 
 # Import z3 for status constant comparison
 import z3
 
 from ..core.base_manager import SolverManager
-from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
-from .environment import execute_z3_code
+from ..core.constants import MAX_SOLVE_TIMEOUT, MIN_SOLVE_TIMEOUT
 from ..core.validation import (
-    validate_index,
-    validate_content,
-    validate_python_code_safety,
-    validate_timeout,
     ValidationError,
     get_standardized_response,
+    validate_content,
+    validate_index,
+    validate_python_code_safety,
+    validate_timeout,
 )
+from .environment import execute_z3_code
 
 
 class Z3ModelManager(SolverManager):
@@ -48,7 +47,7 @@ class Z3ModelManager(SolverManager):
         self.logger = logging.getLogger(__name__)
         self.logger.info("Z3 model manager initialized")
 
-    async def clear_model(self) -> Dict[str, Any]:
+    async def clear_model(self) -> dict[str, Any]:
         """
         Clear the current model.
 
@@ -63,7 +62,7 @@ class Z3ModelManager(SolverManager):
         self.logger.info("Model cleared")
         return get_standardized_response(success=True, message="Model cleared")
 
-    def get_model(self) -> List[Tuple[int, str]]:
+    def get_model(self) -> list[tuple[int, str]]:
         """
         Get the current model content with indexes.
 
@@ -72,7 +71,7 @@ class Z3ModelManager(SolverManager):
         """
         return [(i + 1, content) for i, content in enumerate(self.code_items)]
 
-    async def add_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def add_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Add an item to the model at the specified index.
 
@@ -116,7 +115,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
         except Exception as e:
-            error_msg = f"Unexpected error in add_item: {str(e)}"
+            error_msg = f"Unexpected error in add_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -125,7 +124,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
 
-    async def delete_item(self, index: int) -> Dict[str, Any]:
+    async def delete_item(self, index: int) -> dict[str, Any]:
         """
         Delete an item from the model at the specified index.
 
@@ -171,7 +170,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
         except Exception as e:
-            error_msg = f"Unexpected error in delete_item: {str(e)}"
+            error_msg = f"Unexpected error in delete_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -180,7 +179,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
 
-    async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def replace_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Replace an item in the model at the specified index.
 
@@ -229,7 +228,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
         except Exception as e:
-            error_msg = f"Unexpected error in replace_item: {str(e)}"
+            error_msg = f"Unexpected error in replace_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -238,7 +237,7 @@ class Z3ModelManager(SolverManager):
                 model=self.get_model(),
             )
 
-    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> dict[str, Any]:
         """
         Solve the current model.
 
@@ -316,7 +315,6 @@ export_solution = wrapped_export_solution
                 result.get("error")
                 and "No solution was exported" in result.get("error")
             ):
-
                 # Check if there's a stored solver from previous export_solution calls
                 if "_z3_registry" in globals() and globals()["_z3_registry"].get(
                     "solver"
@@ -428,7 +426,7 @@ export_solution = wrapped_export_solution
                 error=error_msg,
             )
         except Exception as e:
-            error_msg = f"Unexpected error in solve_model: {str(e)}"
+            error_msg = f"Unexpected error in solve_model: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -436,7 +434,7 @@ export_solution = wrapped_export_solution
                 error=error_msg,
             )
 
-    def get_solution(self) -> Dict[str, Any]:
+    def get_solution(self) -> dict[str, Any]:
         """
         Get the current solution.
 
@@ -457,7 +455,7 @@ export_solution = wrapped_export_solution
             status=self.last_solution.get("status", "unknown"),
         )
 
-    def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
+    def get_variable_value(self, variable_name: str) -> dict[str, Any]:
         """
         Get the value of a variable from the current solution.
 
@@ -487,7 +485,7 @@ export_solution = wrapped_export_solution
             value=values.get(variable_name),
         )
 
-    def get_solve_time(self) -> Dict[str, Any]:
+    def get_solve_time(self) -> dict[str, Any]:
         """
         Get the time taken for the last solve operation.
 

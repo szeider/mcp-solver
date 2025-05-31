@@ -1,32 +1,32 @@
-import sys
-import os
-import asyncio
 import argparse
+import asyncio
 import json
-from datetime import datetime
-from typing import Dict, Any, Sequence, Optional
-from rich.console import Console
-import traceback
-from pathlib import Path
+import os
 import re
+import sys
+import traceback
+from datetime import datetime
 from string import Template
+from typing import Any
 
-# Core dependencies
-from .llm_factory import LLMFactory
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
-from mcp_solver.core.prompt_loader import load_prompt
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
-from langchain_core.tools import BaseTool
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # LangGraph agent implementation
 from langgraph.prebuilt import create_react_agent
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from rich.console import Console
+
+from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
+from mcp_solver.core.prompt_loader import load_prompt
+
+# Core dependencies
+from .llm_factory import LLMFactory
+from .token_counter import TokenCounter
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
-from .token_counter import TokenCounter
 
 
 def format_token_count(count):
@@ -74,7 +74,7 @@ MODE_SERVER_ARGS = {
     "mzn": ["run", "mcp-solver-mzn"],
     "z3": ["run", "mcp-solver-z3"],
     "pysat": ["run", "mcp-solver-pysat"],
-    "maxsat": ["run", "mcp-solver-maxsat"]
+    "maxsat": ["run", "mcp-solver-maxsat"],
 }
 
 # Global Rich Console instance with color support
@@ -124,7 +124,7 @@ class ClientError(Exception):
 def load_file_content(file_path):
     """Load content from a file."""
     try:
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(file_path, encoding="utf-8") as file:
             return file.read().strip()
     except Exception as e:
         print(f"Error loading file {file_path}: {e}")
@@ -145,7 +145,7 @@ def load_initial_state(query_path, mode):
         print(f"- Instructions: {len(instructions_prompt)} characters")
         print(f"- Review: {len(review_prompt)} characters")
     except Exception as e:
-        console.print(f"[bold red]Error loading prompts: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error loading prompts: {e!s}[/bold red]")
         sys.exit(1)
 
     # Create initial messages with ONLY the instructions prompt as system message
@@ -232,7 +232,7 @@ def wrap_tool(tool):
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
                                 log_system(
-                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                    f"Warning: Failed to capture model after solve: {e!s}"
                                 )
                                 pass  # Handle errors in get_model capture
 
@@ -245,7 +245,7 @@ def wrap_tool(tool):
 
                 return result
             except Exception as e:
-                error_msg = f"Tool execution failed: {str(e)}"
+                error_msg = f"Tool execution failed: {e!s}"
                 log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()
                 return ToolError(error_msg)
@@ -306,7 +306,7 @@ def wrap_tool(tool):
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
                                 log_system(
-                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                    f"Warning: Failed to capture model after solve: {e!s}"
                                 )
                                 pass  # Handle errors in get_model capture
 
@@ -319,7 +319,7 @@ def wrap_tool(tool):
 
                 return result
             except Exception as e:
-                error_msg = f"Tool execution failed: {str(e)}"
+                error_msg = f"Tool execution failed: {e!s}"
                 log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()
                 return ToolError(error_msg)
@@ -383,7 +383,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def call_reviewer(state: Dict, model: Any) -> Dict:
+def call_reviewer(state: dict, model: Any) -> dict:
     """Call a reviewer to assess the solution.
 
     This function takes the current state, which includes the solution,
@@ -455,9 +455,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
                                 processed_solution += f"{var} = {value}\n"
     except Exception as e:
         # Log errors in solution processing but continue
-        print(
-            f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True
-        )
+        print(f"Note: Solution preprocessing encountered an issue: {e!s}", flush=True)
         pass
 
     # Create reviewer prompt using Template
@@ -527,7 +525,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         }
 
     except Exception as e:
-        print(f"Review process error: {str(e)}", flush=True)
+        print(f"Review process error: {e!s}", flush=True)
         import traceback
 
         print(f"Traceback: {traceback.format_exc()}", flush=True)
@@ -536,10 +534,10 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         return {
             "review_result": {
                 "correctness": "unknown",
-                "explanation": f"Error running reviewer: {str(e)}",
+                "explanation": f"Error running reviewer: {e!s}",
             },
             "mem_review_verdict": "unknown",
-            "mem_review_text": f"Error running reviewer: {str(e)}",
+            "mem_review_text": f"Error running reviewer: {e!s}",
             "messages": state.get("messages", []),  # Preserve existing messages
         }
 
@@ -582,9 +580,9 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                 state["messages"].append({"role": "assistant", "content": error_msg})
                 return state
     except Exception as e:
-        console.print(f"[bold red]Error parsing model code: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error parsing model code: {e!s}[/bold red]")
         state["messages"].append(
-            {"role": "assistant", "content": f"Error parsing model code: {str(e)}"}
+            {"role": "assistant", "content": f"Error parsing model code: {e!s}"}
         )
         return state
 
@@ -633,7 +631,7 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                     # Print tools for debugging
                     print("\n📋 Available tools:", flush=True)
                     for i, tool in enumerate(wrapped_tools):
-                        print(f"  {i+1}. {tool.name}", flush=True)
+                        print(f"  {i + 1}. {tool.name}", flush=True)
                     print("", flush=True)
                     sys.stdout.flush()
 
@@ -756,22 +754,22 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                 flush=True,
                             )
                     except Exception as e:
-                        error_msg = f"Error during LLM invocation: {str(e)}"
+                        error_msg = f"Error during LLM invocation: {e!s}"
                         print(error_msg, flush=True)
                         state["messages"].append(
                             {
                                 "role": "assistant",
-                                "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model.",
+                                "content": f"I encountered an error while processing your request: {e!s}. Please try again with a simpler query or check the model.",
                             }
                         )
                 except Exception as e:
-                    error_msg = f"Error initializing MCP session: {str(e)}"
+                    error_msg = f"Error initializing MCP session: {e!s}"
                     console.print(f"[bold red]{error_msg}[/bold red]")
                     state["messages"].append(
                         {"role": "assistant", "content": error_msg}
                     )
     except Exception as e:
-        error_msg = f"Error connecting to MCP server: {str(e)}"
+        error_msg = f"Error connecting to MCP server: {e!s}"
         console.print(f"[bold red]{error_msg}[/bold red]")
         state["messages"].append({"role": "assistant", "content": error_msg})
 
@@ -829,12 +827,12 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                 # Display review results immediately after completion
                 display_review_result(state)
             else:
-                print(f"Review result: ❓ Unknown format", flush=True)
+                print("Review result: ❓ Unknown format", flush=True)
         except Exception as e:
-            print(f"Error running reviewer: {str(e)}", flush=True)
+            print(f"Error running reviewer: {e!s}", flush=True)
             state["review_result"] = {
                 "correctness": "unknown",
-                "explanation": f"Error running reviewer: {str(e)}",
+                "explanation": f"Error running reviewer: {e!s}",
             }
 
             # Display review results even if there was an error
@@ -1067,7 +1065,7 @@ def generate_result_json(state, json_path):
             json.dump(json_data, f, indent=4, ensure_ascii=False)
         print(f"\nSaved JSON result to: {json_path}")
     except Exception as e:
-        print(f"\nError saving JSON result: {str(e)}")
+        print(f"\nError saving JSON result: {e!s}")
 
 
 async def main():
@@ -1110,7 +1108,7 @@ async def main():
     try:
         state = load_initial_state(args.query, mode)
     except Exception as e:
-        console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error loading files: {e!s}[/bold red]")
         sys.exit(1)
 
     # Store args in state for later use

@@ -1,6 +1,7 @@
-from pathlib import Path
 import logging
-from typing import Literal, Union
+from pathlib import Path
+from typing import Literal
+
 
 # Type definitions for better type checking
 PromptMode = Literal["mzn", "pysat", "z3", "maxsat"]
@@ -25,7 +26,9 @@ def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") 
     """
     # Validate inputs
     if mode not in ("mzn", "pysat", "z3", "maxsat"):
-        raise ValueError(f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3, maxsat")
+        raise ValueError(
+            f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3, maxsat"
+        )
 
     if prompt_type not in ("instructions", "review"):
         raise ValueError(
@@ -73,4 +76,4 @@ def load_prompt(mode: PromptMode, prompt_type: PromptType) -> str:
     except FileNotFoundError:
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
     except Exception as e:
-        raise RuntimeError(f"Error reading prompt file {prompt_path}: {str(e)}")
+        raise RuntimeError(f"Error reading prompt file {prompt_path}: {e!s}")

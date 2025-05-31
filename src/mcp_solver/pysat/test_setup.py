@@ -10,10 +10,8 @@ Note: This script only tests PySAT mode functionality.
 For core MiniZinc testing, use the main test-setup script.
 """
 
-import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 # Import our centralized prompt loader
 from mcp_solver.core.prompt_loader import load_prompt
@@ -21,17 +19,15 @@ from mcp_solver.core.prompt_loader import load_prompt
 
 class PySATSetupTest:
     def __init__(self):
-        self.successes: List[Tuple[str, str]] = []  # (test_name, details)
-        self.failures: List[Tuple[str, str]] = []  # (test_name, error_details)
+        self.successes: list[tuple[str, str]] = []  # (test_name, details)
+        self.failures: list[tuple[str, str]] = []  # (test_name, error_details)
         self.base_dir = Path(__file__).resolve().parents[3]
         self.GREEN = "\033[92m"
         self.RED = "\033[91m"
         self.RESET = "\033[0m"
         self.BOLD = "\033[1m"
 
-    def print_result(
-        self, test_name: str, success: bool, details: Optional[str] = None
-    ):
+    def print_result(self, test_name: str, success: bool, details: str | None = None):
         """Print a test result with color and proper formatting."""
         mark = "✓" if success else "✗"
         color = self.GREEN if success else self.RED
@@ -39,7 +35,7 @@ class PySATSetupTest:
         if details:
             print(f"  └─ {details}")
 
-    def record_test(self, test_name: str, success: bool, details: Optional[str] = None):
+    def record_test(self, test_name: str, success: bool, details: str | None = None):
         """Record a test result and print it."""
         if success:
             self.successes.append((test_name, details if details else ""))
@@ -72,13 +68,13 @@ class PySATSetupTest:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Prompt file not found",
+                    "Prompt file not found",
                 )
             except Exception as e:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Error loading prompt: {str(e)}",
+                    f"Error loading prompt: {e!s}",
                 )
 
         # Test other required files
@@ -113,7 +109,7 @@ class PySATSetupTest:
             self.record_test(
                 "python-sat package",
                 False,
-                f"Error importing pysat: {str(e)}\nPlease install with: pip install python-sat",
+                f"Error importing pysat: {e!s}\nPlease install with: pip install python-sat",
             )
             return
 
@@ -128,7 +124,7 @@ class PySATSetupTest:
             )
         except Exception as e:
             self.record_test(
-                "SAT solver (Glucose3)", False, f"Error initializing solver: {str(e)}"
+                "SAT solver (Glucose3)", False, f"Error initializing solver: {e!s}"
             )
 
     def test_basic_functionality(self):
@@ -146,7 +142,7 @@ class PySATSetupTest:
 
             self.record_test("CNF creation", True, "Successfully created CNF formula")
         except Exception as e:
-            self.record_test("CNF creation", False, f"Error creating CNF: {str(e)}")
+            self.record_test("CNF creation", False, f"Error creating CNF: {e!s}")
             return
 
         # Test solver initialization and basic solving
@@ -160,7 +156,7 @@ class PySATSetupTest:
             )
         except Exception as e:
             self.record_test(
-                "Solver initialization", False, f"Error with solver: {str(e)}"
+                "Solver initialization", False, f"Error with solver: {e!s}"
             )
 
     def run_all_tests(self):

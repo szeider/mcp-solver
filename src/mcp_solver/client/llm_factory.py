@@ -1,18 +1,22 @@
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Tuple, Any
-from langchain_openai import ChatOpenAI
+from typing import Any
+
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+
 
 try:
     # Import Google chat model if available
     from langchain_google_genai import ChatGoogleGenerativeAI
 except ImportError:
     ChatGoogleGenerativeAI = None
-from langchain.chat_models.base import BaseChatModel
 import os
 import re
-from dotenv import load_dotenv
 import uuid
+
+from dotenv import load_dotenv
+from langchain.chat_models.base import BaseChatModel
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,7 +29,7 @@ class ModelInfo:
     platform: str  # OR, OA, AT, GO, LM
     provider: str  # openai, anthropic, google, lmstudio, ollama
     model_name: str  # The actual model name
-    params: Dict[str, Any] = field(default_factory=dict)  # Additional parameters
+    params: dict[str, Any] = field(default_factory=dict)  # Additional parameters
 
     @property
     def model_string(self) -> str:
@@ -49,7 +53,7 @@ class ModelInfo:
         return platform_to_key[self.platform]
 
     @property
-    def base_url(self) -> Optional[str]:
+    def base_url(self) -> str | None:
         """Get the API base URL for the platform."""
         if self.platform == "LM" and hasattr(self, "url"):
             return self.url
@@ -66,7 +70,7 @@ class LLMFactory:
     """Factory for creating LLM instances based on model code."""
 
     # Store model info using unique IDs
-    _model_info: Dict[str, ModelInfo] = {}
+    _model_info: dict[str, ModelInfo] = {}
 
     @staticmethod
     def parse_model_code(model_code: str) -> ModelInfo:
@@ -100,25 +104,30 @@ class LLMFactory:
                     # Parse parameters if present
                     if param_str:
                         # Split by commas, handling potential comma in values
-                        for param_pair in re.findall(r'([^,=]+)=([^,]+)(?:,|$)', param_str):
+                        for param_pair in re.findall(
+                            r"([^,=]+)=([^,]+)(?:,|$)", param_str
+                        ):
                             key, value = param_pair
                             # Convert value types appropriately
-                            if value.lower() == 'true':
+                            if value.lower() == "true":
                                 parsed_value = True
-                            elif value.lower() == 'false':
+                            elif value.lower() == "false":
                                 parsed_value = False
-                            elif re.match(r'^-?\d+$', value):
+                            elif re.match(r"^-?\d+$", value):
                                 parsed_value = int(value)
-                            elif re.match(r'^-?\d*\.\d+$', value):
+                            elif re.match(r"^-?\d*\.\d+$", value):
                                 parsed_value = float(value)
                             else:
                                 parsed_value = value
                             params[key.strip()] = parsed_value
 
                 model_info = ModelInfo(
-                    platform=platform, provider="lmstudio", model_name=model_name, params=params
+                    platform=platform,
+                    provider="lmstudio",
+                    model_name=model_name,
+                    params=params,
                 )
-                setattr(model_info, "url", url)
+                model_info.url = url
                 return model_info
             elif platform == "OR":
                 provider, model_name = remaining.split("/", 1)
@@ -129,15 +138,19 @@ class LLMFactory:
                     # Store additional parameter as a param
                     tier = model_parts[1]
                     model_info = ModelInfo(
-                        platform=platform, provider=provider, model_name=model_name,
-                        params={"tier": tier}
+                        platform=platform,
+                        provider=provider,
+                        model_name=model_name,
+                        params={"tier": tier},
                     )
                     return model_info
             else:
                 provider = (
                     "openai"
                     if platform == "OA"
-                    else "anthropic" if platform == "AT" else "google"
+                    else "anthropic"
+                    if platform == "AT"
+                    else "google"
                 )
                 # Handle reasoning_effort parameter in model code (format: OA:o3-mini:high)
                 if platform == "OA" and ":" in remaining:
@@ -146,8 +159,10 @@ class LLMFactory:
                     # Store reasoning_effort as a param
                     reasoning_effort = model_parts[1]
                     model_info = ModelInfo(
-                        platform=platform, provider=provider, model_name=model_name,
-                        params={"reasoning_effort": reasoning_effort}
+                        platform=platform,
+                        provider=provider,
+                        model_name=model_name,
+                        params={"reasoning_effort": reasoning_effort},
                     )
                     return model_info
                 else:
@@ -209,9 +224,7 @@ class LLMFactory:
             reasoning_effort = model_info.get_param("reasoning_effort")
             if reasoning_effort:
                 model_kwargs["model_kwargs"] = model_kwargs.get("model_kwargs", {})
-                model_kwargs["model_kwargs"][
-                    "reasoning_effort"
-                ] = reasoning_effort
+                model_kwargs["model_kwargs"]["reasoning_effort"] = reasoning_effort
 
             model = ChatOpenAI(
                 model=model_info.model_string, api_key=api_key, **model_kwargs
@@ -235,9 +248,7 @@ class LLMFactory:
             # For local models, use ChatOpenAI with the provided base_url
             base_url = getattr(model_info, "url", None)
             if not base_url:
-                raise ValueError(
-                    "Local models require a URL (format: LM:model@url)"
-                )
+                raise ValueError("Local models require a URL (format: LM:model@url)")
 
             # Detect server type
             server_type = cls.detect_local_server_type(base_url)
@@ -277,16 +288,18 @@ class LLMFactory:
                                 "properties": {
                                     "content": {
                                         "type": "string",
-                                        "description": "The main response content"
+                                        "description": "The main response content",
                                     }
                                 },
-                                "required": ["content"]
-                            }
-                        }
+                                "required": ["content"],
+                            },
+                        },
                     }
                 else:
                     # Default for most APIs
-                    model_kwargs["model_kwargs"]["response_format"] = {"type": "json_object"}
+                    model_kwargs["model_kwargs"]["response_format"] = {
+                        "type": "json_object"
+                    }
 
             model = ChatOpenAI(
                 model=model_info.model_name,
@@ -299,12 +312,12 @@ class LLMFactory:
 
         # Generate a unique ID and store it as an attribute of the model
         model_id = str(uuid.uuid4())
-        setattr(model, "_factory_id", model_id)
+        model._factory_id = model_id
         cls._model_info[model_id] = model_info
         return model
 
     @classmethod
-    def get_provider(cls, model: BaseChatModel) -> Optional[str]:
+    def get_provider(cls, model: BaseChatModel) -> str | None:
         """Get the provider name for a model instance."""
         if hasattr(model, "_factory_id"):
             if model_info := cls._model_info.get(model._factory_id):
@@ -312,7 +325,7 @@ class LLMFactory:
         return None
 
     @classmethod
-    def get_model_info(cls, model: BaseChatModel) -> Optional[ModelInfo]:
+    def get_model_info(cls, model: BaseChatModel) -> ModelInfo | None:
         """Get the full ModelInfo for a model instance."""
         if hasattr(model, "_factory_id"):
             return cls._model_info.get(model._factory_id)
@@ -321,7 +334,7 @@ class LLMFactory:
     # ===== TESTING UTILITIES =====
 
     @classmethod
-    def check_api_key_available(cls, model_code: str) -> Tuple[bool, str]:
+    def check_api_key_available(cls, model_code: str) -> tuple[bool, str]:
         """
         Check if the required API key for a given model code is available.
 
@@ -347,7 +360,7 @@ class LLMFactory:
             return False, str(e)
 
     @classmethod
-    def test_tool_calling_capability(cls, model_code: str) -> Tuple[bool, str]:
+    def test_tool_calling_capability(cls, model_code: str) -> tuple[bool, str]:
         """Test if a model supports tool calling.
 
         Returns:
@@ -387,7 +400,7 @@ class LLMFactory:
             return False, str(e)
 
     @classmethod
-    def get_expected_model_type(cls, model_code: str) -> Tuple[Any, str]:
+    def get_expected_model_type(cls, model_code: str) -> tuple[Any, str]:
         """
         Get the expected model class type for a given model code.
 
@@ -431,7 +444,7 @@ class LLMFactory:
     @classmethod
     def test_create_model(
         cls, model_code: str
-    ) -> Tuple[bool, str, Optional[BaseChatModel]]:
+    ) -> tuple[bool, str, BaseChatModel | None]:
         """
         Test if a model can be created without making API calls.
 
@@ -517,22 +530,24 @@ class LLMFactory:
                                     "properties": {
                                         "content": {
                                             "type": "string",
-                                            "description": "The main response content"
+                                            "description": "The main response content",
                                         }
                                     },
-                                    "required": ["content"]
-                                }
-                            }
+                                    "required": ["content"],
+                                },
+                            },
                         }
                     else:
                         # Default for most APIs
-                        model_kwargs["model_kwargs"]["response_format"] = {"type": "json_object"}
+                        model_kwargs["model_kwargs"]["response_format"] = {
+                            "type": "json_object"
+                        }
 
                 model = ChatOpenAI(
                     model=model_info.model_name,
                     api_key="lm-studio",  # Placeholder value
                     base_url=base_url,
-                    **model_kwargs
+                    **model_kwargs,
                 )
 
             if model and isinstance(model, expected_type):
@@ -542,7 +557,7 @@ class LLMFactory:
                     model,
                 )
             else:
-                return False, f"Failed to create model instance of correct type", None
+                return False, "Failed to create model instance of correct type", None
 
         except Exception as e:
-            return False, f"Error during model creation: {str(e)}", None
+            return False, f"Error during model creation: {e!s}", None

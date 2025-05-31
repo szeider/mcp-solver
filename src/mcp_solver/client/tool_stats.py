@@ -5,7 +5,7 @@ This module provides a class for tracking tool usage statistics during a client 
 """
 
 from collections import Counter
-from typing import Dict, List, Any
+
 from rich.console import Console
 from rich.table import Table
 

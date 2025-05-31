@@ -3,6 +3,7 @@ Z3 integration for MCP Solver.
 """
 
 # Export the solution module functions
-from .solution import export_solution, _LAST_SOLUTION
+from .solution import _LAST_SOLUTION, export_solution
 
-__all__ = ["export_solution", "_LAST_SOLUTION"]
+
+__all__ = ["_LAST_SOLUTION", "export_solution"]

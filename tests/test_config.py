@@ -5,6 +5,7 @@ Shared configuration for all test files.
 import os
 from pathlib import Path
 
+
 # Configuration
 MCP_CLIENT_DIR = os.path.abspath(
     os.path.dirname(os.path.dirname(__file__))
@@ -36,7 +37,7 @@ def load_prompt_for_test(mode, prompt_type="instructions"):
     except ImportError:
         # If the prompt loader isn't available, fall back to file reading
         prompt_path = get_abs_path(f"prompts/{mode}/{prompt_type}.md")
-        with open(prompt_path, "r", encoding="utf-8") as f:
+        with open(prompt_path, encoding="utf-8") as f:
             return f.read().strip()
     except Exception as e:
         # If all else fails, try to find the old-style prompt files
@@ -49,9 +50,7 @@ def load_prompt_for_test(mode, prompt_type="instructions"):
 
         if mode in old_style_paths and prompt_type in old_style_paths[mode]:
             old_path = get_abs_path(old_style_paths[mode][prompt_type])
-            with open(old_path, "r", encoding="utf-8") as f:
+            with open(old_path, encoding="utf-8") as f:
                 return f.read().strip()
         else:
-            raise ValueError(
-                f"Could not load prompt for {mode}/{prompt_type}: {str(e)}"
-            )
+            raise ValueError(f"Could not load prompt for {mode}/{prompt_type}: {e!s}")

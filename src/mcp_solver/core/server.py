@@ -1,27 +1,24 @@
-import sys
 import asyncio
-import logging
-import os
-from typing import List, Optional, Any, Tuple
-from datetime import timedelta
-from pathlib import Path
-from importlib.metadata import version
 import json
+import logging
+import sys
+from datetime import timedelta
+from importlib.metadata import version
+from typing import Any
 
-from mcp.server import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 from mcp.shared.exceptions import McpError
 
 from .constants import (
-    MIN_SOLVE_TIMEOUT,
-    MAX_SOLVE_TIMEOUT,
-    VALIDATION_TIMEOUT,
-    CLEANUP_TIMEOUT,
     ITEM_CHARS,
+    MAX_SOLVE_TIMEOUT,
+    MIN_SOLVE_TIMEOUT,
 )
 from .prompt_loader import load_prompt
+
 
 # Global flags for mode selection
 Z3_MODE = False
@@ -39,7 +36,7 @@ except Exception:
 
 
 def format_model_items(
-    items: List[Tuple[int, str]], max_chars: Optional[int] = None
+    items: list[tuple[int, str]], max_chars: int | None = None
 ) -> str:
     """Format model items with optional truncation."""
     if not items:
@@ -100,7 +97,9 @@ async def serve() -> None:
             return descriptions["pysat"]
         elif MAXSAT_MODE and "maxsat" in descriptions:
             return descriptions["maxsat"]
-        elif not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions:
+        elif (
+            not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions
+        ):
             return descriptions["mzn"]
         elif "default" in descriptions:
             return descriptions["default"]
@@ -142,7 +141,7 @@ async def serve() -> None:
                 content = load_prompt(mode_folder, "instructions")
 
                 # Add debugging logs
-                logging.getLogger(__name__).info(f"Prompt loaded successfully")
+                logging.getLogger(__name__).info("Prompt loaded successfully")
                 logging.getLogger(__name__).info(
                     f"Prompt content length: {len(content)}"
                 )
@@ -150,7 +149,7 @@ async def serve() -> None:
                     f"Prompt content first 100 chars: {content[:100]}"
                 )
             except Exception as e:
-                error_msg = f"Critical Error: {str(e)}"
+                error_msg = f"Critical Error: {e!s}"
                 logging.getLogger(__name__).error(error_msg)
                 raise McpError(error_msg)
 
@@ -168,14 +167,14 @@ async def serve() -> None:
             logging.getLogger(__name__).error(error_msg)
             raise McpError(error_msg)
 
-    def format_array_access(variable_name: str, indices: List[int]) -> str:
+    def format_array_access(variable_name: str, indices: list[int]) -> str:
         return (
             variable_name
             if not indices
             else f"{variable_name}[{','.join(str(i) for i in indices)}]"
         )
 
-    def get_array_value(array: Any, indices: List[int]) -> Any:
+    def get_array_value(array: Any, indices: list[int]) -> Any:
         if not indices:
             return array
         if not hasattr(array, "__getitem__"):
@@ -192,7 +191,7 @@ async def serve() -> None:
             raise ValueError("Invalid index type")
 
     @server.list_tools()
-    async def list_tools() -> List[types.Tool]:
+    async def list_tools() -> list[types.Tool]:
         # Tools for all modes
         tools = [
             types.Tool(
@@ -298,7 +297,7 @@ async def serve() -> None:
         return tools
 
     @server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
+    async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         try:
             match name:
                 case "get_model":
@@ -470,12 +469,12 @@ async def serve() -> None:
                             except Exception as e:
                                 # Catch any exceptions from the model manager
                                 logging.getLogger(__name__).error(
-                                    f"Error in model manager during solve: {str(e)}",
+                                    f"Error in model manager during solve: {e!s}",
                                     exc_info=True,
                                 )
                                 # Return a valid result even when errors occur
                                 error_result = {
-                                    "message": f"Error solving model: {str(e)}",
+                                    "message": f"Error solving model: {e!s}",
                                     "success": True,  # Important: still success=True
                                     "status": "error",
                                     "error": str(e),
@@ -486,7 +485,7 @@ async def serve() -> None:
                                     )
                                 ]
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # This should rarely happen since we use a timeout in model_mgr.solve_model
                         # But as an extra safety net, we handle it here at the server level
                         logging.getLogger(__name__).warning(
@@ -505,10 +504,10 @@ async def serve() -> None:
                     except Exception as e:
                         # Handle any other errors during timeout handling itself
                         logging.getLogger(__name__).error(
-                            f"Error in timeout handling: {str(e)}", exc_info=True
+                            f"Error in timeout handling: {e!s}", exc_info=True
                         )
                         error_result = {
-                            "message": f"Error in timeout handling: {str(e)}",
+                            "message": f"Error in timeout handling: {e!s}",
                             "success": True,  # Always success=True for client connection
                             "status": "error",
                             "error": str(e),
@@ -519,7 +518,7 @@ async def serve() -> None:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
             logging.getLogger(__name__).error("Tool execution failed", exc_info=True)
-            error_message = f"Tool execution failed: {str(e)}"
+            error_message = f"Tool execution failed: {e!s}"
             return [types.TextContent(type="text", text=error_message)]
 
     # Wrap the server run in try-except to handle unexpected errors
@@ -532,7 +531,7 @@ async def serve() -> None:
                 exception = context.get("exception")
                 if exception:
                     logging.getLogger(__name__).error(
-                        f"Uncaught exception: {str(exception)}", exc_info=exception
+                        f"Uncaught exception: {exception!s}", exc_info=exception
                     )
                 else:
                     logging.getLogger(__name__).error(
@@ -567,7 +566,7 @@ async def serve() -> None:
         except Exception as e:
             # Log the error but try to avoid crashing the server
             logging.getLogger(__name__).error(
-                f"Error in MCP server operation: {str(e)}", exc_info=True
+                f"Error in MCP server operation: {e!s}", exc_info=True
             )
             # Don't re-raise - this would terminate the server and disconnect clients
             # Instead, attempt to continue or at least shutdown more gracefully
@@ -589,7 +588,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MCP Solver")
     parser.add_argument("--z3", action="store_true", help="Use Z3 solver")
     parser.add_argument("--pysat", action="store_true", help="Use PySAT solver")
-    parser.add_argument("--maxsat", action="store_true", help="Use MaxSAT optimization solver")
+    parser.add_argument(
+        "--maxsat", action="store_true", help="Use MaxSAT optimization solver"
+    )
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
@@ -610,7 +611,9 @@ def main() -> int:
     elif PYSAT_MODE:
         logging.getLogger(__name__).info("Server running with PySAT solver")
     elif MAXSAT_MODE:
-        logging.getLogger(__name__).info("Server running with MaxSAT optimization solver")
+        logging.getLogger(__name__).info(
+            "Server running with MaxSAT optimization solver"
+        )
     else:
         logging.getLogger(__name__).info("Server running with MiniZinc solver")
 
