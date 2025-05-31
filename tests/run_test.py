@@ -330,9 +330,8 @@ def run_test(
     if verbose:
         print("Verbose flag enabled: Output will be printed in real-time.")
 
-    if timeout and timeout != DEFAULT_TIMEOUT:
-        # Assume test-client accepts --timeout
-        cmd += f" --timeout {timeout}"
+    # NOTE: test-client doesn't accept a timeout parameter, but we still use it for overall process timeout
+    # Timeout is applied to the subprocess itself, not passed as a command-line parameter
 
     # If result path provided, forward it to client.py
     if result_path:

@@ -63,7 +63,7 @@ from .constraints import (
     implies,
     mutually_exclusive,
 )
-from .solution import export_maxsat_solution, export_solution
+from .solution import export_solution
 from .templates.cardinality_templates import at_least_k, at_most_k, exactly_k
 
 
