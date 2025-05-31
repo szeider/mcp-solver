@@ -58,10 +58,15 @@ uv.lock
 mcp-solver.txt
 tests/results/
 CLAUDE.md
+CLAUDE-TEST.md
 docs/
 tmp/
 .mcp.json
 LM_STUDIO_IMPLEMENTATION.md
+local/
+tester-report.md
+testers_report.md
+fix-analysis-script.patch
 
 # Distribution / packaging
 dist/
