@@ -55,11 +55,13 @@ dev = [
 test-setup-mzn = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
+test-setup-maxsat = "mcp_solver.maxsat.test_setup:main"
 test-setup-client = "mcp_solver.client.test_setup:main"
 mcp-solver = "mcp_solver.core.__main__:main"
 mcp-solver-mzn = "mcp_solver.core.__main__:main_mzn"
 mcp-solver-z3 = "mcp_solver.core.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.core.__main__:main_pysat"
+mcp-solver-maxsat = "mcp_solver.core.__main__:main_maxsat"
 test-client = "mcp_solver.client.client:main_cli"
 run-test = "tests.run_test:main"
 

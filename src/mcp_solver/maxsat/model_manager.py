@@ -1,0 +1,1055 @@
+"""
+MaxSAT model manager implementation.
+
+This module implements the SolverManager abstract base class for MaxSAT,
+providing methods for managing MaxSAT optimization models.
+"""
+
+import asyncio
+import logging
+from typing import Dict, Any, List, Tuple, Optional, Union, cast
+from datetime import timedelta
+import time
+import re
+
+from ..core.base_manager import SolverManager
+from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
+from .environment import execute_pysat_code
+from .error_handling import PySATError, format_solution_error
+from ..core.validation import (
+    validate_index,
+    validate_content,
+    validate_python_code_safety,
+    ValidationError,
+    get_standardized_response,
+    validate_timeout,
+    DictionaryMisuseValidator,
+)
+
+
+class MaxSATModelManager(SolverManager):
+    """
+    MaxSAT model manager implementation.
+
+    This class manages MaxSAT optimization models, including adding, removing, and modifying
+    model items, as well as solving models and extracting optimization solutions.
+    """
+
+    def __init__(self):
+        """
+        Initialize a new MaxSAT model manager.
+        """
+        super().__init__()
+        self.code_items: List[Tuple[int, str]] = []
+        self.last_result: Optional[Dict[str, Any]] = None
+        self.last_solution: Optional[Dict[str, Any]] = None
+        self.last_solve_time: float = 0.0
+        self.initialized = True
+        self.logger = logging.getLogger(__name__)
+        self.dict_validator = DictionaryMisuseValidator()
+        self.logger.info("MaxSAT model manager initialized")
+
+    async def clear_model(self) -> Dict[str, Any]:
+        """
+        Clear the current model.
+
+        Returns:
+            A dictionary with a message indicating the model was cleared
+        """
+        self.code_items = []
+        self.last_result = None
+        self.last_solution = None
+
+        # Reset the dictionary misuse validator
+        self.dict_validator = DictionaryMisuseValidator()
+
+        self.logger.info("Model cleared")
+        return {"message": "Model cleared successfully"}
+
+    def get_model(self) -> List[Tuple[int, str]]:
+        """
+        Get the current model content with indices.
+
+        Returns:
+            A list of (index, content) tuples
+        """
+        return self.code_items
+
+    async def add_item(self, index: int, content: str) -> Dict[str, Any]:
+        """
+        Add an item to the model at the specified index.
+
+        Args:
+            index: The index at which to add the item
+            content: The content of the item
+
+        Returns:
+            A dictionary with the result of the operation
+
+        Raises:
+            ValidationError: If the input is invalid
+        """
+        try:
+            # Validate inputs
+            validate_index(index, self.code_items, one_based=True)
+            validate_content(content)
+            validate_python_code_safety(content)
+
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
+
+            # Check if an item with the same index already exists
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    # Replace existing item
+                    self.code_items[i] = (index, content)
+                    self.logger.info(f"Replaced item at index {index}")
+                    return get_standardized_response(
+                        success=True, message=f"Replaced item at index {index}"
+                    )
+
+            # Add new item
+            self.code_items.append((index, content))
+            self.logger.info(f"Added item at index {index}")
+            return get_standardized_response(
+                success=True, message=f"Added item at index {index}"
+            )
+
+        except ValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in add_item: {error_msg}")
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to add item: {error_msg}",
+                error=error_msg,
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error in add_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return get_standardized_response(
+                success=False,
+                message="Failed to add item due to an internal error",
+                error=error_msg,
+            )
+
+    async def delete_item(self, index: int) -> Dict[str, Any]:
+        """
+        Delete an item from the model at the specified index.
+
+        Args:
+            index: The index of the item to delete
+
+        Returns:
+            A dictionary with the result of the operation
+        """
+        try:
+            # Basic index validation - only check if it's a valid integer
+            validate_index(index, one_based=True)
+
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    del self.code_items[i]
+                    self.logger.info(f"Deleted item at index {index}")
+                    return get_standardized_response(
+                        success=True, message=f"Deleted item at index {index}"
+                    )
+
+            self.logger.warning(f"Item at index {index} not found")
+            return get_standardized_response(
+                success=False,
+                message=f"Item at index {index} not found",
+                error="Item not found",
+            )
+
+        except ValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in delete_item: {error_msg}")
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to delete item: {error_msg}",
+                error=error_msg,
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error in delete_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return get_standardized_response(
+                success=False,
+                message="Failed to delete item due to an internal error",
+                error=error_msg,
+            )
+
+    async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
+        """
+        Replace an item in the model at the specified index.
+
+        Args:
+            index: The index of the item to replace
+            content: The new content of the item
+
+        Returns:
+            A dictionary with the result of the operation
+        """
+        try:
+            # Validate inputs
+            validate_index(index, self.code_items, one_based=True)
+            validate_content(content)
+            validate_python_code_safety(content)
+
+            # Add the code fragment to the dictionary misuse validator
+            self.dict_validator.add_fragment(content, index)
+            self.logger.debug(f"Added fragment to dictionary validator: item {index}")
+
+            # Check if the item exists
+            for i, (idx, _) in enumerate(self.code_items):
+                if idx == index:
+                    # Replace existing item
+                    self.code_items[i] = (index, content)
+                    self.logger.info(f"Replaced item at index {index}")
+                    return get_standardized_response(
+                        success=True, message=f"Replaced item at index {index}"
+                    )
+
+            # Item not found, add as new
+            self.logger.warning(f"Item at index {index} not found, adding as new")
+            return await self.add_item(index, content)
+
+        except ValidationError as e:
+            error_msg = str(e)
+            self.logger.error(f"Validation error in replace_item: {error_msg}")
+            return get_standardized_response(
+                success=False,
+                message=f"Failed to replace item: {error_msg}",
+                error=error_msg,
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error in replace_item: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return get_standardized_response(
+                success=False,
+                message="Failed to replace item due to an internal error",
+                error=error_msg,
+            )
+
+    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+        """
+        Solve the current MaxSAT optimization model with a timeout.
+
+        Args:
+            timeout: Maximum time to spend on solving
+
+        Returns:
+            A dictionary with the solving result, including optimization details
+        """
+        try:
+            if not self.initialized:
+                return get_standardized_response(
+                    success=False,
+                    message="Model manager not initialized",
+                    error="Not initialized",
+                )
+
+            if not self.code_items:
+                return get_standardized_response(
+                    success=False,
+                    message="No model items to solve",
+                    error="Empty model",
+                )
+
+            # Validate timeout
+            validate_timeout(timeout, MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT)
+
+            # Validate code fragments for dictionary misuse
+            dict_validation_result = self.dict_validator.validate()
+            if dict_validation_result["has_errors"]:
+                # Dictionary misuse detected, format errors for user
+                error_messages = []
+                for error in dict_validation_result["errors"]:
+                    item_index = error.get("item", "?")
+                    line_num = error.get("fragment_line", error.get("line", "?"))
+                    error_messages.append(
+                        f"Item {item_index}, Line {line_num}: {error['message']} {error['suggestion']}"
+                    )
+
+                self.logger.warning(f"Dictionary misuse detected: {error_messages}")
+
+                return get_standardized_response(
+                    success=False,
+                    message="Your code contains a common dictionary usage error that will cause unexpected behavior.",
+                    error="Dictionary misuse detected",
+                    error_details={
+                        "errors": error_messages,
+                        "suggestion": "Check how you're updating dictionary variables. Use var_dict[key] = value instead of var_dict = value.",
+                    },
+                )
+
+            # Sort code items by index
+            sorted_items = sorted(self.code_items, key=lambda x: x[0])
+
+            # Join code items into a single string
+            code_string = "\n".join(content for _, content in sorted_items)
+
+            # Perform static analysis on the code before executing it
+            try:
+                import ast
+
+                ast_tree = ast.parse(code_string)
+
+                # Check for RC2 usage or other MaxSAT solvers
+                maxsat_solver_found = False
+                wcnf_found = False
+                for node in ast.walk(ast_tree):
+                    # Check for RC2 instantiation
+                    if (isinstance(node, ast.Call) and 
+                        isinstance(node.func, ast.Name) and 
+                        node.func.id == "RC2"):
+                        maxsat_solver_found = True
+                        self.logger.debug("Found RC2 solver in code")
+                    # Check for with RC2(wcnf) pattern
+                    elif (isinstance(node, ast.withitem) and 
+                          isinstance(node.context_expr, ast.Call) and 
+                          isinstance(node.context_expr.func, ast.Name) and 
+                          node.context_expr.func.id == "RC2"):
+                        maxsat_solver_found = True
+                        self.logger.debug("Found RC2 context manager in code")
+                    # Check for WCNF usage 
+                    elif (isinstance(node, ast.Call) and 
+                          isinstance(node.func, ast.Name) and 
+                          node.func.id == "WCNF"):
+                        wcnf_found = True
+                        self.logger.debug("Found WCNF formula in code")
+
+                if not maxsat_solver_found:
+                    self.logger.warning("No MaxSAT solver found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No MaxSAT solver found in the code. For optimization problems, you need to use RC2 or another MaxSAT solver.",
+                        error="Missing MaxSAT solver",
+                        code_analysis="Missing RC2 solver instantiation",
+                    )
+
+                if not wcnf_found:
+                    self.logger.warning("No WCNF formula found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No WCNF formula found in the code. MaxSAT optimization requires a WCNF formula with soft clauses.",
+                        error="Missing WCNF formula",
+                        code_analysis="Missing WCNF formula instantiation",
+                    )
+
+                # Check for solver.compute() calls (for RC2)
+                compute_calls = 0
+                for node in ast.walk(ast_tree):
+                    if isinstance(node, ast.Call):
+                        if (
+                            isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "compute"
+                            and isinstance(node.func.value, ast.Name)
+                        ):
+                            compute_calls += 1
+
+                if compute_calls == 0:
+                    self.logger.warning("No solver.compute() call found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No solver.compute() call found in the code. For MaxSAT optimization with RC2, use solver.compute() instead of solver.solve().",
+                        error="Missing compute call",
+                        code_analysis="Missing solver.compute() call",
+                    )
+
+                # Check for export_maxsat_solution calls
+                export_calls = 0
+                for node in ast.walk(ast_tree):
+                    if isinstance(node, ast.Call):
+                        if (
+                            isinstance(node.func, ast.Name)
+                            and node.func.id == "export_maxsat_solution"
+                        ):
+                            export_calls += 1
+
+                if export_calls == 0:
+                    self.logger.warning("No export_maxsat_solution() call found in the code")
+                    return get_standardized_response(
+                        success=False,
+                        message="No export_maxsat_solution() call found in the code. For MaxSAT optimization, use export_maxsat_solution() to return results.",
+                        error="Missing export_maxsat_solution call",
+                        code_analysis="Missing export_maxsat_solution() call",
+                    )
+
+            except SyntaxError as e:
+                line_num = e.lineno if hasattr(e, "lineno") else "?"
+                col_num = e.offset if hasattr(e, "offset") else "?"
+                error_text = (
+                    e.text.strip() if hasattr(e, "text") and e.text else "unknown"
+                )
+
+                self.logger.error(
+                    f"Syntax error in code at line {line_num}, column {col_num}: {str(e)}"
+                )
+                return get_standardized_response(
+                    success=False,
+                    message=f"Syntax error at line {line_num}, column {col_num}: {str(e)}",
+                    error="Syntax error",
+                    error_details={
+                        "line": line_num,
+                        "column": col_num,
+                        "code": error_text,
+                        "message": str(e),
+                    },
+                )
+            except Exception as e:
+                self.logger.error(f"Error analyzing code: {str(e)}")
+                # Continue despite analysis error
+
+            # Modify the code to enhance debugging
+            modified_code = self._enhance_code_for_debugging(code_string)
+
+            # Set timeout
+            timeout_seconds = timeout.total_seconds()
+
+            # Execute code with timeout
+            start_time = time.time()
+            self.last_result = execute_pysat_code(
+                modified_code, timeout=timeout_seconds
+            )
+            self.last_solve_time = time.time() - start_time
+
+            # Check if there were execution errors
+            if self.last_result.get("error"):
+                error_msg = self.last_result["error"]
+                self.logger.error(f"Error executing code: {error_msg}")
+                return get_standardized_response(
+                    success=False,
+                    message=f"Error executing code: {error_msg}",
+                    error="Execution error",
+                )
+
+            # Extract solver output to check for solution data
+            output = self.last_result.get("output", "")
+            satisfiable = False
+            maxsat_data_present = False
+
+            # Look for MaxSAT marker in the output
+            maxsat_marker = re.search(r"_is_maxsat_solution", output)
+            if maxsat_marker:
+                maxsat_data_present = True
+                self.logger.debug("Found MaxSAT solution marker in output")
+
+            # Parse output for explicit satisfiability result
+            sat_match = re.search(
+                r"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=(\w+)", output
+            )
+            if sat_match:
+                satisfiable = sat_match.group(1).lower() == "true"
+                self.logger.debug(
+                    f"Found explicit satisfiability result: {satisfiable}"
+                )
+            
+            # Extract solution if available
+            if self.last_result.get("solution"):
+                self.last_solution = self.last_result["solution"]
+            else:
+                # Create a minimal solution with just the satisfiability flag
+                self.last_solution = {
+                    "satisfiable": satisfiable,
+                    "status": "optimal" if satisfiable else "unsatisfiable",
+                    "values": {},
+                }
+
+            # Ensure there's a 'values' dictionary for standardized access
+            if "values" not in self.last_solution:
+                self.last_solution["values"] = {}
+
+            # Try to find direct MaxSAT result in the output first
+            maxsat_result_pattern = re.compile(r"MaxSAT Result: ({.*})")
+            maxsat_result_match = maxsat_result_pattern.search(output)
+            if maxsat_result_match:
+                try:
+                    maxsat_result_str = maxsat_result_match.group(1)
+                    self.logger.debug(f"Found direct MaxSAT result output: {maxsat_result_str}")
+                    # Try to evaluate it as a Python dictionary
+                    import ast
+                    maxsat_data = ast.literal_eval(maxsat_result_str)
+                    if isinstance(maxsat_data, dict):
+                        self.logger.debug("Successfully parsed direct MaxSAT result")
+                        # Create a proper MaxSAT solution structure
+                        self.last_solution = {
+                            "satisfiable": maxsat_data.get("satisfiable", True),
+                            "status": maxsat_data.get("status", "optimal"),
+                            "values": maxsat_data.get("values", {}),
+                            "maxsat_result": maxsat_data,
+                        }
+                        # Add direct fields for convenience
+                        if "cost" in maxsat_data:
+                            self.last_solution["cost"] = maxsat_data["cost"]
+                        if "total_value" in maxsat_data:
+                            self.last_solution["objective"] = maxsat_data["total_value"]
+                        if "selected_items" in maxsat_data:
+                            self.last_solution["selected_items"] = maxsat_data["selected_items"]
+                        # Mark as MaxSAT data
+                        maxsat_data_present = True
+                except Exception as e:
+                    self.logger.error(f"Error parsing direct MaxSAT result: {str(e)}")
+            
+            # Also try the standard debug output
+            last_solution_pattern = re.compile(r"DEBUG - _LAST_SOLUTION set to: (.*)")
+            last_solution_match = last_solution_pattern.search(output)
+            if last_solution_match:
+                try:
+                    last_solution_str = last_solution_match.group(1)
+                    # Preprocess string to improve JSON compatibility
+                    last_solution_str = self._prepare_solution_string_for_json(
+                        last_solution_str
+                    )
+
+                    # Try to parse as JSON
+                    import json
+
+                    try:
+                        last_solution_data = json.loads(last_solution_str)
+                        if isinstance(last_solution_data, dict):
+                            # Enhanced copy mechanism for all solution data
+                            self._merge_solution_data(last_solution_data)
+                            
+                            # Check for MaxSAT data in the solution
+                            if "_is_maxsat_solution" in last_solution_data:
+                                maxsat_data_present = True
+                                self.logger.debug("Found MaxSAT solution marker in data")
+                                
+                                # Extract satisfiability from the MaxSAT solution
+                                satisfiable = last_solution_data.get("satisfiable", False)
+                                self.last_solution["satisfiable"] = satisfiable
+                                
+                                # For MaxSAT, use optimal/unsatisfiable as status
+                                self.last_solution["status"] = "optimal" if satisfiable else "unsatisfiable"
+                                
+                            # Check for maxsat_data or maxsat_result directly
+                            if "maxsat_data" in last_solution_data:
+                                maxsat_data_present = True
+                                self.logger.debug("Found maxsat_data in solution")
+                                
+                                # Ensure the maxsat_data is properly copied to the solution
+                                if isinstance(last_solution_data["maxsat_data"], dict):
+                                    maxsat_data = last_solution_data["maxsat_data"]
+                                    self.last_solution["maxsat_result"] = maxsat_data
+                                    
+                                    # Extract key metrics
+                                    if "cost" in maxsat_data:
+                                        self.last_solution["cost"] = maxsat_data["cost"]
+                                    if "objective" in maxsat_data:
+                                        self.last_solution["objective"] = maxsat_data["objective"]
+                                    if "status" in maxsat_data:
+                                        self.last_solution["status"] = maxsat_data["status"]
+                            
+                            elif "maxsat_result" in last_solution_data:
+                                maxsat_data_present = True
+                                self.logger.debug("Found maxsat_result in solution")
+                                
+                                # Extract satisfiability from MaxSAT result if available
+                                if isinstance(last_solution_data["maxsat_result"], dict):
+                                    maxsat_result = last_solution_data["maxsat_result"]
+                                    if "satisfiable" in maxsat_result:
+                                        satisfiable = maxsat_result["satisfiable"]
+                                        self.last_solution["satisfiable"] = satisfiable
+                                    
+                                    # For MaxSAT, use optimal/unsatisfiable as status
+                                    if "status" in maxsat_result:
+                                        self.last_solution["status"] = maxsat_result["status"]
+                                    else:
+                                        self.last_solution["status"] = "optimal" if satisfiable else "unsatisfiable"
+                                
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"Error parsing solution JSON: {str(e)}")
+                        self.logger.debug(
+                            f"Problematic JSON string: {last_solution_str[:100]}..."
+                        )
+
+                        # Attempt alternative parsing using ast.literal_eval which is more forgiving
+                        if self._try_alternative_parsing(last_solution_str):
+                            # Check for MaxSAT data after alternative parsing
+                            if "_is_maxsat_solution" in self.last_solution or "maxsat_data" in self.last_solution:
+                                maxsat_data_present = True
+                                self.logger.debug("Found MaxSAT data after alternative parsing")
+                        
+                        # Even with parsing error, we'll keep the solution data we have
+                        self.last_solution["warning"] = (
+                            f"Solution parsing warning: {str(e)}"
+                        )
+                except Exception as e:
+                    self.logger.error(f"Error extracting solution: {str(e)}")
+                    self.last_solution["warning"] = (
+                        f"Solution extraction error: {str(e)}"
+                    )
+
+            # Add solve time to solution
+            self.last_solution["solve_time"] = f"{self.last_solve_time:.6f} seconds"
+
+            # Verify this is actually a MaxSAT optimization problem
+            if not maxsat_data_present:
+                self.logger.warning("No MaxSAT data found in the solution")
+                warning_msg = (
+                    "Solution does not contain MaxSAT optimization data. "
+                    "Make sure you're using a WCNF formula with soft clauses, an RC2 solver, "
+                    "and calling export_maxsat_solution() to return results."
+                )
+                
+                if "warnings" not in self.last_solution:
+                    self.last_solution["warnings"] = []
+                self.last_solution["warnings"].append(warning_msg)
+
+            # Prepare the optimization-specific response
+            is_optimal = self.last_solution.get("status") == "optimal"
+            
+            # Construct message based on solution data
+            if satisfiable:
+                message = "MaxSAT optimization completed successfully"
+                if is_optimal:
+                    message += " (optimal solution found)"
+                else:
+                    message += " (feasible solution found)"
+                
+                # Add cost/objective details if available
+                if "cost" in self.last_solution:
+                    message += f" with cost: {self.last_solution['cost']}"
+                elif "objective" in self.last_solution:
+                    message += f" with objective: {self.last_solution['objective']}"
+            else:
+                message = "MaxSAT optimization completed (no feasible solution found)"
+                if "status" in self.last_solution and self.last_solution["status"] != "unsatisfiable":
+                    message += f" - status: {self.last_solution['status']}"
+            
+            # Build the response
+            response = {
+                "message": message,
+                "success": True,
+                "solve_time": f"{self.last_solve_time:.6f} seconds",
+                "output": output,
+                "satisfiable": satisfiable,
+                "status": self.last_solution.get("status", "optimal" if satisfiable else "unsatisfiable"),
+                "is_optimization": True,
+            }
+            
+            # Include optimization-specific fields
+            if "cost" in self.last_solution:
+                response["cost"] = self.last_solution["cost"]
+            if "objective" in self.last_solution:
+                response["objective"] = self.last_solution["objective"]
+                
+            # Include the maxsat_result if available
+            if "maxsat_result" in self.last_solution:
+                response["maxsat_result"] = self.last_solution["maxsat_result"]
+                
+            # Include values dictionary
+            if self.last_solution.get("values"):
+                response["values"] = self.last_solution["values"]
+
+            # Include warnings if any
+            if self.last_solution.get("warnings"):
+                response["warnings"] = self.last_solution["warnings"]
+
+            return response
+
+        except Exception as e:
+            # Log the error
+            self.logger.error(f"Error in solve_model: {str(e)}", exc_info=True)
+
+            # Return a structured error response
+            return get_standardized_response(
+                success=False,
+                message=f"Error solving model: {str(e)}",
+                error="Internal error",
+            )
+
+    def _prepare_solution_string_for_json(self, solution_str):
+        """
+        Prepare a solution string for JSON parsing by handling common formatting issues.
+
+        Args:
+            solution_str: The solution string extracted from output
+
+        Returns:
+            A cleaned string ready for JSON parsing
+        """
+        # Replace Python syntax with JSON syntax
+        clean_str = solution_str.replace("'", '"')
+        clean_str = clean_str.replace("True", "true").replace("False", "false")
+        clean_str = clean_str.replace("None", "null")
+
+        # Fix common tuple formatting issues (convert Python tuples to JSON arrays)
+        # Handle simple tuples with two numbers
+        clean_str = re.sub(r"\((\d+),\s*(\d+)\)", r"[\1, \2]", clean_str)
+        
+        # Handle tuples with three numbers (e.g., in cut_edges)
+        clean_str = re.sub(r"\((\d+),\s*(\d+),\s*(\d+)\)", r"[\1, \2, \3]", clean_str)
+        
+        # Handle nested tuples in lists
+        clean_str = re.sub(r"\[\(", "[[", clean_str)
+        clean_str = re.sub(r"\)\]", "]]", clean_str)
+        clean_str = re.sub(r"\),\s*\(", "], [", clean_str)
+
+        # Remove trailing commas which are valid in Python but not in JSON
+        clean_str = re.sub(r",\s*([}\]])", r"\1", clean_str)
+        
+        # Handle MaxSAT specific patterns
+        # Fix any stray double quotes that might be inside strings
+        # Avoid using look-behind/look-ahead which can cause regex errors
+        clean_str = clean_str.replace('""', '\\"')
+        
+        # Replace NaN and Infinity with null (which is JSON compatible)
+        clean_str = re.sub(r"NaN", "null", clean_str)
+        clean_str = re.sub(r"Infinity", "null", clean_str)
+        
+        # Try to normalize any maxsat_data structure that might be causing issues
+        if "maxsat_data" in clean_str:
+            self.logger.debug("Found maxsat_data in solution, cleaning up structure")
+            
+            # Try to handle double quotes in maxsat_data fields
+            # This is tricky but helps with common extraction issues
+            clean_str = re.sub(r'(maxsat_data":\s*{"[^}]*})', 
+                              lambda m: m.group(1).replace('\\"', "'"), 
+                              clean_str)
+
+        return clean_str
+
+    def _merge_solution_data(self, solution_data):
+        """
+        Merge solution data from extracted output into the last_solution dictionary.
+
+        Args:
+            solution_data: Dictionary containing solution data
+        """
+        # Copy all fields, not just dictionaries
+        for key, value in solution_data.items():
+            # Special handling for dictionaries
+            if isinstance(value, dict):
+                if key not in self.last_solution or not isinstance(
+                    self.last_solution[key], dict
+                ):
+                    self.last_solution[key] = {}
+
+                # Merge dictionaries rather than replace
+                for inner_key, inner_value in value.items():
+                    self.last_solution[key][inner_key] = inner_value
+
+                self.logger.debug(f"Merged dictionary '{key}' into solution")
+            # Special handling for list fields
+            elif isinstance(value, list):
+                self.last_solution[key] = value
+                self.logger.debug(f"Copied list '{key}' to solution")
+            # For primitive values
+            else:
+                self.last_solution[key] = value
+                self.logger.debug(f"Copied value '{key}' to solution")
+
+        # Ensure values are properly formatted
+        if "values" in solution_data:
+            self.logger.debug(
+                f"Found values in solution_data: {solution_data['values']}"
+            )
+            # Convert JSON booleans back to Python booleans
+            for key, value in solution_data["values"].items():
+                if value is True or value == "true":
+                    self.last_solution["values"][key] = True
+                elif value is False or value == "false":
+                    self.last_solution["values"][key] = False
+                else:
+                    self.last_solution["values"][key] = value
+
+    def _try_alternative_parsing(self, solution_str):
+        """
+        Try alternative parsing methods when JSON parsing fails.
+
+        Args:
+            solution_str: The solution string that failed JSON parsing
+            
+        Returns:
+            Boolean indicating whether parsing succeeded
+        """
+        try:
+            # Try using Python's literal_eval which can handle more Python-like syntax
+            import ast
+
+            solution_data = ast.literal_eval(solution_str)
+
+            if isinstance(solution_data, dict):
+                self.logger.info(
+                    "Successfully parsed solution using ast.literal_eval fallback"
+                )
+                self._merge_solution_data(solution_data)
+                return True
+        except Exception as e:
+            self.logger.debug(f"Alternative parsing also failed: {str(e)}")
+
+            # Even if both parsing methods fail, try to extract any useful data using regex
+            if self._extract_data_with_regex(solution_str):
+                return True
+
+        return False
+
+    def _extract_data_with_regex(self, solution_str):
+        """
+        Extract critical data using regex patterns when all parsing fails.
+
+        Args:
+            solution_str: The solution string that failed parsing
+            
+        Returns:
+            Boolean indicating whether any useful data was extracted
+        """
+        extracted_something = False
+        
+        # Try to extract satisfiability
+        sat_match = re.search(
+            r"'satisfiable':\s*(true|false)", solution_str, re.IGNORECASE
+        )
+        if sat_match:
+            is_sat = sat_match.group(1).lower() == "true"
+            self.last_solution["satisfiable"] = is_sat
+            self.last_solution["status"] = "optimal" if is_sat else "unsatisfiable"
+            extracted_something = True
+            self.logger.debug(f"Extracted satisfiability from regex: {is_sat}")
+
+        # Try to extract cost/objective
+        cost_match = re.search(r"'cost':\s*(\d+)", solution_str)
+        if cost_match:
+            try:
+                cost = int(cost_match.group(1))
+                self.last_solution["cost"] = cost
+                extracted_something = True
+                self.logger.debug(f"Extracted cost from regex: {cost}")
+            except ValueError:
+                pass
+            
+        objective_match = re.search(r"'objective':\s*(-?\d+)", solution_str)
+        if objective_match:
+            try:
+                objective = int(objective_match.group(1))
+                self.last_solution["objective"] = objective
+                extracted_something = True
+                self.logger.debug(f"Extracted objective from regex: {objective}")
+            except ValueError:
+                pass
+                
+        # Try to extract MaxSAT status
+        status_match = re.search(r"'status':\s*\"(\w+)\"", solution_str)
+        if status_match:
+            status = status_match.group(1)
+            self.last_solution["status"] = status
+            extracted_something = True
+            self.logger.debug(f"Extracted status from regex: {status}")
+
+        return extracted_something
+
+    def _enhance_code_for_debugging(self, code_string: str) -> str:
+        """
+        Enhances the code with debug statements to aid in debugging.
+
+        Args:
+            code_string: The original code string
+
+        Returns:
+            Enhanced code string with debug information
+        """
+        # Add debug headers and imports if not present
+        debug_header = (
+            "# === DEBUG INSTRUMENTATION ===\n"
+            "import traceback\n"
+            "# === END DEBUG HEADER ===\n\n"
+        )
+
+        modified_code = debug_header + code_string
+
+        # Modify the code to add debug info around solver.compute() calls
+        modified_lines = []
+        lines = modified_code.split("\n")
+
+        for i, line in enumerate(lines):
+            modified_lines.append(line)
+
+            # Add debugging for if solver.compute():
+            if re.search(r"if\s+\w+\.compute\(\)", line):
+                # Capture the solver variable name
+                solver_var = re.search(r"if\s+(\w+)\.compute\(\)", line)
+                if solver_var:
+                    solver_name = solver_var.group(1)
+                    # Indent level of the original line
+                    indent = re.match(r"^(\s*)", line).group(1)
+                    next_indent = indent + "    "  # Assume 4-space indentation
+
+                    # Add debug prints after the conditional
+                    modified_lines.append(
+                        f'{next_indent}print(f"PYSAT_DEBUG_OUTPUT: model_is_satisfiable=True")'
+                    )
+                    modified_lines.append(
+                        f'{next_indent}print(f"PYSAT_DEBUG_OUTPUT: solver={solver_name!r}")'
+                    )
+
+            # Add debugging for model = solver.compute():
+            if re.search(r"\w+\s*=\s*\w+\.compute\(\)", line):
+                # Capture the solver variable name
+                solver_var = re.search(r"\w+\s*=\s*(\w+)\.compute\(\)", line)
+                if solver_var:
+                    solver_name = solver_var.group(1)
+                    # Indent level of the original line
+                    indent = re.match(r"^(\s*)", line).group(1)
+
+                    # Add debug prints after the compute call
+                    modified_lines.append(
+                        f'{indent}print(f"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={{True if {solver_name}.model is not None else False}}")'
+                    )
+                    modified_lines.append(
+                        f'{indent}print(f"PYSAT_DEBUG_OUTPUT: solver={solver_name!r}")'
+                    )
+
+            # Add exception handling around export_maxsat_solution calls
+            if "export_maxsat_solution(" in line:
+                # Find indentation
+                indent = re.match(r"^(\s*)", line).group(1)
+
+                # Find the start of the function call
+                call_start = line.find("export_maxsat_solution(")
+
+                # If the call is not at the beginning of the line, we need to preserve what comes before it
+                prefix = line[:call_start]
+
+                # Extract the call and arguments
+                call_match = re.search(r"export_maxsat_solution\((.*)\)", line)
+                if call_match:
+                    args = call_match.group(1)
+
+                    # Replace the line with a try-except block
+                    modified_lines[-1] = f"{indent}try:"
+                    modified_lines.append(
+                        f"{indent}    {prefix}export_maxsat_solution({args})"
+                    )
+                    modified_lines.append(f"{indent}except Exception as e:")
+                    modified_lines.append(
+                        f'{indent}    print(f"PYSAT_DEBUG_OUTPUT: export_maxsat_solution_error={{str(e)}}")'
+                    )
+                    modified_lines.append(
+                        f'{indent}    print(f"PYSAT_DEBUG_OUTPUT: traceback={{traceback.format_exc()}}")'
+                    )
+                    modified_lines.append(
+                        f"{indent}    # Re-raise to ensure proper error handling"
+                    )
+                    modified_lines.append(f"{indent}    raise")
+
+        return "\n".join(modified_lines)
+
+    def get_solution(self) -> Dict[str, Any]:
+        """
+        Get the current solution.
+
+        Returns:
+            A dictionary with the current solution
+        """
+        if not self.last_solution:
+            return {"message": "No solution available", "success": False}
+
+        return {
+            "message": "Solution retrieved",
+            "success": True,
+            "solution": self.last_solution,
+        }
+
+    def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
+        """
+        Get the value of a variable from the current solution.
+
+        Args:
+            variable_name: The name of the variable
+
+        Returns:
+            A dictionary with the value of the variable
+        """
+        if not self.last_solution:
+            return {"message": "No solution available", "success": False}
+
+        # First, check if the variable is directly available in the solution
+        # This handles custom dictionaries like 'selected_features'
+        if variable_name in self.last_solution:
+            return {
+                "message": f"Value of dictionary '{variable_name}'",
+                "success": True,
+                "value": self.last_solution[variable_name],
+            }
+
+        # Then check in the values dictionary for individual variables
+        if "values" not in self.last_solution:
+            return {
+                "message": "Solution does not contain variable values",
+                "success": False,
+            }
+
+        values = self.last_solution["values"]
+        if variable_name not in values:
+            return {
+                "message": f"Variable '{variable_name}' not found in solution",
+                "success": False,
+            }
+
+        return {
+            "message": f"Value of variable '{variable_name}'",
+            "success": True,
+            "value": values[variable_name],
+        }
+
+    def get_solve_time(self) -> Dict[str, Any]:
+        """
+        Get the time taken for the last solve operation.
+
+        Returns:
+            A dictionary with the solve time information
+        """
+        if self.last_solve_time is None:
+            return {"message": "No solve time available", "success": False}
+
+        return {
+            "message": "Solve time retrieved",
+            "success": True,
+            "solve_time": f"{self.last_solve_time:.6f} seconds",
+        }
+
+    def get_optimization_result(self) -> Dict[str, Any]:
+        """
+        Get the optimization result including cost and objective values.
+        
+        Returns:
+            A dictionary with optimization result information
+        """
+        if not self.last_solution:
+            return {"message": "No solution available", "success": False}
+            
+        # Check if this is truly an optimization result
+        is_optimization = False
+        if "cost" in self.last_solution or "objective" in self.last_solution:
+            is_optimization = True
+        elif "maxsat_result" in self.last_solution:
+            is_optimization = True
+            
+        if not is_optimization:
+            return {
+                "message": "No optimization result available",
+                "success": False,
+                "error": "Not an optimization problem"
+            }
+            
+        # Extract optimization data
+        result = {
+            "message": "Optimization result retrieved",
+            "success": True,
+            "satisfiable": self.last_solution.get("satisfiable", False),
+            "status": self.last_solution.get("status", "unknown"),
+        }
+        
+        # Add cost/objective if available
+        if "cost" in self.last_solution:
+            result["cost"] = self.last_solution["cost"]
+        if "objective" in self.last_solution:
+            result["objective"] = self.last_solution["objective"]
+            
+        # Add MaxSAT specific data if available
+        if "maxsat_result" in self.last_solution:
+            result["maxsat_result"] = self.last_solution["maxsat_result"]
+            
+        return result

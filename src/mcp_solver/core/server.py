@@ -26,6 +26,7 @@ from .prompt_loader import load_prompt
 # Global flags for mode selection
 Z3_MODE = False
 PYSAT_MODE = False
+MAXSAT_MODE = False
 
 try:
     version_str = version("mcp-solver")
@@ -67,6 +68,11 @@ async def serve() -> None:
 
         model_mgr = PySATModelManager()
         logging.getLogger(__name__).info("Using PySAT model manager")
+    elif MAXSAT_MODE:
+        from ..maxsat.model_manager import MaxSATModelManager
+
+        model_mgr = MaxSATModelManager()
+        logging.getLogger(__name__).info("Using MaxSAT model manager")
     else:
         from ..mzn.model_manager import MiniZincModelManager
 
@@ -79,7 +85,7 @@ async def serve() -> None:
         Get the appropriate description based on the current mode.
 
         Args:
-            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'mzn')
+            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn')
                           or a string for a common description across all modes
 
         Returns:
@@ -92,7 +98,9 @@ async def serve() -> None:
             return descriptions["z3"]
         elif PYSAT_MODE and "pysat" in descriptions:
             return descriptions["pysat"]
-        elif not Z3_MODE and not PYSAT_MODE and "mzn" in descriptions:
+        elif MAXSAT_MODE and "maxsat" in descriptions:
+            return descriptions["maxsat"]
+        elif not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions:
             return descriptions["mzn"]
         elif "default" in descriptions:
             return descriptions["default"]
@@ -117,7 +125,14 @@ async def serve() -> None:
         # Choose the appropriate instruction prompt based on mode
         if name == "instructions":
             # Determine mode subfolder
-            mode_folder = "z3" if Z3_MODE else "pysat" if PYSAT_MODE else "mzn"
+            if Z3_MODE:
+                mode_folder = "z3"
+            elif PYSAT_MODE:
+                mode_folder = "pysat"
+            elif MAXSAT_MODE:
+                mode_folder = "maxsat"
+            else:
+                mode_folder = "mzn"
 
             logging.getLogger(__name__).info(
                 f"Loading {name} prompt for {mode_folder} mode"
@@ -187,6 +202,7 @@ async def serve() -> None:
                         "mzn": "Remove all items from the minizinc model, effectively resetting it.",
                         "z3": "Remove all items from the Z3 Python model, effectively resetting it.",
                         "pysat": "Remove all items from the PySAT Python model, effectively resetting it.",
+                        "maxsat": "Remove all items from the MaxSAT optimization model, effectively resetting it.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -198,6 +214,7 @@ async def serve() -> None:
                         "mzn": "Add new minizinc item to the model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
                         "z3": "Add new Python code to the Z3 model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
                         "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
+                        "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -216,6 +233,7 @@ async def serve() -> None:
                         "mzn": "Replace an existing item in the minizinc model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "z3": "Replace an existing item in the Z3 Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "pysat": "Replace an existing item in the PySAT Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                        "maxsat": "Replace an existing item in the MaxSAT optimization model at a specified index with new content. Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -234,6 +252,7 @@ async def serve() -> None:
                         "mzn": "Delete an item from the minizinc model at the specified index. Required parameter: 'index'.",
                         "z3": "Delete an item from the Z3 Python model at the specified index. Required parameter: 'index'.",
                         "pysat": "Delete an item from the PySAT Python model at the specified index. Required parameter: 'index'.",
+                        "maxsat": "Delete an item from the MaxSAT optimization model at the specified index. Required parameter: 'index'.",
                     }
                 ),
                 inputSchema={
@@ -249,6 +268,7 @@ async def serve() -> None:
                         "mzn": "Fetch the current content of the minizinc model, listing each item with its index.",
                         "z3": "Fetch the current content of the Z3 Python model, listing each item with its index.",
                         "pysat": "Fetch the current content of the PySAT Python model, listing each item with its index.",
+                        "maxsat": "Fetch the current content of the MaxSAT optimization model, listing each item with its index.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -260,6 +280,7 @@ async def serve() -> None:
                         "mzn": "Solve the current minizinc model with a timeout parameter. Required parameter: 'timeout'.",
                         "z3": "Solve the current Z3 Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "pysat": "Solve the current PySAT Python model with a timeout parameter. Required parameter: 'timeout'.",
+                        "maxsat": "Solve the current MaxSAT optimization model with a timeout parameter. Required parameter: 'timeout'.",
                     }
                 ),
                 inputSchema={
@@ -568,17 +589,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MCP Solver")
     parser.add_argument("--z3", action="store_true", help="Use Z3 solver")
     parser.add_argument("--pysat", action="store_true", help="Use PySAT solver")
+    parser.add_argument("--maxsat", action="store_true", help="Use MaxSAT optimization solver")
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
     # Set global flags based on arguments
-    global Z3_MODE, PYSAT_MODE
+    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
+    MAXSAT_MODE = args.maxsat
 
     # Check for incompatible flags
-    if Z3_MODE and PYSAT_MODE:
-        print("Error: Cannot use both --z3 and --pysat flags at the same time")
+    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE]) > 1:
+        print("Error: Cannot use multiple solver mode flags at the same time")
         return 1
 
     # Log the mode
@@ -586,6 +609,8 @@ def main() -> int:
         logging.getLogger(__name__).info("Server running with Z3 solver")
     elif PYSAT_MODE:
         logging.getLogger(__name__).info("Server running with PySAT solver")
+    elif MAXSAT_MODE:
+        logging.getLogger(__name__).info("Server running with MaxSAT optimization solver")
     else:
         logging.getLogger(__name__).info("Server running with MiniZinc solver")
 

@@ -69,6 +69,14 @@ DEFAULT_MODEL = "AT:claude-sonnet-4-20250514"  # Anthropic Claude Sonnet 4
 DEFAULT_SERVER_COMMAND = "uv"
 DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn"]
 
+# Mode-specific server arguments
+MODE_SERVER_ARGS = {
+    "mzn": ["run", "mcp-solver-mzn"],
+    "z3": ["run", "mcp-solver-z3"],
+    "pysat": ["run", "mcp-solver-pysat"],
+    "maxsat": ["run", "mcp-solver-maxsat"]
+}
+
 # Global Rich Console instance with color support
 console = Console(color_system="truecolor")
 _current_title = None  # Stores the current title for system messages
@@ -342,6 +350,12 @@ def parse_arguments():
         help='Server command to use. Format: "command arg1 arg2 arg3..."',
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["mzn", "z3", "pysat", "maxsat"],
+        help="Solver mode to use (overrides automatic detection)",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=DEFAULT_MODEL,
@@ -586,6 +600,7 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
 
     # Set up server command and args
     if state.get("server_command") and state.get("server_args"):
+        # Custom server command specified via --server argument
         mcp_command = state["server_command"]
         mcp_args = state["server_args"]
         print(
@@ -593,10 +608,12 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
             flush=True,
         )
     else:
+        # Use mode-specific server args
+        mode = state.get("mode", "mzn")
         mcp_command = DEFAULT_SERVER_COMMAND
-        mcp_args = DEFAULT_SERVER_ARGS
+        mcp_args = MODE_SERVER_ARGS.get(mode, DEFAULT_SERVER_ARGS)
         print(
-            f"Using default server command: {mcp_command} {' '.join(mcp_args)}",
+            f"Using {mode} mode server command: {mcp_command} {' '.join(mcp_args)}",
             flush=True,
         )
 
@@ -1066,15 +1083,23 @@ async def main():
     # Initialize token counter (always enabled regardless of --no-stats flag)
     _ = TokenCounter.get_instance()
 
-    # Determine mode from the server command, not from the model code
-    mode = "mzn"  # Default to MiniZinc
-
-    if args.server:
+    # Determine mode from arguments or server command
+    if args.mode:
+        # Use explicit mode if provided
+        mode = args.mode
+    elif args.server:
+        # Otherwise detect from server command
+        mode = "mzn"  # Default to MiniZinc
         server_cmd = args.server.lower()
         if "z3" in server_cmd:
             mode = "z3"
+        elif "maxsat" in server_cmd:
+            mode = "maxsat"
         elif "pysat" in server_cmd:
             mode = "pysat"
+    else:
+        # Default to MiniZinc if no mode or server specified
+        mode = "mzn"
 
     print(f"Detected mode: {mode}")
 
@@ -1091,7 +1116,7 @@ async def main():
     # Store args in state for later use
     state["args"] = args
 
-    # Store mode in state for later use in JSON output
+    # Store mode in state for later use in JSON output and server selection
     state["mode"] = mode
 
     # Initialize mem_solution and mem_model

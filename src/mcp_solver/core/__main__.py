@@ -51,6 +51,15 @@ def main_pysat():
     return server_main()
 
 
+def main_maxsat():
+    """Entry point for MaxSAT optimization mode"""
+    from .server import main as server_main
+
+    # Set command line arguments for MaxSAT mode
+    sys.argv = [sys.argv[0], "--maxsat"]
+    return server_main()
+
+
 if __name__ == "__main__":
     try:
         sys.exit(main())
