@@ -83,6 +83,11 @@ with RC2(wcnf) as solver:
 - **Export Solution**: Always use `export_maxsat_solution()` to return results
 - **WCNF vs CNF**: Always use `WCNF()` for MaxSAT optimization problems, not `CNF()`
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
+- **Soft Constraint Literals**: Always use brackets around literals in `wcnf.append()` calls:
+  - ✅ Correct: `wcnf.append([x], weight=1)` (with square brackets)
+  - ❌ Incorrect: `wcnf.append(x, weight=1)` (missing brackets)
+  - ❌ Incorrect: `wcnf.append(, weight=1)` (incomplete)
+- **Dictionary Summation**: When summing values in a dictionary, use `sum(dict.values())` not `sum(dict)`
 
 ## Available Tools
 
@@ -161,8 +166,9 @@ with RC2(wcnf) as solver:
     
     if model is not None:
         # Calculate the total value of selected items
+        item_values = {1: 10, 2: 5, 3: 7, 4: 12}  # Map variables to their values
         total_value = sum(
-            weight for var, weight in zip([1, 2, 3, 4], [10, 5, 7, 12])
+            item_values[var] for var in [1, 2, 3, 4]
             if var in model
         )
         
