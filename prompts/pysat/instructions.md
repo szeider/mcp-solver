@@ -18,8 +18,6 @@ The MCP Solver integrates PySAT solving with the Model Context Protocol, allowin
 
 These tools let you construct your model incrementally and solve it using a SAT solver.
 
-> **Note:** For optimization problems using MaxSAT (Maximum Satisfiability), please use the dedicated MaxSAT mode by running `uv run mcp-solver-maxsat`. The PySAT mode is designed for satisfiability problems only.
-
 
 ## Quick Start Example
 
@@ -425,7 +423,5 @@ solver.delete()
 - **Split long code parts** into smaller items.
 - **Verification:**  
   Always verify the solution after a solve operation by checking that all constraints are satisfied and justified.
-- **For Optimization Problems:**  
-  Use the dedicated MaxSAT mode by running `uv run mcp-solver-maxsat`. MaxSAT extends SAT by differentiating between hard constraints (must be satisfied) and soft constraints (can be violated at a cost).
 
 Happy modeling with MCP Solver!
