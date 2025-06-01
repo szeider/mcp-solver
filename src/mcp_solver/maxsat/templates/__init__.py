@@ -8,6 +8,8 @@ easier to build and solve MaxSAT problems.
 from .basic_templates import *
 from .optimization_templates import *
 from .variable_mapping import *
+from .cardinality_constraints import *
+from .objective_helpers import *
 
 __all__ = [
     # From basic_templates
@@ -25,5 +27,18 @@ __all__ = [
     
     # From variable_mapping
     "VariableMap",
-    "create_variable_map"
+    "create_variable_map",
+    
+    # From cardinality_constraints
+    "at_most_k",
+    "at_least_k",
+    "prefer_at_least_k",
+    "prefer_at_most_k",
+    
+    # From objective_helpers
+    "maximize_sum",
+    "minimize_sum",
+    "optimize_net_value",
+    "calculate_objective_value",
+    "encode_weighted_selection"
 ]

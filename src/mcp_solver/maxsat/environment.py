@@ -66,7 +66,20 @@ from mcp_solver.maxsat.templates import (
     
     # From variable_mapping
     VariableMap,
-    create_variable_map
+    create_variable_map,
+    
+    # From cardinality_constraints
+    at_most_k as maxsat_at_most_k,
+    at_least_k as maxsat_at_least_k,
+    prefer_at_least_k,
+    prefer_at_most_k,
+    
+    # From objective_helpers
+    maximize_sum,
+    minimize_sum,
+    optimize_net_value,
+    calculate_objective_value,
+    encode_weighted_selection
 )
 
 # We need to create our own version of _execute_pysat_code_in_process that includes
@@ -223,6 +236,17 @@ def if_then_else(condition, then_var, else_var):
             "knapsack_problem": knapsack_problem,
             "VariableMap": VariableMap,
             "create_variable_map": create_variable_map,
+            # Cardinality constraints (MaxSAT versions)
+            "at_most_k": maxsat_at_most_k,
+            "at_least_k": maxsat_at_least_k,
+            "prefer_at_least_k": prefer_at_least_k,
+            "prefer_at_most_k": prefer_at_most_k,
+            # Objective helpers
+            "maximize_sum": maximize_sum,
+            "minimize_sum": minimize_sum,
+            "optimize_net_value": optimize_net_value,
+            "calculate_objective_value": calculate_objective_value,
+            "encode_weighted_selection": encode_weighted_selection,
         }
 
         # Add common variable types needed for PySAT code

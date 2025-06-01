@@ -43,11 +43,12 @@ A, B, C = 1, 2, 3
 wcnf.append([A, B])        # A OR B
 wcnf.append([-A, -B])      # NOT A OR NOT B (can't both be true)
 
-# Add soft constraints with weights (satisfy if possible)
-wcnf.append([A], weight=2)       # Try to make A true (value 2)
-wcnf.append([B], weight=3)       # Try to make B true (value 3)
-wcnf.append([C], weight=5)       # Try to make C true (value 5)
-wcnf.append([-C], weight=1)      # Try to make C false (value 1)
+# Add soft constraints with weights
+# IMPORTANT: The solver minimizes the sum of weights of UNSATISFIED clauses
+wcnf.append([A], weight=2)       # Cost 2 if A is FALSE (clause [A] unsatisfied)
+wcnf.append([B], weight=3)       # Cost 3 if B is FALSE (clause [B] unsatisfied)
+wcnf.append([C], weight=5)       # Cost 5 if C is FALSE (clause [C] unsatisfied)
+wcnf.append([-C], weight=1)      # Cost 1 if C is TRUE (clause [-C] unsatisfied)
 
 # Map variable IDs to meaningful names
 var_mapping = {
@@ -61,7 +62,7 @@ with RC2(wcnf) as solver:
     model = solver.compute()
     
     if model is not None:
-        print(f"Solution found with cost: {solver.cost}")
+        # Note: cost = sum of weights of unsatisfied soft clauses
         
         # Create a readable solution
         solution = {
@@ -72,7 +73,6 @@ with RC2(wcnf) as solver:
         # Export the MaxSAT solution
         export_maxsat_solution(solver, var_mapping)
     else:
-        print("No solution found (problem is unsatisfiable)")
         export_maxsat_solution({
             "satisfiable": False,
             "status": "unsatisfiable"
@@ -115,14 +115,40 @@ with RC2(wcnf) as solver:
 
 ## ⭐ MaxSAT Concepts
 
-MaxSAT distinguishes between two types of constraints:
+### Understanding MaxSAT Optimization (CRITICAL)
+
+**FUNDAMENTAL CONCEPT**: MaxSAT finds an assignment that:
+1. Satisfies ALL hard constraints (clauses without weights)
+2. **Minimizes the sum of weights of UNSATISFIED soft constraints**
+
+**Note**: If the hard constraints are contradictory (unsatisfiable), the solver will return `model = None` and the export will show `satisfiable: False` with `status: "unsatisfiable"`.
+
+This means:
+- If you have a soft clause `[x]` with weight W, the solver pays cost W if x is FALSE (clause unsatisfied)
+- If you have a soft clause `[-x]` with weight W, the solver pays cost W if x is TRUE (clause unsatisfied)
+- The `solver.cost` represents the total weight of all unsatisfied soft clauses
+
+### Converting Between Maximization and Minimization
+
+Since MaxSAT minimizes the cost of unsatisfied clauses, to maximize a value:
+- If setting x=TRUE gives value V, add soft clause `[x]` with weight V
+- This way, NOT selecting x (x=FALSE) costs V, so the solver will try to select it
+
+Example:
+```python
+# To maximize the selection of items with values
+item_value = 10
+wcnf.append([item_var], weight=item_value)  # Cost 10 if item NOT selected
+```
+
+### Types of Constraints
 
 1. **Hard Constraints**: Must be satisfied for a solution to be valid
+   - Added with: `wcnf.append([literals])`  (no weight parameter)
+   
 2. **Soft Constraints**: Can be violated at a cost equal to their weight
-
-The MaxSAT solver finds an assignment that:
-- Satisfies all hard constraints
-- Minimizes the total weight of violated soft constraints
+   - Added with: `wcnf.append([literals], weight=W)`  (positive weight value)
+   - The solver minimizes the sum of weights of violated soft constraints
 
 ### Key Components
 
@@ -131,6 +157,25 @@ The MaxSAT solver finds an assignment that:
 - **Soft Clauses**: Added with `wcnf.append([literals], weight=W)` (positive weight value)
 - **Cost**: Sum of weights of violated soft constraints (lower is better)
 - **RC2 Solver**: Modern MaxSAT solver with excellent performance
+
+### Cost vs. Objective Value
+
+Understanding the relationship between cost and your optimization objective is crucial:
+
+- **Cost** (`solver.cost`): What the solver minimizes - the sum of weights of unsatisfied soft clauses
+- **Objective**: Your problem's value (often different from cost)
+
+For maximization problems:
+- If you want to maximize a total value of 100, and achieve 80, then cost = 100 - 80 = 20
+- The cost represents the "lost value" from not achieving the maximum
+
+Example:
+```python
+# Problem: Select items to maximize total value
+total_possible_value = sum(all_item_values)
+achieved_value = sum(values of selected items)
+# solver.cost ≈ total_possible_value - achieved_value
+```
 
 ### Basic Optimization Example
 
@@ -491,11 +536,56 @@ import collections
 import itertools
 import re
 import json
+
+# MaxSAT helper functions (automatically available)
+from mcp_solver.maxsat.templates import (
+    # Objective helpers
+    maximize_sum, minimize_sum, optimize_net_value, calculate_objective_value,
+    # Cardinality constraints
+    at_least_k, at_most_k, prefer_at_least_k, prefer_at_most_k,
+    # Variable mapping
+    VariableMap, create_variable_map,
+    # Basic helpers
+    add_hard_constraint, add_soft_constraint, solve_maxsat_problem
+)
 ```
 
 ### Template Helpers
 
 The MCP Solver provides built-in helper functions for common MaxSAT patterns:
+
+#### Objective Optimization
+
+```python
+# Maximize sum of values
+maximize_sum(wcnf, [(var1, 10), (var2, 20), (var3, 15)])
+# Creates soft clauses [var] with weight=value for each
+
+# Minimize sum of costs  
+minimize_sum(wcnf, [(var1, 5), (var2, 8), (var3, 3)])
+# Creates soft clauses [-var] with weight=cost for each
+
+# Handle items with both benefits and costs
+optimize_net_value(wcnf, [
+    (var1, benefit=20, cost=5),   # net value = 15 (positive)
+    (var2, benefit=10, cost=15),  # net value = -5 (negative)
+])
+
+# Calculate achieved objective value from solution
+objective = calculate_objective_value(model, [(var1, 10), (var2, 20)])
+```
+
+#### Cardinality Constraints
+
+```python
+# Hard constraints
+at_least_k(wcnf, [var1, var2, var3, var4], k=2)  # At least 2 must be true
+at_most_k(wcnf, [var1, var2, var3, var4], k=3)   # At most 3 can be true
+
+# Soft preferences (simpler encoding for optimization)
+prefer_at_least_k(wcnf, variables, k=5, penalty_per_missing=10)
+prefer_at_most_k(wcnf, variables, k=3, penalty_per_extra=5)
+```
 
 #### Variable Mapping
 
@@ -516,7 +606,7 @@ with RC2(wcnf) as solver:
     if model:
         # Convert to meaningful variable assignments
         solution = var_map.interpret_model(model)
-        print(solution)  # {'x1': True, 'x2': False, ...}
+        # solution will be {'x1': True, 'x2': False, ...}
 ```
 
 #### Basic Templates
@@ -580,6 +670,160 @@ result = knapsack_problem(
 - Values will be automatically extracted into a flat "values" dictionary
 - For optimization problems, include `cost` and/or `objective` fields
 - For convenience, include problem-specific fields like `selected_items` or `assignment`
+
+## Common Problem Patterns
+
+### Assignment Problems (Workers to Tasks)
+
+```python
+# Workers assigned to tasks with preferences
+workers = ["Alice", "Bob", "Carol"]
+tasks = ["Task1", "Task2", "Task3"]
+
+# Create assignment variables
+assignments = {}
+for worker in workers:
+    for task in tasks:
+        var = create_var(f"{worker}_{task}")
+        assignments[(worker, task)] = var
+
+# Each task needs exactly one worker
+for task in tasks:
+    task_vars = [assignments[(w, task)] for w in workers]
+    exactly_one(wcnf, task_vars)  # Hard constraint
+
+# Workers have preferences (enthusiasm scores)
+preferences = {
+    ("Alice", "Task1"): 8,
+    ("Alice", "Task2"): 5,
+    ("Bob", "Task1"): 6,
+    ("Bob", "Task3"): 9,
+    ("Carol", "Task2"): 7,
+    ("Carol", "Task3"): 6
+}
+
+# Maximize total enthusiasm
+var_value_pairs = [(assignments[key], value) for key, value in preferences.items()]
+maximize_sum(wcnf, var_value_pairs)
+```
+
+### Selection with Budget
+
+```python
+# Select items within budget constraint
+items = {
+    "A": {"cost": 10, "value": 25},
+    "B": {"cost": 15, "value": 30},
+    "C": {"cost": 8, "value": 18},
+    "D": {"cost": 12, "value": 22}
+}
+budget = 30
+
+# Create selection variables
+item_vars = {name: create_var(name) for name in items}
+
+# Budget constraint (simplified for small problems)
+# For each subset exceeding budget, at least one must be false
+for subset_size in range(2, len(items) + 1):
+    for subset in itertools.combinations(items.keys(), subset_size):
+        total_cost = sum(items[i]["cost"] for i in subset)
+        if total_cost > budget:
+            wcnf.append([-item_vars[i] for i in subset])
+
+# Maximize value
+maximize_sum(wcnf, [(item_vars[name], info["value"]) for name, info in items.items()])
+```
+
+### Scheduling with Soft Preferences
+
+```python
+# Schedule shifts with preferences and constraints
+shifts = ["Morning", "Afternoon", "Night"]
+workers = ["Alex", "Beth", "Carl", "Dana"]
+
+# Create shift assignment variables
+shift_vars = {}
+for worker in workers:
+    for shift in shifts:
+        shift_vars[(worker, shift)] = create_var(f"{worker}_{shift}")
+
+# Hard: Each shift needs between 2-3 workers
+for shift in shifts:
+    vars_for_shift = [shift_vars[(w, shift)] for w in workers]
+    at_least_k(wcnf, vars_for_shift, k=2)
+    at_most_k(wcnf, vars_for_shift, k=3)
+
+# Soft: Workers should work 1-2 shifts (preference)
+for worker in workers:
+    vars_for_worker = [shift_vars[(worker, s)] for s in shifts]
+    prefer_at_least_k(wcnf, vars_for_worker, k=1, penalty_per_missing=5)
+    prefer_at_most_k(wcnf, vars_for_worker, k=2, penalty_per_extra=3)
+
+# Worker preferences for shifts
+preferences = {
+    ("Alex", "Morning"): 8,
+    ("Beth", "Afternoon"): 7,
+    ("Carl", "Night"): 9,
+    # ... more preferences
+}
+maximize_sum(wcnf, [(shift_vars[key], value) for key, value in preferences.items()])
+```
+
+## Debugging MaxSAT Solutions
+
+When your solution has unexpectedly high cost or doesn't produce expected results:
+
+### 1. Check Your Soft Constraint Encoding
+
+```python
+# WRONG: Thinking this "prefers" item selection
+wcnf.append([item_var], weight=value)  # Actually: cost if item NOT selected
+
+# Remember: weight is the cost of the clause being UNSATISFIED
+# Clause [x] is unsatisfied when x=FALSE
+# Clause [-x] is unsatisfied when x=TRUE
+```
+
+### 2. Verify Cost Interpretation
+
+```python
+# solver.cost = Sum of weights of unsatisfied soft clauses
+
+# For maximization problems, high cost might be normal:
+# If total possible value = 100 and cost = 20, you achieved value = 80
+```
+
+### 3. Debug Which Soft Clauses Are Unsatisfied
+
+```python
+# After solving, check which soft constraints are violated
+if model is not None:
+    # Track unsatisfied soft constraints in your solution
+    unsatisfied_info = []
+    
+    # Example: if you have soft clause [var] with weight W
+    if var not in model:  # var is FALSE
+        unsatisfied_info.append({
+            "clause": "[var]",
+            "weight": W,
+            "reason": "var is FALSE"
+        })
+    
+    # Include this in your export for debugging
+    export_maxsat_solution({
+        "satisfiable": True,
+        "cost": solver.cost,
+        "debug_unsatisfied": unsatisfied_info,
+        # ... other solution data
+    })
+```
+
+### 4. Common Debugging Patterns
+
+- **Unexpectedly high cost**: Check if you're encoding maximization correctly
+- **All variables false**: You might have contradictory soft constraints
+- **Wrong optimization direction**: Ensure you understand what's being minimized
+- **Infeasible problems**: Check your hard constraints aren't over-constrained
 
 ## Final Notes
 
