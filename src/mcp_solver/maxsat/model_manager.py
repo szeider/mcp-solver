@@ -372,7 +372,8 @@ class MaxSATModelManager(SolverManager):
                     }
                     return response
 
-                # Check for export_maxsat_solution calls
+                # Although export_maxsat_solution is automatically available,
+                # it's still good practice to check if it's being used
                 export_calls = 0
                 for node in ast.walk(ast_tree):
                     if isinstance(node, ast.Call):
@@ -386,15 +387,13 @@ class MaxSATModelManager(SolverManager):
                     self.logger.warning(
                         "No export_maxsat_solution() call found in the code"
                     )
-                    # Create an error response with consistent success=False when there's an error
-                    response = {
-                        "message": "No export_maxsat_solution() call found in the code. For MaxSAT optimization, use export_maxsat_solution() to return results.",
-                        "success": False,
-                        "error": "Missing export_maxsat_solution call",
-                        "status": "error",
-                        "code_analysis": "Missing export_maxsat_solution() call",
-                    }
-                    return response
+                    # Generate a warning but don't return an error anymore
+                    # since it might be using a different solution export approach
+                    if "warnings" not in self.last_solution:
+                        self.last_solution["warnings"] = []
+                    self.last_solution["warnings"].append(
+                        "Recommendation: Use export_maxsat_solution() to return MaxSAT results. This is now automatically available in the environment."
+                    )
                     
                 # Check for common logical errors in the code
                 line_issues = []
@@ -486,30 +485,9 @@ class MaxSATModelManager(SolverManager):
                 self.logger.error(f"Error analyzing code: {e!s}")
                 # Continue despite analysis error
 
-            # Modify the code to enhance debugging and automatically add required imports
+            # Modify the code to enhance debugging - no need to inject imports
+            # since export_maxsat_solution will be made available directly in the environment
             modified_code = self._enhance_code_for_debugging(code_string)
-            
-            # Automatically inject the export_maxsat_solution import if it's missing
-            if "export_maxsat_solution" in modified_code and "from solution import export_maxsat_solution" not in modified_code:
-                # Add the import at the top of the code, after any existing imports
-                import_statement = "\n# Auto-injected import for MaxSAT solution export\nfrom solution import export_maxsat_solution\n\n"
-                
-                # Find a good position to insert the import - after existing imports
-                import_pos = 0
-                lines = modified_code.split("\n")
-                for i, line in enumerate(lines):
-                    if line.startswith("import ") or line.startswith("from "):
-                        import_pos = i + 1
-                
-                # Insert the import after the last import statement
-                if import_pos > 0:
-                    lines.insert(import_pos, import_statement)
-                else:
-                    # If no imports found, add it at the top after any debug headers
-                    lines.insert(0, import_statement)
-                
-                modified_code = "\n".join(lines)
-                self.logger.info("Auto-injected export_maxsat_solution import into the code")
 
             # Set timeout
             timeout_seconds = timeout.total_seconds()
@@ -564,11 +542,11 @@ class MaxSATModelManager(SolverManager):
                         "status": "error",
                     }
                 
-                # Check if this is a NameError involving export_maxsat_solution
+                # With automatic injection, we shouldn't see NameError for export_maxsat_solution anymore
+                # But keep error handling just in case something else goes wrong
                 if "NameError" in error_msg and "export_maxsat_solution" in error_msg:
-                    error_response["message"] = "Missing export_maxsat_solution: You need to import this function explicitly. Add 'from solution import export_maxsat_solution' at the top of your code."
-                    error_response["error"] = "Missing export_maxsat_solution function"
-                    error_response["code_fix"] = "Add 'from solution import export_maxsat_solution' to imports"
+                    error_response["message"] = "Error accessing export_maxsat_solution function. This is likely an internal error with the MaxSAT environment."
+                    error_response["error"] = "Error with export_maxsat_solution function"
                 
                 return error_response
 
