@@ -4,8 +4,6 @@ Welcome to the MCP Solver. This document provides concise guidelines on how to i
 
 This service provides access to MaxSAT (Maximum Satisfiability) optimization with a simplified interface for weighted constraint problems using WCNF (Weighted Conjunctive Normal Form).
 
-
-
 ## Overview
 
 The MCP Solver integrates MaxSAT solving with the Model Context Protocol, allowing you to create, modify, and solve weighted constraint optimization problems. The following tools are available:
@@ -18,37 +16,74 @@ The MCP Solver integrates MaxSAT solving with the Model Context Protocol, allowi
 
 These tools let you construct your model incrementally and solve it using a MaxSAT solver.
 
+## 📋 MANDATORY Blueprint Structure
+
+**EVERY MaxSAT model MUST follow this exact structure with these item numbers:**
+
+### Blueprint Template:
+```python
+# Item 1: Imports and WCNF initialization
+from pysat.formula import WCNF
+from pysat.examples.rc2 import RC2
+wcnf = WCNF()
+
+# Item 2: Problem parameters and variables
+# Define all variables with clear comments
+# var = number
+
+# Item 3: Hard constraints
+# Add all hard constraints (must be satisfied)
+# wcnf.append([literals])
+
+# Item 4: Soft constraints
+# Add all soft constraints with weights
+# wcnf.append([literals], weight=value)
+
+# Item 5: Solve and export solution
+# Use RC2 solver and export results
+```
 
 ## Quick Start Example
 
+### Item 1: Imports and initialization
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
 
-# Simple optimization problem: Select items to maximize value
-# Each item has a value (benefit if selected)
-
 wcnf = WCNF()
+```
 
-# Define variables: 1=itemA, 2=itemB, 3=itemC
-itemA, itemB, itemC = 1, 2, 3
+### Item 2: Variables
+```python
+# Problem: Select items to maximize value
+# Variables: 1=itemA, 2=itemB, 3=itemC
+itemA = 1
+itemB = 2  
+itemC = 3
+```
 
-# Hard constraints (must be satisfied)
-# Example: Can't select both A and B
+### Item 3: Hard constraints
+```python
+# Hard constraint: Can't select both A and B
 wcnf.append([-itemA, -itemB])
+```
 
-# Soft constraints with weights
-# Weight = penalty if clause is FALSE
+### Item 4: Soft constraints
+```python
+# Soft constraints (weight = penalty if FALSE)
 wcnf.append([itemA], weight=5)   # Penalty 5 if itemA not selected
 wcnf.append([itemB], weight=3)   # Penalty 3 if itemB not selected  
 wcnf.append([itemC], weight=2)   # Penalty 2 if itemC not selected
+```
 
+### Item 5: Solve and export
+```python
 # Solve with RC2 MaxSAT solver
 with RC2(wcnf) as solver:
     model = solver.compute()
     
     if model:
-        # Create solution
+        # Create solution dictionary
         solution = {
             "itemA": itemA in model,
             "itemB": itemB in model,
@@ -69,24 +104,20 @@ with RC2(wcnf) as solver:
 
 ## ⚠️ Common Pitfalls
 
-- **Incorrect Problem Parameters**: ALWAYS encode the EXACT problem specifications. If the problem asks for "9 colors", use `range(9)` not `range(10)`. If it asks for "6 queens and 5 knights", use exactly those numbers.
-- **Off-by-one Errors**: Be careful with ranges. "9 colors" means colors 0-8 (using `range(9)`), NOT colors 0-9.
-- **Arbitrary Problem Modifications**: NEVER change problem parameters (e.g., reducing piece counts) without explicit justification. Solve the problem as stated.
-- **Incomplete Variables**: Always complete variable assignments (e.g., `item_vars = [has_item(i) for i in items]`)
-- **Dictionary Updates**: Use `selected_items[item] = value` (not `selected_items = value`)
-- **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`. This function is automatically available - DO NOT try to import it!
-- **Memory Management**: Always call `solver.delete()` or use `with` statement
+- **Blueprint Violations**: ALWAYS use the 5-item structure. Do NOT combine or skip items!
+- **Incorrect Problem Parameters**: ALWAYS encode the EXACT problem specifications
+- **Export Solution**: Always include `export_solution()` - it's automatically available
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
 - **WCNF vs CNF**: Always use `WCNF()` for MaxSAT problems, not `CNF()`
 
 ## 🚨 CRITICAL: Problem Parameter Verification
 
-**NEVER modify problem parameters!** The agent has been observed changing numbers, which leads to solving the wrong problem entirely.
+**NEVER modify problem parameters!**
 
 ### Before encoding ANY problem:
 
 1. **Extract ALL numeric parameters** from the problem statement
-2. **Add verification comments** to track them:
+2. **Add verification comments** in Item 2:
    ```python
    # Problem parameters (DO NOT CHANGE):
    # - Number of items: 10
@@ -99,298 +130,145 @@ with RC2(wcnf) as solver:
    budget = 50              # ✓ Budget limit 50
    ```
 
-3. **Include parameter checks** in your solution:
+## Weight Semantics in MaxSAT
+
+### Understanding Soft Constraints
+- **Soft clause weight** = penalty for NOT satisfying the clause
+- MaxSAT minimizes the total weight of unsatisfied soft clauses
+- Think of weights as "costs to pay" when a preference is violated
+
+### Common Patterns:
+
+1. **Maximize selections** (want variable to be true):
    ```python
-   # Verification: Using exactly the required parameters
-   assert len(items) == 10, f"Expected 10 items, using {len(items)}"
-   assert required_selections == 3, "Must select exactly 3 items"
+   wcnf.append([var], weight=benefit)  # Penalty if var is FALSE
    ```
 
-### ❌ NEVER DO THIS:
-```python
-# Problem asks for 9 colors
-colors = list(range(10))  # WRONG: This is 10 colors!
+2. **Minimize selections** (want variable to be false):
+   ```python
+   wcnf.append([-var], weight=cost)  # Penalty if var is TRUE
+   ```
 
-# Problem asks for 6 nurses per shift
-exactly_k(wcnf, nurse_vars, 5)  # WRONG: Changed to 5!
+## Available Helper Functions
+
+The following functions are automatically available:
+
+### Cardinality Constraints:
+- `exactly_k(variables, k)` - Returns clauses for exactly k variables true
+- `at_most_k(variables, k)` - Returns clauses for at most k variables true
+- `at_least_k(variables, k)` - Returns clauses for at least k variables true
+
+### Basic Constraints:
+- `exactly_one(variables)` - Exactly one variable must be true
+- `at_most_one(variables)` - At most one variable can be true
+- `implies(a, b)` - If a then b
+
+### Usage in Item 3 (hard constraints):
+```python
+# Item 3: Hard constraints
+# Exactly 2 items must be selected
+for clause in exactly_k([item1, item2, item3], 2):
+    wcnf.append(clause)
 ```
 
-### ✅ ALWAYS DO THIS:
-```python
-# Problem asks for 9 colors
-colors = list(range(9))  # CORRECT: Exactly 9 colors [0-8]
+## Example: Feature Selection
 
-# Problem asks for 6 nurses per shift  
-exactly_k(wcnf, nurse_vars, 6)  # CORRECT: Exactly 6
-```
-
-## Counting and Ranges
-
-### Understanding Problem Specifications:
-- **"N items"** means exactly N items, typically `range(N)` which gives `[0,1,...,N-1]`
-- **"K selections"** means exactly K items must be selected, no more, no less
-- **"Maximum of M"** means at most M (could be less)
-- **"Minimum of M"** means at least M (could be more)
-
-### Common Range Patterns:
-```python
-# For N items:
-items = list(range(N))        # [0, 1, 2, ..., N-1]
-
-# For grid positions:
-positions = [(i,j) for i in range(rows) for j in range(cols)]
-
-# For counting selections:
-assert len(selected_items) == required_count
-```
-
-### Verification is Key:
-Always verify your encoding matches the problem:
-```python
-# Verify counts match problem specification
-assert len(items) == required_items, f"Wrong number of items"
-assert num_selections == required_selections, f"Wrong number of selections"
-```
-
-## ⚠️ WARNING: Do Not Modify Problem Parameters
-
-### The #1 cause of MaxSAT failures is changing problem numbers!
-
-❌ **NEVER** change numbers to "simplify" the problem  
-❌ **NEVER** reduce constraints thinking it will help  
-❌ **NEVER** add extra variables "just in case"  
-
-✅ **ALWAYS** encode the EXACT problem as stated  
-✅ **ALWAYS** use the precise numbers given  
-✅ **ALWAYS** verify your parameters match the problem  
-
-**Remember**: If the problem specifies exact numbers, you MUST use those exact numbers. Changing them means solving a different problem entirely.
-
-## Solving and Verification
-
-- **Pre-Solving Verification:**  
-  Before solving, verify that your encoding matches the problem specification exactly. Double-check numerical parameters, ranges, and counts.
-
-- **Solution Verification:**  
-  After solving, verify that the returned solution satisfies all specified constraints. Check both hard constraints and the optimization objective.
-
-- **Parameter Validation Example:**
-  ```python
-  # Problem: "Select 3 items from 10 to maximize value"
-  # CORRECT:
-  items = list(range(10))  # [0, 1, 2, ..., 9] - exactly 10 items
-  print(f"Using {len(items)} items: {items}")  # Verify before solving
-  
-  # Add constraint: exactly 3 items selected
-  item_vars = [i+1 for i in items]  # Variables 1-10
-  exactly_k(wcnf, item_vars, 3)
-  
-  # INCORRECT:
-  # items = list(range(11))  # This gives 11 items!
-  ```
-
-## MaxSAT Semantics
-
-MaxSAT minimizes the sum of weights of UNSATISFIED soft clauses:
-- Soft clause `[x]` with weight W costs W if x is FALSE
-- Soft clause `[-x]` with weight W costs W if x is TRUE
-- The solver finds an assignment that minimizes total cost
-
-## Available Tools
-
-| Tool           | Description                                                  |
-| -------------- | ------------------------------------------------------------ |
-| `clear_model`  | Reset the MaxSAT model                                       |
-| `add_item`     | Add Python code to the model                                 |
-| `replace_item` | Replace code in the model                                    |
-| `delete_item`  | Delete code from the model                                   |
-| `solve_model`  | Solve the current model (requires timeout parameter between 1-30 seconds) |
-| `get_model`    | Fetch the current content of the MaxSAT model                |
-
-> **Timeout Handling:** When using `solve_model`, always specify a timeout (in seconds) to prevent long-running computations. If your model times out, you'll receive a response with `"status": "timeout"` and `"timeout": true`, but the connection will be maintained so you can modify and retry your model.
-
-## ⭐ Cardinality Constraints
-
-The following helper functions are available for common constraint patterns:
-
-```python
-# Import cardinality helpers (automatically available)
-from mcp_solver.maxsat.templates import at_most_k, at_least_k, exactly_k
-
-# At most k variables can be true
-at_most_k(wcnf, [var1, var2, var3, var4], k=2)
-
-# At least k variables must be true  
-at_least_k(wcnf, [var1, var2, var3, var4], k=2)
-
-# Exactly k variables must be true
-exactly_k(wcnf, [var1, var2, var3, var4], k=2)
-```
-
-**IMPORTANT:** These helper functions add clauses to your WCNF formula. They handle the combinatorial encoding for you.
-
-## Variable Creation and Mapping
-
-For MaxSAT problems, you need to create variables as positive integers and map them to meaningful names:
-
-### Basic Variable Creation Pattern
-```python
-# Simple counter approach
-var_count = 0
-def create_var(name):
-    global var_count
-    var_count += 1
-    return var_count
-
-# Create variables
-x1 = create_var("x1")
-x2 = create_var("x2")
-```
-
-### Variable Mapping for Complex Problems
-```python
-# For grid problems
-cell_vars = {}
-var_count = 0
-for i in range(rows):
-    for j in range(cols):
-        var_count += 1
-        cell_vars[(i, j)] = var_count
-
-# For assignment problems  
-assign_vars = {}
-var_count = 0
-for worker in workers:
-    for task in tasks:
-        var_count += 1
-        assign_vars[(worker, task)] = var_count
-```
-
-### Variable Namespacing
-```python
-# Using functions for different variable types
-var_count = 0
-
-def item_selected(item_id):
-    global var_count
-    var_count += 1
-    return var_count
-
-def feature_enabled(feature_name):
-    global var_count
-    var_count += 1
-    return var_count
-```
-
-## Standard Code Pattern
-
-Here's the recommended pattern for creating MaxSAT models:
-
+### Item 1: Imports
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
 
-# 1. Create WCNF formula
 wcnf = WCNF()
+```
 
-# 2. Create variables with meaningful names
-var_count = 0
-def create_var(name):
-    global var_count
-    var_count += 1
-    return var_count
+### Item 2: Variables
+```python
+# PARAMETER VERIFICATION
+# Problem parameters (DO NOT CHANGE):
+# - Number of features: 6
+# - Feature values: cloud=10, ai=8, security=6, mobile=7, analytics=9, integration=5
 
-# Create variables
-x1 = create_var("x1")
-x2 = create_var("x2")
-x3 = create_var("x3")
+# Variables: 1=cloud, 2=ai, 3=security, 4=mobile, 5=analytics, 6=integration
+cloud = 1
+ai = 2
+security = 3
+mobile = 4
+analytics = 5
+integration = 6
 
-# 3. Add hard constraints (no weight parameter)
-wcnf.append([x1, x2])        # x1 OR x2 must be true
-wcnf.append([-x1, -x2, x3])  # NOT x1 OR NOT x2 OR x3
+# Feature values for soft constraints
+values = {
+    cloud: 10,
+    ai: 8,
+    security: 6,
+    mobile: 7,
+    analytics: 9,
+    integration: 5
+}
+```
 
-# 4. Add soft constraints (with weight = penalty if false)
-wcnf.append([x1], weight=3)   # Prefer x1 to be true (cost 3 if false)
-wcnf.append([-x2], weight=2)  # Prefer x2 to be false (cost 2 if true)
+### Item 3: Hard constraints
+```python
+# Hard constraints: Dependencies
+# If AI selected, must have cloud
+wcnf.append([-ai, cloud])  # NOT ai OR cloud
 
-# 5. Solve and export results
+# If analytics selected, must have integration
+wcnf.append([-analytics, integration])
+```
+
+### Item 4: Soft constraints
+```python
+# Soft constraints: Maximize total value
+# For each feature, add penalty equal to its value if not selected
+for feature, value in values.items():
+    wcnf.append([feature], weight=value)
+```
+
+### Item 5: Solve and export
+```python
 with RC2(wcnf) as solver:
-    model = solver.compute()
-    
-    if model:
-        # Map variables back to names
-        assignment = {
-            "x1": x1 in model,
-            "x2": x2 in model,
-            "x3": x3 in model
+    if solver.compute():
+        model = solver.model
+        
+        # Extract selected features
+        selected_features = {
+            "cloud": cloud in model,
+            "ai": ai in model,
+            "security": security in model,
+            "mobile": mobile in model,
+            "analytics": analytics in model,
+            "integration": integration in model
         }
+        
+        # Calculate total value
+        total_value = sum(values[f] for f in model if f in values)
         
         export_solution({
             "satisfiable": True,
             "cost": solver.cost,
-            "assignment": assignment
+            "selected_features": selected_features,
+            "total_value": total_value
         })
     else:
         export_solution({
             "satisfiable": False,
-            "message": "No solution exists"
+            "message": "No valid feature selection exists"
         })
-```
-
-## Interpreting the Solver's Model
-
-When a solution is found, `solver.compute()` returns a model - a list of literals:
-
-- Positive numbers (e.g., 1, 5, 7) represent variables that are TRUE
-- Negative numbers (e.g., -2, -3, -4) represent variables that are FALSE
-
-```python
-model = solver.compute()
-# Example model: [1, -2, 3, -4, 5]
-# This means: var1=True, var2=False, var3=True, var4=False, var5=True
-
-# Check if a variable is true
-is_true = var_id in model  # True if variable is in the model
-
-# Create a complete solution dictionary
-solution = {}
-for name, var_id in variable_mapping.items():
-    solution[name] = (var_id in model)
-```
-
-## Handling Imports
-
-Available imports:
-
-```python
-# Core MaxSAT modules
-from pysat.formula import WCNF
-from pysat.examples.rc2 import RC2
-
-# Standard Python modules
-import math  
-import random
-import collections
-import itertools
-import re
-import json
-
-# Cardinality constraint helpers (automatically available)
-at_most_k, at_least_k, exactly_k
 ```
 
 ## Example: Nurse Scheduling
 
+### Item 1: Imports
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
 
-# Problem: Schedule 5 nurses for 3 shifts
-# Constraint: Exactly 2 nurses per shift
-# Preference: Each nurse works 1-2 shifts
-
 wcnf = WCNF()
+```
 
+### Item 2: Variables
+```python
 # PARAMETER VERIFICATION
 # Problem parameters (DO NOT CHANGE):
 # - Number of nurses: 5
@@ -402,7 +280,7 @@ num_nurses = 5
 num_shifts = 3
 nurses_per_shift = 2
 
-# Create variables: nurse_shift[n][s] = nurse n works shift s
+# Variables: nurse_shift[n][s] = nurse n works shift s
 var_count = 0
 nurse_shift = {}
 for n in range(num_nurses):
@@ -412,28 +290,36 @@ for n in range(num_nurses):
 
 # Verify parameters
 assert len(nurse_shift) == num_nurses * num_shifts, "Wrong number of variables"
+```
 
+### Item 3: Hard constraints
+```python
 # Hard constraint: Exactly 2 nurses per shift
 for shift in range(num_shifts):
     shift_vars = [nurse_shift[(n, shift)] for n in range(num_nurses)]
-    exactly_k(wcnf, shift_vars, nurses_per_shift)
+    for clause in exactly_k(shift_vars, nurses_per_shift):
+        wcnf.append(clause)
+```
 
-# Soft preference: Prefer each nurse works at least 1 shift
+### Item 4: Soft constraints
+```python
+# Soft preference: Each nurse works at least 1 shift (weight 10)
 for nurse in range(num_nurses):
     nurse_vars = [nurse_shift[(nurse, s)] for s in range(num_shifts)]
-    # At least one shift for this nurse
-    wcnf.append(nurse_vars, weight=10)
+    wcnf.append(nurse_vars, weight=10)  # At least one shift
 
-# Soft preference: Discourage nurses from working all 3 shifts
+# Soft preference: Discourage working all 3 shifts (weight 5)
 for nurse in range(num_nurses):
-    # Penalize if nurse works shift 0 AND shift 1 AND shift 2
+    # Penalize if nurse works all shifts
     wcnf.append([
         -nurse_shift[(nurse, 0)],
         -nurse_shift[(nurse, 1)], 
         -nurse_shift[(nurse, 2)]
     ], weight=5)
+```
 
-# Solve
+### Item 5: Solve and export
+```python
 with RC2(wcnf) as solver:
     model = solver.compute()
     
@@ -445,11 +331,11 @@ with RC2(wcnf) as solver:
                 if nurse_shift[(n, s)] in model:
                     schedule[f"nurse_{n}"].append(f"shift_{s}")
         
-        # Verify solution
+        # Verify solution meets requirements
         for s in range(num_shifts):
             assigned = sum(1 for n in range(num_nurses) 
                          if nurse_shift[(n, s)] in model)
-            assert assigned == nurses_per_shift, f"Shift {s} has {assigned} nurses"
+            assert assigned == nurses_per_shift
         
         export_solution({
             "satisfiable": True,
@@ -471,12 +357,12 @@ with RC2(wcnf) as solver:
 
 `export_solution(data)`: Extract and format solutions from a MaxSAT solver or solution data
 
-This function processes MaxSAT solution data and creates a standardized output format. It supports both direct dictionary input and RC2 MaxSAT solver objects. All values in custom dictionaries are automatically extracted and made available in the flat "values" dictionary.
+This function processes MaxSAT solution data and creates a standardized output format. It supports both direct dictionary input and RC2 MaxSAT solver objects.
 
 ### Basic Usage:
 
 ```python
-# Method 1: Direct dictionary
+# Method 1: Direct dictionary (recommended)
 export_solution({
     "satisfiable": True,
     "cost": solver.cost,
@@ -492,19 +378,25 @@ export_solution(solver, variables=var_mapping, objective=total_value)
 
 - Requires at minimum: `{"satisfiable": True/False}`
 - Structure data using custom dictionaries that reflect your problem domain
-- Values will be automatically extracted into a flat "values" dictionary
-- If multiple dictionaries contain the same key, values are preserved by prefixing keys with their parent dictionary name
-- Keys that appear in only one dictionary won't be prefixed
 - For optimization problems, include `cost` from the solver
 - The function marks solutions with `_is_maxsat_solution` for identification
 
+## ✅ Final Checklist
+
+Before submitting your solution, verify:
+
+- [ ] **Item 1**: Imports WCNF and RC2, creates wcnf = WCNF()
+- [ ] **Item 2**: Defines all variables with clear comments and parameter verification
+- [ ] **Item 3**: Adds all hard constraints using wcnf.append()
+- [ ] **Item 4**: Adds all soft constraints with appropriate weights
+- [ ] **Item 5**: Uses RC2 solver with compute() and calls export_solution()
+- [ ] **Parameters**: All problem parameters match exactly (no modifications!)
+- [ ] **Variables**: All variables are positive integers
+- [ ] **Export**: Solution includes satisfiable, cost, and problem-specific data
+
 ## Final Notes
 
-- **Review Return Information:**  
-  Carefully review the confirmation messages and the current model after each tool call.
-- **Direct Approach**: Build constraints explicitly rather than using abstractions
+- **Blueprint Compliance**: ALWAYS follow the 5-item structure
+- **Direct Approach**: Build constraints explicitly without abstractions
 - **Weight Semantics**: Remember weights are penalties for UNSATISFIED clauses
-- **Variable Creation**: Use simple counter pattern for variable management
-- **Verification**: Always verify the solution after a solve operation by checking that all constraints are satisfied and justified.
-
-Happy modeling with MCP Solver!
+- **Review Output**: Check confirmation messages after each tool call
