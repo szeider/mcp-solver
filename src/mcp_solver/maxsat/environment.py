@@ -43,53 +43,10 @@ except ImportError:
     sys.exit(1)
 
 # Import our MaxSAT solution functions 
-from mcp_solver.maxsat.solution import export_maxsat_solution
+from mcp_solver.maxsat.solution import export_solution, export_maxsat_solution
 
-# Import PySAT templates and helper functions
-from mcp_solver.pysat.templates.cardinality_templates import at_most_k, at_least_k, exactly_k
-from mcp_solver.pysat.constraints import at_most_one, exactly_one, implies, mutually_exclusive, if_then_else
-
-# Import MaxSAT templates
-from mcp_solver.maxsat.templates import (
-    # From basic_templates
-    create_maxsat_solver,
-    solve_maxsat_problem,
-    add_hard_constraint,
-    add_soft_constraint,
-    encode_binary_variable,
-    
-    # From optimization_templates
-    feature_selection_problem,
-    weighted_max_cut,
-    set_cover_problem,
-    knapsack_problem,
-    
-    # From variable_mapping
-    VariableMap,
-    create_variable_map,
-    
-    # From cardinality_constraints
-    at_most_k as maxsat_at_most_k,
-    at_least_k as maxsat_at_least_k,
-    exactly_k as maxsat_exactly_k,
-    prefer_at_least_k,
-    prefer_at_most_k,
-    prefer_exactly_k,
-    prefer_between_k_and_m,
-    
-    # From objective_helpers
-    maximize_sum,
-    minimize_sum,
-    optimize_net_value,
-    calculate_objective_value,
-    encode_weighted_selection,
-    
-    # From assignment_helpers
-    one_to_one_assignment,
-    assignment_with_preferences,
-    partial_assignment,
-    many_to_many_assignment
-)
+# Import only basic cardinality constraints from MaxSAT templates
+from mcp_solver.maxsat.templates import at_most_k, at_least_k, exactly_k
 
 # We need to create our own version of _execute_pysat_code_in_process that includes
 # export_maxsat_solution in the restricted globals, just like PySAT does with export_solution
@@ -223,7 +180,8 @@ def if_then_else(condition, then_var, else_var):
             "CardEnc": CardEnc,
             "EncType": EncType,
             "RC2": RC2,  # MaxSAT solver
-            "export_maxsat_solution": export_maxsat_solution,  # Key difference from PySAT
+            "export_solution": export_solution,  # Simplified like PySAT
+            "export_maxsat_solution": export_maxsat_solution,  # Legacy compatibility
             "collections": collections,
             "itertools": itertools,
             "math": math,
@@ -233,37 +191,10 @@ def if_then_else(condition, then_var, else_var):
             "time": time,  # Add time module to the restricted globals
             # No need to reference the constraint functions directly here,
             # as they're already defined in the processed_code preamble
-            # Add MaxSAT specific template functions
-            "create_maxsat_solver": create_maxsat_solver,
-            "solve_maxsat_problem": solve_maxsat_problem,
-            "add_hard_constraint": add_hard_constraint,
-            "add_soft_constraint": add_soft_constraint,
-            "encode_binary_variable": encode_binary_variable,
-            "feature_selection_problem": feature_selection_problem,
-            "weighted_max_cut": weighted_max_cut,
-            "set_cover_problem": set_cover_problem,
-            "knapsack_problem": knapsack_problem,
-            "VariableMap": VariableMap,
-            "create_variable_map": create_variable_map,
-            # Cardinality constraints (MaxSAT versions)
-            "at_most_k": maxsat_at_most_k,
-            "at_least_k": maxsat_at_least_k,
-            "exactly_k": maxsat_exactly_k,
-            "prefer_at_least_k": prefer_at_least_k,
-            "prefer_at_most_k": prefer_at_most_k,
-            "prefer_exactly_k": prefer_exactly_k,
-            "prefer_between_k_and_m": prefer_between_k_and_m,
-            # Objective helpers
-            "maximize_sum": maximize_sum,
-            "minimize_sum": minimize_sum,
-            "optimize_net_value": optimize_net_value,
-            "calculate_objective_value": calculate_objective_value,
-            "encode_weighted_selection": encode_weighted_selection,
-            # Assignment helpers
-            "one_to_one_assignment": one_to_one_assignment,
-            "assignment_with_preferences": assignment_with_preferences,
-            "partial_assignment": partial_assignment,
-            "many_to_many_assignment": many_to_many_assignment,
+            # Only basic cardinality constraints
+            "at_most_k": at_most_k,
+            "at_least_k": at_least_k,
+            "exactly_k": exactly_k,
         }
 
         # Add common variable types needed for PySAT code
@@ -429,38 +360,19 @@ def execute_maxsat_code(code: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> 
 # Override the execute_pysat_code function with our MaxSAT-specific version
 execute_pysat_code = execute_maxsat_code
 
-# Add a reference that will be available in the environment
-def get_export_maxsat_solution():
-    """
-    Helper function to get a reference to the export_maxsat_solution function.
-    This is needed because the function might not be directly importable in the environment.
-    """
-    return export_maxsat_solution
 
 # Define the list of exported symbols
 __all__ = [
     # Environment functions
     "execute_pysat_code",
     "DEFAULT_TIMEOUT_SECONDS",
-    "get_export_maxsat_solution",
     
     # Solution functions
+    "export_solution",
     "export_maxsat_solution",
     
-    # Basic templates
-    "create_maxsat_solver",
-    "solve_maxsat_problem",
-    "add_hard_constraint",
-    "add_soft_constraint",
-    "encode_binary_variable",
-    
-    # Optimization templates
-    "feature_selection_problem",
-    "weighted_max_cut",
-    "set_cover_problem",
-    "knapsack_problem",
-    
-    # Variable mapping
-    "VariableMap",
-    "create_variable_map"
+    # Cardinality constraints
+    "at_most_k",
+    "at_least_k",
+    "exactly_k"
 ]
