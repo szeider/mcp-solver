@@ -93,6 +93,52 @@ with RC2(wcnf) as solver:
   - ❌ Incorrect: `wcnf.append(, weight=1)` (incomplete)
 - **Dictionary Summation**: When summing values in a dictionary, use `sum(dict.values())` not `sum(dict)`
 
+## Common Problem Patterns and Solutions
+
+### Assignment Problems (Workers ↔ Tasks)
+
+Use the helper functions for clean, correct encoding:
+
+```python
+# Create assignment variables
+assignment_vars = {}
+for worker in workers:
+    for task in tasks:
+        assignment_vars[(worker, task)] = create_var(f"{worker}_{task}")
+
+# Set up one-to-one assignment (each worker gets one task, each task gets one worker)
+one_to_one_assignment(wcnf, workers, tasks, assignment_vars)
+
+# Add preferences
+assignment_with_preferences(wcnf, assignment_vars, preference_scores)
+```
+
+### Cardinality Constraints Quick Reference
+
+**Hard Constraints:**
+- **Exactly k**: Use `exactly_k(wcnf, variables, k)` 
+- **At least k**: Use `at_least_k(wcnf, variables, k)`
+- **At most k**: Use `at_most_k(wcnf, variables, k)`
+
+**Soft Preferences:**
+- **Prefer exactly k**: Use `prefer_exactly_k(wcnf, vars, k, penalty_too_few, penalty_too_many)`
+- **Prefer range [k,m]**: Use `prefer_between_k_and_m(wcnf, vars, k, m, penalty)`
+
+### Debugging Your Constraints
+
+Always verify your encoding makes sense:
+
+```python
+# Check: Can all soft clauses be satisfied simultaneously?
+# If not, you have conflicting objectives!
+
+# Example of WRONG encoding:
+for item in items:
+    wcnf.append([select[item]], weight=10)    # Want item selected
+    wcnf.append([-select[item]], weight=5)    # Want item NOT selected
+    # This creates 5 units of guaranteed cost per item!
+```
+
 ## Available Tools
 
 | Tool           | Description                                                  |
@@ -542,7 +588,11 @@ from mcp_solver.maxsat.templates import (
     # Objective helpers
     maximize_sum, minimize_sum, optimize_net_value, calculate_objective_value,
     # Cardinality constraints
-    at_least_k, at_most_k, prefer_at_least_k, prefer_at_most_k,
+    at_least_k, at_most_k, exactly_k,
+    prefer_at_least_k, prefer_at_most_k, prefer_exactly_k, prefer_between_k_and_m,
+    # Assignment helpers
+    one_to_one_assignment, assignment_with_preferences,
+    partial_assignment, many_to_many_assignment,
     # Variable mapping
     VariableMap, create_variable_map,
     # Basic helpers
@@ -579,12 +629,15 @@ objective = calculate_objective_value(model, [(var1, 10), (var2, 20)])
 
 ```python
 # Hard constraints
+exactly_k(wcnf, [var1, var2, var3, var4], k=2)   # Exactly 2 must be true
 at_least_k(wcnf, [var1, var2, var3, var4], k=2)  # At least 2 must be true
 at_most_k(wcnf, [var1, var2, var3, var4], k=3)   # At most 3 can be true
 
 # Soft preferences (simpler encoding for optimization)
+prefer_exactly_k(wcnf, variables, k=2, penalty_too_few=10, penalty_too_many=5)
 prefer_at_least_k(wcnf, variables, k=5, penalty_per_missing=10)
 prefer_at_most_k(wcnf, variables, k=3, penalty_per_extra=5)
+prefer_between_k_and_m(wcnf, variables, k=2, m=4, penalty=8)
 ```
 
 #### Variable Mapping
@@ -824,6 +877,38 @@ if model is not None:
 - **All variables false**: You might have contradictory soft constraints
 - **Wrong optimization direction**: Ensure you understand what's being minimized
 - **Infeasible problems**: Check your hard constraints aren't over-constrained
+
+### Example: Debugging Cardinality Constraints
+
+Problem: Need exactly k items from each group to be selected.
+
+```python
+# CORRECT APPROACH:
+# 1. Use the exactly_k helper for precise cardinality
+for group in groups:
+    group_vars = [vars[(item, group)] for item in items]
+    exactly_k(wcnf, group_vars, k)  # Exactly k items per group
+
+# 2. Verify cardinality in your solution
+with RC2(wcnf) as solver:
+    model = solver.compute()
+    if model:
+        # Verify constraints are satisfied
+        group_counts = {}
+        for group in groups:
+            count = sum(1 for item in items 
+                       if vars[(item, group)] in model)
+            group_counts[f"group_{group}_count"] = count
+            # count should equal k
+        
+        # Include verification in export
+        export_maxsat_solution({
+            "satisfiable": True,
+            "cost": solver.cost,
+            "group_counts": group_counts,
+            # ... rest of solution
+        })
+```
 
 ## Final Notes
 

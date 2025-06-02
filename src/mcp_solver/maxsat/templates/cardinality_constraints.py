@@ -92,3 +92,53 @@ def prefer_at_most_k(wcnf: WCNF, variables: List[int], k: int, penalty_per_extra
     if k < len(variables):
         for var in variables[k:]:
             wcnf.append([-var], weight=penalty_per_extra)
+
+
+def exactly_k(wcnf: WCNF, variables: List[int], k: int) -> None:
+    """
+    Add hard constraints that exactly k variables must be true.
+    
+    This is a critical helper that was missing and caused many failures.
+    It combines at_least_k and at_most_k constraints.
+    
+    Args:
+        wcnf: WCNF formula to modify
+        variables: List of variable IDs
+        k: Exact number of variables that must be true
+    """
+    at_least_k(wcnf, variables, k)
+    at_most_k(wcnf, variables, k)
+
+
+def prefer_exactly_k(wcnf: WCNF, variables: List[int], k: int, 
+                    penalty_too_few: int, penalty_too_many: int) -> None:
+    """
+    Add soft constraints preferring exactly k variables to be true.
+    
+    Different penalties can be set for having too few vs too many.
+    
+    Args:
+        wcnf: WCNF formula to modify
+        variables: List of variable IDs
+        k: Desired exact number of true variables
+        penalty_too_few: Penalty for each variable below k
+        penalty_too_many: Penalty for each variable above k
+    """
+    prefer_at_least_k(wcnf, variables, k, penalty_too_few)
+    prefer_at_most_k(wcnf, variables, k, penalty_too_many)
+
+
+def prefer_between_k_and_m(wcnf: WCNF, variables: List[int], 
+                          k: int, m: int, penalty: int) -> None:
+    """
+    Add soft constraints preferring between k and m variables (inclusive) to be true.
+    
+    Args:
+        wcnf: WCNF formula to modify
+        variables: List of variable IDs
+        k: Minimum desired number of true variables
+        m: Maximum desired number of true variables
+        penalty: Penalty for being outside the range
+    """
+    prefer_at_least_k(wcnf, variables, k, penalty)
+    prefer_at_most_k(wcnf, variables, m, penalty)

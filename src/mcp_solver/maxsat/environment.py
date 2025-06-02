@@ -71,15 +71,24 @@ from mcp_solver.maxsat.templates import (
     # From cardinality_constraints
     at_most_k as maxsat_at_most_k,
     at_least_k as maxsat_at_least_k,
+    exactly_k as maxsat_exactly_k,
     prefer_at_least_k,
     prefer_at_most_k,
+    prefer_exactly_k,
+    prefer_between_k_and_m,
     
     # From objective_helpers
     maximize_sum,
     minimize_sum,
     optimize_net_value,
     calculate_objective_value,
-    encode_weighted_selection
+    encode_weighted_selection,
+    
+    # From assignment_helpers
+    one_to_one_assignment,
+    assignment_with_preferences,
+    partial_assignment,
+    many_to_many_assignment
 )
 
 # We need to create our own version of _execute_pysat_code_in_process that includes
@@ -239,14 +248,22 @@ def if_then_else(condition, then_var, else_var):
             # Cardinality constraints (MaxSAT versions)
             "at_most_k": maxsat_at_most_k,
             "at_least_k": maxsat_at_least_k,
+            "exactly_k": maxsat_exactly_k,
             "prefer_at_least_k": prefer_at_least_k,
             "prefer_at_most_k": prefer_at_most_k,
+            "prefer_exactly_k": prefer_exactly_k,
+            "prefer_between_k_and_m": prefer_between_k_and_m,
             # Objective helpers
             "maximize_sum": maximize_sum,
             "minimize_sum": minimize_sum,
             "optimize_net_value": optimize_net_value,
             "calculate_objective_value": calculate_objective_value,
             "encode_weighted_selection": encode_weighted_selection,
+            # Assignment helpers
+            "one_to_one_assignment": one_to_one_assignment,
+            "assignment_with_preferences": assignment_with_preferences,
+            "partial_assignment": partial_assignment,
+            "many_to_many_assignment": many_to_many_assignment,
         }
 
         # Add common variable types needed for PySAT code
