@@ -72,10 +72,14 @@ wcnf.append([-itemA, -itemB])
 
 ### Item 4: Soft constraints
 ```python
-# Soft constraints (weight = penalty if FALSE)
-wcnf.append([itemA], weight=5)   # Penalty 5 if itemA not selected
-wcnf.append([itemB], weight=3)   # Penalty 3 if itemB not selected  
-wcnf.append([itemC], weight=2)   # Penalty 2 if itemC not selected
+# Soft constraints: We want to MAXIMIZE total value
+# Remember: MaxSAT MINIMIZES penalties, so we penalize NOT selecting valuable items
+
+wcnf.append([itemA], weight=5)   # Lose 5 points if itemA=FALSE (not selected)
+wcnf.append([itemB], weight=3)   # Lose 3 points if itemB=FALSE (not selected)  
+wcnf.append([itemC], weight=2)   # Lose 2 points if itemC=FALSE (not selected)
+
+# MaxSAT will select items to minimize penalties → maximizes value!
 ```
 
 ### Item 5: Solve and export
@@ -187,6 +191,26 @@ if solver.compute():
 - MaxSAT minimizes the total weight of unsatisfied soft clauses
 - Think of weights as "costs to pay" when a preference is violated
 
+### ⚠️ CRITICAL: MaxSAT Minimizes UNSATISFIED Clause Weights!
+
+**This is COUNTERINTUITIVE and the #1 source of errors!**
+
+MaxSAT finds assignments that minimize the total weight of **violated** (unsatisfied) clauses. This means:
+- To **maximize** selecting valuable items → penalize **NOT** selecting them
+- To **minimize** selecting costly items → penalize selecting them
+
+```python
+# 🚨 OPPOSITE OF INTUITION - We penalize NOT doing what we want!
+
+# Want to MAXIMIZE value? Penalize NOT selecting:
+wcnf.append([item], weight=value)      # Penalty if item=FALSE
+
+# Want to MINIMIZE cost? Penalize selecting:
+wcnf.append([-item], weight=cost)      # Penalty if item=TRUE
+```
+
+**Remember**: You're defining penalties for **bad** outcomes, not rewards for good ones!
+
 ### 🎯 Optimization Direction Quick Reference
 
 **Remember: MaxSAT always MINIMIZES the total penalty (cost)**
@@ -292,10 +316,15 @@ wcnf.append([-analytics, integration])
 
 ### Item 4: Soft constraints
 ```python
-# Soft constraints: Maximize total value
-# For each feature, add penalty equal to its value if not selected
+# Goal: Maximize total value of selected features
+# Strategy: Penalize NOT selecting each feature by its value
+# This is COUNTERINTUITIVE but correct!
+
 for feature, value in values.items():
-    wcnf.append([feature], weight=value)
+    wcnf.append([feature], weight=value)  # Penalty = value if feature=FALSE
+    
+# Example: cloud (value=10) not selected → penalty of 10
+# MaxSAT minimizes penalties → selects high-value features
 ```
 
 ### Item 5: Solve and export
@@ -421,6 +450,101 @@ with RC2(wcnf) as solver:
             "satisfiable": False,
             "message": "No valid schedule exists"
         })
+```
+
+## Common Encoding Patterns
+
+### Pattern 1: Maximizing Value Selection
+When you want to maximize the total value of selected items:
+
+```python
+# WRONG ❌ - This MINIMIZES value!
+for item, value in item_values.items():
+    wcnf.append([item], weight=value)  # Penalizes selecting valuable items
+
+# CORRECT ✅ - Penalize NOT selecting valuable items
+for item, value in item_values.items():
+    wcnf.append([item], weight=value)  # Penalty = value if item NOT selected
+```
+
+**Why this works**: MaxSAT minimizes penalties. By penalizing NOT selecting an item by its value, MaxSAT will select high-value items to avoid large penalties.
+
+### Pattern 2: Minimizing Cost Selection
+When you want to minimize the total cost of selected items:
+
+```python
+# WRONG ❌ - This MAXIMIZES cost!
+for item, cost in item_costs.items():
+    wcnf.append([item], weight=cost)  # Penalizes NOT selecting costly items
+
+# CORRECT ✅ - Penalize selecting costly items
+for item, cost in item_costs.items():
+    wcnf.append([-item], weight=cost)  # Penalty = cost if item IS selected
+```
+
+**Why this works**: By penalizing the selection of an item by its cost, MaxSAT will avoid selecting high-cost items.
+
+### Pattern 3: Bonus for Relationship (Auxiliary Variables)
+When you want to give a bonus if two things happen together:
+
+```python
+# Problem: Give bonus of 5 if both personA and personB are selected
+
+# Step 1: Create auxiliary variable
+aux_var = max(all_variables) + 1  # Next available variable number
+
+# Step 2: Link auxiliary to the relationship
+# aux is true IFF both persons are selected
+wcnf.append([-personA, -personB, aux_var])   # personA AND personB => aux
+wcnf.append([personA, -aux_var])             # aux => personA
+wcnf.append([personB, -aux_var])             # aux => personB
+
+# Step 3: Give bonus when auxiliary is true
+wcnf.append([aux_var], weight=5)  # Penalty of 5 if aux is FALSE (bonus not given)
+```
+
+**Why this works**: The auxiliary variable tracks whether both conditions are met. We penalize NOT having the auxiliary true, which encourages satisfying both conditions.
+
+### Pattern 4: Exactly One Relationship Bonus
+When multiple pairs could get a bonus, but you want to count it only once:
+
+```python
+# Problem: Carol and Emma get bonus 3 if in same room (count once, not per room)
+
+# Create one auxiliary for the relationship
+same_room_aux = max_var + 1
+
+# For each room, if both are in it, auxiliary must be true
+for room in rooms:
+    carol_in_room = person_room[(carol_id, room)]
+    emma_in_room = person_room[(emma_id, room)]
+    wcnf.append([-carol_in_room, -emma_in_room, same_room_aux])
+
+# If auxiliary is true, they must be in some room together
+room_clauses = []
+for room in rooms:
+    room_clauses.extend([-same_room_aux, person_room[(carol_id, room)]])
+    room_clauses.extend([-same_room_aux, person_room[(emma_id, room)]])
+wcnf.append(room_clauses)
+
+# Give bonus once
+wcnf.append([same_room_aux], weight=3)  # Penalty if NOT in same room
+```
+
+### Pattern 5: Conditional Penalties
+When you want to penalize something only if a condition is met:
+
+```python
+# Problem: If itemA is selected, penalize selecting itemB by 10
+
+# Create auxiliary: aux = (itemA AND itemB)
+aux = max_var + 1
+wcnf.append([-itemA, -itemB, aux])    # itemA AND itemB => aux
+wcnf.append([itemA, -aux])            # aux => itemA  
+wcnf.append([itemB, -aux])            # aux => itemB
+
+# Penalize the bad combination
+wcnf.append([-aux], weight=10)  # Penalty if both are selected
 ```
 
 ## Solution Export
