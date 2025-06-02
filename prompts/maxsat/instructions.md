@@ -25,6 +25,7 @@ These tools let you construct your model incrementally and solve it using a MaxS
 # Item 1: Imports and WCNF initialization
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+# Note: Helper functions (exactly_k, at_most_k, etc.) are already available - no import needed
 wcnf = WCNF()
 
 # Item 2: Problem parameters and variables
@@ -49,6 +50,7 @@ wcnf = WCNF()
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+# Note: Helper functions (exactly_k, at_most_k, etc.) are already available
 
 wcnf = WCNF()
 ```
@@ -110,6 +112,54 @@ with RC2(wcnf) as solver:
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
 - **WCNF vs CNF**: Always use `WCNF()` for MaxSAT problems, not `CNF()`
 
+## ❌ Common Mistakes to Avoid
+
+### 1. Trying to Import Helper Functions
+```python
+# ❌ WRONG - Don't import helpers
+from mcp_solver.maxsat.constraints import exactly_k
+from pysat.card import *
+
+# ✅ CORRECT - Helpers are already available
+for clause in exactly_k(vars, 3):
+    wcnf.append(clause)
+```
+
+### 2. Wrong Optimization Direction
+```python
+# Problem: Maximize total value
+# ❌ WRONG - This minimizes value
+wcnf.append([-item], weight=value)
+
+# ✅ CORRECT - Penalty if not selected
+wcnf.append([item], weight=value)
+```
+
+### 3. Forgetting to Add All Clauses from Helpers
+```python
+# ❌ WRONG - Only adds one clause
+wcnf.append(exactly_k(vars, 2))
+
+# ✅ CORRECT - Add all clauses returned
+for clause in exactly_k(vars, 2):
+    wcnf.append(clause)
+```
+
+### 4. Missing Solution Export
+```python
+# ❌ WRONG - No export
+if solver.compute():
+    print(solver.model)
+
+# ✅ CORRECT - Always export
+if solver.compute():
+    export_solution({
+        "satisfiable": True,
+        "cost": solver.cost,
+        "solution": solver.model
+    })
+```
+
 ## 🚨 CRITICAL: Problem Parameter Verification
 
 **NEVER modify problem parameters!**
@@ -137,21 +187,36 @@ with RC2(wcnf) as solver:
 - MaxSAT minimizes the total weight of unsatisfied soft clauses
 - Think of weights as "costs to pay" when a preference is violated
 
-### Common Patterns:
+### 🎯 Optimization Direction Quick Reference
 
-1. **Maximize selections** (want variable to be true):
+**Remember: MaxSAT always MINIMIZES the total penalty (cost)**
+
+1. **To MAXIMIZE value/benefit** (want variable to be TRUE):
    ```python
-   wcnf.append([var], weight=benefit)  # Penalty if var is FALSE
+   # If you want to maximize selecting items with values
+   wcnf.append([var], weight=value)  # Penalty = value if var is FALSE
    ```
 
-2. **Minimize selections** (want variable to be false):
+2. **To MINIMIZE cost** (want variable to be FALSE):
    ```python
-   wcnf.append([-var], weight=cost)  # Penalty if var is TRUE
+   # If you want to minimize selecting items with costs
+   wcnf.append([-var], weight=cost)  # Penalty = cost if var is TRUE
    ```
+
+### Examples:
+```python
+# Problem: Maximize total value of selected features
+# Feature A has value 10
+wcnf.append([featureA], weight=10)  # Lose 10 points if A not selected
+
+# Problem: Minimize total cost of selected items  
+# Item B has cost 5
+wcnf.append([-itemB], weight=5)  # Pay 5 points if B is selected
+```
 
 ## Available Helper Functions
 
-The following functions are automatically available:
+The following helper functions are automatically available in your code (no import needed):
 
 ### Cardinality Constraints:
 - `exactly_k(variables, k)` - Returns clauses for exactly k variables true
@@ -162,13 +227,20 @@ The following functions are automatically available:
 - `exactly_one(variables)` - Exactly one variable must be true
 - `at_most_one(variables)` - At most one variable can be true
 - `implies(a, b)` - If a then b
+- `mutually_exclusive(variables)` - Variables are mutually exclusive
+- `if_then_else(condition, then_var, else_var)` - If-then-else construct
 
-### Usage in Item 3 (hard constraints):
+### ⚠️ IMPORTANT: No Import Needed!
+These functions are **embedded** in the environment. Just use them directly:
+
 ```python
 # Item 3: Hard constraints
-# Exactly 2 items must be selected
+# CORRECT - Just use the function directly
 for clause in exactly_k([item1, item2, item3], 2):
     wcnf.append(clause)
+
+# WRONG - Do NOT import anything
+# from mcp_solver.maxsat.constraints import exactly_k  # ❌ NO!
 ```
 
 ## Example: Feature Selection
@@ -177,6 +249,7 @@ for clause in exactly_k([item1, item2, item3], 2):
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+# Note: Helper functions are already available
 
 wcnf = WCNF()
 ```
@@ -263,6 +336,7 @@ with RC2(wcnf) as solver:
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
+# Note: Helper functions are already available
 
 wcnf = WCNF()
 ```
