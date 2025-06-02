@@ -70,11 +70,86 @@ solver.delete()
 
 ## ⚠️ Common Pitfalls
 
+- **Incorrect Problem Parameters**: ALWAYS encode the EXACT problem specifications. If the problem asks for "9 colors", use `range(9)` not `range(10)`. If it asks for "6 queens and 5 knights", use exactly those numbers.
+- **Off-by-one Errors**: Be careful with ranges. "9 colors" means colors 0-8 (using `range(9)`), NOT colors 0-9.
+- **Arbitrary Problem Modifications**: NEVER change problem parameters (e.g., reducing piece counts) without explicit justification. Solve the problem as stated.
 - **Incomplete Variables**: Always complete variable assignments (e.g., `node_color_vars = [has_color(node, color) for color in colors]`)
 - **Dictionary Updates**: Use `node_colors[node] = color` (not `node_colors = color`)
 - **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`
 - **Memory Management**: Always call `solver.delete()` to free memory
 - **Variable Ranges**: PySAT variables must be positive integers (1, 2, 3, ...)
+
+## 🚨 CRITICAL: Problem Parameter Verification
+
+**NEVER modify problem parameters!** The agent has been observed changing numbers, which leads to solving the wrong problem entirely.
+
+### Before encoding ANY problem:
+
+1. **Extract ALL numeric parameters** from the problem statement
+2. **Add verification comments** to track them:
+   ```python
+   # Problem parameters (DO NOT CHANGE):
+   # - Number of colors: 9
+   # - Number of queens: 6  
+   # - Number of knights: 5
+   # - Grid size: 6x6
+   
+   # Verify encoding matches:
+   colors = list(range(9))  # ✓ 9 colors [0,1,2,3,4,5,6,7,8]
+   num_queens = 6          # ✓ Exactly 6 queens
+   num_knights = 5         # ✓ Exactly 5 knights
+   ```
+
+3. **Include parameter checks** in your solution:
+   ```python
+   # Verification: Using exactly the required parameters
+   assert len(colors) == 9, f"Expected 9 colors, using {len(colors)}"
+   ```
+
+### ❌ NEVER DO THIS:
+```python
+# Problem asks for 9 colors
+colors = list(range(10))  # WRONG: This is 10 colors!
+
+# Problem asks for 6 queens
+for clause in exactly_k(queen_vars, 5):  # WRONG: Changed to 5!
+```
+
+### ✅ ALWAYS DO THIS:
+```python
+# Problem asks for 9 colors
+colors = list(range(9))  # CORRECT: Exactly 9 colors [0-8]
+
+# Problem asks for 6 queens  
+for clause in exactly_k(queen_vars, 6):  # CORRECT: Exactly 6
+```
+
+## Counting and Ranges
+
+### Understanding Problem Specifications:
+- **"N colors"** means exactly N colors, typically `range(N)` which gives `[0,1,...,N-1]`
+- **"N items"** means exactly N items, no more, no less
+- **"K-coloring"** means using at most K colors (but often we want to know if exactly K suffice)
+
+### Common Range Patterns:
+```python
+# For N colors:
+colors = list(range(N))        # [0, 1, 2, ..., N-1]
+
+# For grid positions:
+positions = [(i,j) for i in range(rows) for j in range(cols)]
+
+# For counting items:
+assert len(selected_items) == required_count
+```
+
+### Verification is Key:
+Always verify your encoding matches the problem:
+```python
+# Verify counts match problem specification
+assert len(colors) == required_colors, f"Wrong number of colors"
+assert num_pieces == required_pieces, f"Wrong number of pieces"
+```
 
 ## Available Tools
 
@@ -91,10 +166,38 @@ solver.delete()
 
 
 
+## ⚠️ WARNING: Do Not Modify Problem Parameters
+
+### The #1 cause of PySAT failures is changing problem numbers!
+
+❌ **NEVER** change numbers to "simplify" the problem  
+❌ **NEVER** reduce piece counts thinking it will help  
+❌ **NEVER** add extra colors "just in case"  
+
+✅ **ALWAYS** encode the EXACT problem as stated  
+✅ **ALWAYS** use the precise numbers given  
+✅ **ALWAYS** verify your parameters match the problem  
+
+**Remember**: If the problem specifies exact numbers, you MUST use those exact numbers. Changing them means solving a different problem entirely.
+
 ## Solving and Verification
+
+- **Pre-Solving Verification:**  
+  Before solving, verify that your encoding matches the problem specification exactly. Double-check numerical parameters, ranges, and counts.
 
 - **Solution Verification:**  
   After solving, verify that the returned solution satisfies all specified constraints. If you get UNSAT, then check that all clauses are indeed justified from the problem description.
+
+- **Parameter Validation Example:**
+  ```python
+  # Problem: "Find a coloring with 9 colors"
+  # CORRECT:
+  colors = list(range(9))  # [0, 1, 2, 3, 4, 5, 6, 7, 8] - exactly 9 colors
+  print(f"Using {len(colors)} colors: {colors}")  # Verify before solving
+  
+  # INCORRECT:
+  # colors = list(range(10))  # This gives 10 colors!
+  ```
 
 ## ⭐ Advanced Helper Functions and Templates
 
@@ -158,27 +261,39 @@ if solver.solve():
 
 **IMPORTANT:** These helper functions return clauses that must be added to your formula using the pattern shown above.
 
-### Example Using Cardinality Constraints
+### Example Using Cardinality Constraints with Parameter Verification
 
 ```python
 from pysat.formula import CNF
 from pysat.solvers import Glucose3
 from pysat.card import *
 
+# PARAMETER VERIFICATION - Track problem requirements
+# Problem parameters (example):
+# - Total items: 4
+# - Must select: exactly 2
+# - Constraint: if first item selected, at most 1 of the others
+
+# Verify we're using correct parameters
+total_items = 4
+required_selections = 2
+
 formula = CNF()
 
 # Create variables with meaningful names
-a, b, c, d = 1, 2, 3, 4
+items = list(range(1, total_items + 1))  # [1, 2, 3, 4]
+assert len(items) == total_items, f"Expected {total_items} items"
+
+a, b, c, d = items
 var_names = {1: "a", 2: "b", 3: "c", 4: "d"}
 
-# Add cardinality constraints
-# At most 2 of these variables can be true
-for clause in at_most_k([a, b, c, d], 2):
+# Add cardinality constraints using verified parameters
+# Exactly 'required_selections' items must be selected
+for clause in exactly_k(items, required_selections):  # Using verified parameter
     formula.append(clause)
     
-# Exactly one of these variables must be true
-for clause in exactly_one([a, b, c]):
-    formula.append(clause)
+# Additional constraint from problem
+# (Example constraint logic here)
     
 # Combining constraints - If 'a' is true, then at most one of b,c,d can be true
 formula.append([-a, b, c, d])  # If a is true, at least one of b,c,d must be true
@@ -315,6 +430,25 @@ formula.append([-a_id, -b_id, c_id])
 ```
 
 ## Standard Code Pattern
+
+### CRITICAL: Problem Specification Validation
+
+Always validate your encoding parameters against the problem statement:
+
+```python
+# Example: Problem asks for "6 queens and 5 knights"
+NUM_QUEENS = 6  # From problem specification
+NUM_KNIGHTS = 5  # From problem specification
+
+# Add validation output
+print(f"Encoding {NUM_QUEENS} queens and {NUM_KNIGHTS} knights")
+
+# Use exact counts in constraints
+for clause in exactly_k(all_queen_vars, NUM_QUEENS):
+    formula.append(clause)
+for clause in exactly_k(all_knight_vars, NUM_KNIGHTS):
+    formula.append(clause)
+```
 
 Here are two recommended patterns for creating SAT encodings:
 
