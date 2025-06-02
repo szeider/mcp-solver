@@ -6,30 +6,40 @@ with timeout handling and output capturing. It builds on the PySAT
 environment module but adapts it for MaxSAT optimization problems.
 """
 
-import sys
-import os
-import tempfile
+import collections
+import io
+import itertools
+import json
 import logging
 import math
+import os
 import random
-import collections
-import itertools
 import re
-import json
-import traceback
+import signal
+import sys
 import time
+import traceback
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from multiprocessing import Process, Queue
 from typing import Any
 
-# Import specific PySAT environment utilities
-from mcp_solver.pysat.environment import (
-    execute_pysat_code, 
-    safe_import, 
-    time_limit, 
-    TimeoutException
-)
 
-# Define the default timeout
-DEFAULT_TIMEOUT_SECONDS = 10.0
+# Import path management to ensure we get the correct PySAT
+current_dir = os.path.abspath(os.path.dirname(__file__))
+parent_dir = os.path.abspath(os.path.join(current_dir, ".."))
+if current_dir in sys.path:
+    sys.path.remove(current_dir)
+if parent_dir in sys.path:
+    sys.path.remove(parent_dir)
+
+# Add site-packages to the front of the path
+import site
+
+
+site_packages = site.getsitepackages()
+for p in reversed(site_packages):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 # Import PySAT but protect against failure
 try:
@@ -38,28 +48,79 @@ try:
     from pysat.examples.rc2 import RC2
     from pysat.formula import CNF, WCNF
     from pysat.solvers import Cadical153, Glucose3, Glucose4, Lingeling, Solver
+
+    # Import our local solution module
+    from . import solution
+    from .solution import export_solution
 except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
-# Import our MaxSAT solution functions 
-from mcp_solver.maxsat.solution import export_solution, export_maxsat_solution
 
-# Import only basic cardinality constraints from MaxSAT templates
-from mcp_solver.maxsat.templates import at_most_k, at_least_k, exactly_k
+# Exception for timeouts
+class TimeoutException(Exception):
+    """Exception raised when code execution times out."""
 
-# We need to create our own version of _execute_pysat_code_in_process that includes
-# export_maxsat_solution in the restricted globals, just like PySAT does with export_solution
+    pass
 
-# Import needed modules for our implementation
-from multiprocessing import Process, Queue
-import io
-from contextlib import redirect_stdout, redirect_stderr
 
-def _execute_maxsat_code_in_process(code: str, result_queue: Queue) -> None:
+@contextmanager
+def time_limit(seconds: float):
+    """
+    Context manager to limit execution time of a code block.
+
+    Args:
+        seconds: Maximum execution time in seconds
+
+    Raises:
+        TimeoutException: If execution time exceeds the limit
+    """
+
+    def signal_handler(signum, frame):
+        raise TimeoutException(f"Execution timed out after {seconds} seconds")
+
+    # Set signal handler for SIGALRM
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+
+    try:
+        yield
+    finally:
+        # Reset signal handler
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
+
+def safe_import(name, *args, **kwargs):
+    """A restricted version of __import__ that only allows importing safe modules."""
+    ALLOWED_MODULES = {
+        # Standard modules
+        "math",
+        "random",
+        "collections",
+        "itertools",
+        "re",
+        "json",
+        # PySAT modules
+        "pysat",
+        "pysat.formula",
+        "pysat.solvers",
+        "pysat.card",
+        "pysat.examples",
+        "pysat.examples.rc2",
+        "pysat.pb",
+        "pysat.engines",
+    }
+    if name not in ALLOWED_MODULES:
+        raise ImportError(
+            f"Module '{name}' is not allowed in the restricted environment"
+        )
+    return __import__(name, *args, **kwargs)
+
+
+def _execute_pysat_code_in_process(code: str, result_queue: Queue) -> None:
     """
     Helper function to execute MaxSAT code in a separate process.
-    This is based on PySAT's _execute_pysat_code_in_process but includes export_maxsat_solution.
+    This function will be run in a separate process.
 
     Args:
         code: MaxSAT code to execute
@@ -90,7 +151,7 @@ def _execute_maxsat_code_in_process(code: str, result_queue: Queue) -> None:
             else:
                 regular_lines.append(line)
 
-        # Add fixed imports and helpers at the top
+        # Add fixed imports at the top - embed all helpers as strings like PySAT does
         processed_code = """
 # Standard library imports provided by the environment
 import collections
@@ -106,8 +167,54 @@ from pysat.solvers import Glucose3, Cadical153
 from pysat.card import CardEnc, EncType
 from pysat.examples.rc2 import RC2
 
-# Define basic helper functions for MaxSAT constraints
+# Cardinality constraint helpers (embedded directly)
+def at_most_k(variables, k):
+    \"\"\"Returns clauses ensuring at most k variables are true\"\"\"
+    clauses = []
+    if k < 0:
+        # Trivially unsatisfiable
+        clauses.append([])  # Empty clause means contradiction
+    elif k == 0:
+        # All variables must be false
+        for var in variables:
+            clauses.append([-var])
+    elif k >= len(variables):
+        # Trivially satisfiable
+        pass
+    else:
+        # For each combination of k+1 variables, at least one must be false
+        from itertools import combinations
+        for combo in combinations(variables, k + 1):
+            clauses.append([-var for var in combo])
+    return clauses
+
+def at_least_k(variables, k):
+    \"\"\"Returns clauses ensuring at least k variables are true\"\"\"
+    clauses = []
+    if k <= 0:
+        # Trivially satisfiable
+        pass
+    elif k > len(variables):
+        # Trivially unsatisfiable
+        clauses.append([])  # Empty clause means contradiction
+    else:
+        # For each combination of n-k+1 variables, at least one must be true
+        from itertools import combinations
+        n = len(variables)
+        negated_vars = [-var for var in variables]
+        for combo in combinations(negated_vars, n - k + 1):
+            clauses.append([-var for var in combo])
+    return clauses
+
+def exactly_k(variables, k):
+    \"\"\"Returns clauses ensuring exactly k variables are true\"\"\"
+    at_most = at_most_k(variables, k)
+    at_least = at_least_k(variables, k)
+    return at_most + at_least
+
+# Basic constraint helpers
 def at_most_one(variables):
+    \"\"\"Returns clauses ensuring at most one variable is true\"\"\"
     clauses = []
     for i in range(len(variables)):
         for j in range(i + 1, len(variables)):
@@ -115,22 +222,31 @@ def at_most_one(variables):
     return clauses
 
 def exactly_one(variables):
-    clauses = at_most_one(variables)
+    \"\"\"Returns clauses ensuring exactly one variable is true\"\"\"
+    clauses = []
+    # At least one is true
     clauses.append(list(variables))
+    # At most one is true
+    for i in range(len(variables)):
+        for j in range(i + 1, len(variables)):
+            clauses.append([-variables[i], -variables[j]])
     return clauses
 
 def implies(a, b):
+    \"\"\"Returns a clause representing a -> b (if a then b)\"\"\"
     return [[-a, b]]
 
 def mutually_exclusive(variables):
+    \"\"\"Returns clauses ensuring variables are mutually exclusive\"\"\"
     return at_most_one(variables)
 
 def if_then_else(condition, then_var, else_var):
+    \"\"\"Returns clauses for if-then-else construct\"\"\"
     return [[-condition, then_var], [condition, else_var]]
 
 """ + "\n".join(regular_lines)
 
-        # Setup restricted globals for execution
+        # Setup restricted globals for execution (same as in original function)
         restricted_globals = {
             "__builtins__": {
                 # Allowed builtins
@@ -172,29 +288,23 @@ def if_then_else(condition, then_var, else_var):
                 "TypeError": TypeError,
                 "__import__": safe_import,
             },
-            # Provide the PySAT environment - only include stable solvers
+            # Provide the PySAT/MaxSAT environment
             "CNF": CNF,
             "WCNF": WCNF,
-            "Glucose3": Glucose3,  # Standard solver 1
-            "Cadical153": Cadical153,  # Standard solver 2
+            "Glucose3": Glucose3,
+            "Cadical153": Cadical153,
             "CardEnc": CardEnc,
             "EncType": EncType,
             "RC2": RC2,  # MaxSAT solver
-            "export_solution": export_solution,  # Simplified like PySAT
-            "export_maxsat_solution": export_maxsat_solution,  # Legacy compatibility
+            "export_solution": export_solution,
             "collections": collections,
             "itertools": itertools,
             "math": math,
             "random": random,
             "re": re,
             "json": json,
-            "time": time,  # Add time module to the restricted globals
-            # No need to reference the constraint functions directly here,
-            # as they're already defined in the processed_code preamble
-            # Only basic cardinality constraints
-            "at_most_k": at_most_k,
-            "at_least_k": at_least_k,
-            "exactly_k": exactly_k,
+            "time": time,
+            # Don't need to add cardinality functions here - they're embedded in code
         }
 
         # Add common variable types needed for PySAT code
@@ -224,10 +334,10 @@ def if_then_else(condition, then_var, else_var):
             stdout = stdout_capture.getvalue()
             stderr = stderr_capture.getvalue()
 
-            # Check if _LAST_SOLUTION was set by export_maxsat_solution
-            solution = None
-            if "_LAST_SOLUTION" in restricted_globals:
-                solution = restricted_globals["_LAST_SOLUTION"]
+            # Check if _LAST_SOLUTION was set by export_solution
+            # Import the solution module to get _LAST_SOLUTION
+            from . import solution as sol_module
+            solution = getattr(sol_module, "_LAST_SOLUTION", None)
 
             # Return success result with output and solution
             result["success"] = True
@@ -255,13 +365,13 @@ def if_then_else(condition, then_var, else_var):
             }
         )
 
-# Custom version of execute_pysat_code for MaxSAT
-def execute_maxsat_code(code: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+
+def execute_pysat_code(code: str, timeout: float = 10.0) -> dict[str, Any]:
     """
     Executes MaxSAT Python code in a secure environment with robust timeout handling.
-    
-    This is similar to execute_pysat_code but includes export_maxsat_solution in
-    the restricted globals dictionary.
+
+    This implementation uses a separate process to execute the code, which allows for
+    more reliable timeout handling by terminating the entire process if needed.
 
     Args:
         code: The MaxSAT Python code to execute
@@ -299,7 +409,7 @@ def execute_maxsat_code(code: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> 
     # Create and start a process to execute the code
     # Use daemon=True to ensure the process doesn't block server shutdown
     process = Process(
-        target=_execute_maxsat_code_in_process, args=(code, result_queue), daemon=True
+        target=_execute_pysat_code_in_process, args=(code, result_queue), daemon=True
     )
 
     start_time = time.time()
@@ -346,7 +456,7 @@ def execute_maxsat_code(code: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> 
         return result
 
     except Exception as e:
-        logger.error(f"Error in execute_maxsat_code: {e!s}", exc_info=True)
+        logger.error(f"Error in execute_pysat_code: {e!s}", exc_info=True)
         # Return a success=True result even for errors to maintain connection
         return {
             "success": True,  # Mark as successful to prevent disconnection
@@ -356,23 +466,3 @@ def execute_maxsat_code(code: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> 
             "solution": None,
             "status": "error",  # Indicate that there was an error even though success=True
         }
-
-# Override the execute_pysat_code function with our MaxSAT-specific version
-execute_pysat_code = execute_maxsat_code
-
-
-# Define the list of exported symbols
-__all__ = [
-    # Environment functions
-    "execute_pysat_code",
-    "DEFAULT_TIMEOUT_SECONDS",
-    
-    # Solution functions
-    "export_solution",
-    "export_maxsat_solution",
-    
-    # Cardinality constraints
-    "at_most_k",
-    "at_least_k",
-    "exactly_k"
-]

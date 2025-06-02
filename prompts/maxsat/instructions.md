@@ -74,7 +74,7 @@ with RC2(wcnf) as solver:
 - **Arbitrary Problem Modifications**: NEVER change problem parameters (e.g., reducing piece counts) without explicit justification. Solve the problem as stated.
 - **Incomplete Variables**: Always complete variable assignments (e.g., `item_vars = [has_item(i) for i in items]`)
 - **Dictionary Updates**: Use `selected_items[item] = value` (not `selected_items = value`)
-- **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`
+- **Export Solution**: Always include `export_solution()` with at minimum `{"satisfiable": True/False}`. This function is automatically available - DO NOT try to import it!
 - **Memory Management**: Always call `solver.delete()` or use `with` statement
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
 - **WCNF vs CNF**: Always use `WCNF()` for MaxSAT problems, not `CNF()`
@@ -465,11 +465,38 @@ with RC2(wcnf) as solver:
 
 ## Solution Export
 
-`export_solution(data)`: Export data as a solution
+### CRITICAL: Always Export Your Solution
+
+**You MUST call `export_solution()` to return results.** This function is automatically available in the environment.
+
+`export_solution(data)`: Extract and format solutions from a MaxSAT solver or solution data
+
+This function processes MaxSAT solution data and creates a standardized output format. It supports both direct dictionary input and RC2 MaxSAT solver objects. All values in custom dictionaries are automatically extracted and made available in the flat "values" dictionary.
+
+### Basic Usage:
+
+```python
+# Method 1: Direct dictionary
+export_solution({
+    "satisfiable": True,
+    "cost": solver.cost,
+    "selected_items": selected,
+    "total_value": total
+})
+
+# Method 2: Pass RC2 solver directly
+export_solution(solver, variables=var_mapping, objective=total_value)
+```
+
+### Important Notes:
 
 - Requires at minimum: `{"satisfiable": True/False}`
-- Include relevant data like cost, assignment, or custom fields
-- The solution will be automatically extracted and returned
+- Structure data using custom dictionaries that reflect your problem domain
+- Values will be automatically extracted into a flat "values" dictionary
+- If multiple dictionaries contain the same key, values are preserved by prefixing keys with their parent dictionary name
+- Keys that appear in only one dictionary won't be prefixed
+- For optimization problems, include `cost` from the solver
+- The function marks solutions with `_is_maxsat_solution` for identification
 
 ## Final Notes
 

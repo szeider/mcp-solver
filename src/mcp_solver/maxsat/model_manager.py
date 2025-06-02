@@ -289,6 +289,9 @@ class MaxSATModelManager(SolverManager):
             # Join code items into a single string
             code_string = "\n".join(content for _, content in sorted_items)
 
+            # Initialize line_issues before the try block
+            line_issues = []
+
             # Perform static analysis on the code before executing it
             try:
                 import ast
@@ -372,27 +375,26 @@ class MaxSATModelManager(SolverManager):
                     }
                     return response
 
-                # Although export_maxsat_solution is automatically available,
-                # it's still good practice to check if it's being used
+                # Check for export_solution calls
                 export_calls = 0
                 for node in ast.walk(ast_tree):
                     if isinstance(node, ast.Call):
                         if (
                             isinstance(node.func, ast.Name)
-                            and node.func.id == "export_maxsat_solution"
+                            and node.func.id == "export_solution"
                         ):
                             export_calls += 1
 
                 if export_calls == 0:
                     self.logger.warning(
-                        "No export_maxsat_solution() call found in the code"
+                        "No export_solution() call found in the code"
                     )
                     # Generate a warning but don't return an error anymore
                     # since it might be using a different solution export approach
                     if "warnings" not in self.last_solution:
                         self.last_solution["warnings"] = []
                     self.last_solution["warnings"].append(
-                        "Recommendation: Use export_maxsat_solution() to return MaxSAT results. This is now automatically available in the environment."
+                        "Recommendation: Use export_solution() to return MaxSAT results. This function is automatically available in the environment."
                     )
                     
                 # Check for common logical errors in the code
