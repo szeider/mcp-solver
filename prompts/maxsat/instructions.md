@@ -275,6 +275,14 @@ wcnf.append([featureA], weight=10)  # Lose 10 points if A not selected
 wcnf.append([-itemB], weight=5)  # Pay 5 points if B is selected
 ```
 
+### Choosing Soft Constraint Weights
+
+When balancing multiple objectives (e.g., minimize cost while maximizing value):
+- **Start with raw values** from the problem statement
+- **Keep weights in similar ranges** for balanced optimization
+- **Only adjust if needed** - if the solution heavily favors one objective
+- **Example**: If costs are 1-5 and values are 10-50, consider scaling to similar ranges
+
 ## Available Helper Functions
 
 The following helper functions are automatically available in your code (no import needed):
