@@ -182,6 +182,47 @@ The model items behave like a standard Python list with 0-based indexing:
 
 **Remember**: First item is at index 0, not 1!
 
+## Important: Two Types of Indexing
+
+1. **Model Item Indexing**: Always 0-based
+   - First item is at index 0
+   - Used with add_item, replace_item, delete_item
+   - Example: `add_item(0, "# First code item")` adds at the beginning
+
+2. **SAT Variable Numbering**: Must be positive integers (1, 2, 3, ...)
+   - PySAT requires variables to be numbered starting from 1
+   - Variable 0 is invalid in SAT solvers
+   - Example: `queen_at_1_1 = 1`, `queen_at_1_2 = 2`, etc.
+
+## Variable Mapping Pattern
+
+When mapping problem entities to SAT variables, use this clear pattern:
+
+```python
+# Good: Clear mapping with 1-based variables
+queen_vars = {}
+var_num = 1
+for row in range(8):  # 0-based iteration
+    for col in range(8):
+        queen_vars[(row, col)] = var_num  # Map position to variable
+        var_num += 1
+
+# Alternative: Using a formula
+def get_var(row, col, num_cols):
+    return row * num_cols + col + 1  # +1 ensures 1-based
+
+# Usage in constraints
+for row in range(8):
+    # At least one queen in each row
+    row_vars = [queen_vars[(row, col)] for col in range(8)]
+    formula.append(row_vars)
+```
+
+**Key Points:**
+- Iterate using 0-based indices (Python convention)
+- Map to 1-based variable numbers (SAT requirement)
+- Keep mapping consistent throughout your model
+
 ## ⚠️ WARNING: Do Not Modify Problem Parameters
 
 ### The #1 cause of PySAT failures is changing problem numbers!

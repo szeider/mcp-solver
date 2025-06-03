@@ -41,13 +41,19 @@ Focus on these checks:
    - Do the variable counts match the problem (e.g., if 5 items mentioned, are 5 items in solution)?
    - Does the solution format match what the problem asks for?
 
-4. **Basic Sanity Checks**
-   - If unsatisfiable, is this explained properly?
+4. **For Unsatisfiable Solutions**
+   - **IMPORTANT**: You do NOT need to explain WHY the problem is unsatisfiable
+   - Simply verify that all hard constraints in the model are grounded in the problem description
+   - Check that each hard constraint represents a requirement from the problem statement
+   - Note that "unsatisfiable" is a perfectly valid result - if all constraints are justified by the problem, mark it as correct
+   - Trust the solver's determination of unsatisfiability
+
+5. **Basic Sanity Checks**
    - Are positive integer variables used (1, 2, 3...)?
-   - Is the cost a non-negative number?
+   - Is the cost a non-negative number for satisfiable solutions?
    - Are the reported values consistent (e.g., if cost=10, which soft constraints were violated?)
 
-5. **DO NOT Check**
+6. **DO NOT Check**
    - ❌ Whether the constraint encoding logic is correct (e.g., don't verify if `[-a, -b, c]` correctly encodes "if a and b then c")
    - ❌ Whether the solution is optimal (trust the solver)
    - ❌ Whether there could be a "better" solution

@@ -104,6 +104,16 @@ The model items behave like a standard programming list with these exact semanti
 - **When to Clear the Model:**  
   Use `clear_model` only when extensive changes are required and starting over is necessary.
 
+## Important: Model Item Indexing
+
+MiniZinc mode uses **0-based indexing** for all model operations:
+- First item is at index 0
+- Used with add_item, replace_item, delete_item
+- Example: `add_item(0, "int: n = 8;")` adds at the beginning
+- Example: `replace_item(2, "constraint: alldifferent(queens);")` replaces the third item
+
+Note: This is different from MiniZinc arrays which typically use 1-based indexing by default.
+
 ## Final Notes
 
 - **Review Return Information:**  

@@ -131,6 +131,110 @@ The model items follow standard list semantics:
    - Output detailed information for debugging purposes
    - Test edge cases explicitly
 
+## Z3 Best Practices
+
+### Working with Arrays and Sequences
+
+When working with arrays or sequences in Z3, use Pythonic approaches for cleaner, more efficient code:
+
+```python
+# GOOD: Use list comprehensions for variable creation
+arr = [Int(f"arr_{i}") for i in range(8)]
+
+# AVOID: Verbose individual declarations
+# arr_0 = Int('arr_0')
+# arr_1 = Int('arr_1')
+# ... etc
+
+# GOOD: Use loops for adding constraints
+for i in range(7):
+    solver.add(arr[i] <= arr[i+1])
+
+# AVOID: Repetitive individual constraints
+# solver.add(arr[0] <= arr[1])
+# solver.add(arr[1] <= arr[2])
+# ... etc
+```
+
+### Array Helper Functions
+
+Z3 provides pre-defined helper functions for Z3 Array objects (not Python lists):
+
+**Note**: These helpers work with Z3's `Array` type, not Python lists. For Python lists of Z3 variables, use loops as shown in the examples above.
+
+- **`array_is_sorted(arr, size, strict=False)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object (created with `Array()`)
+  - `size`: Number of elements
+  - `strict`: If True, uses strict inequality (<) instead of (<=)
+
+- **`all_distinct(arr, size)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object
+  - `size`: Number of elements
+
+- **`array_contains(arr, size, value)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object
+  - `size`: Number of elements
+  - `value`: The value that must be present
+
+**For Python lists of variables (most common case), use direct constraints:**
+```python
+# Sorting constraint for Python list
+for i in range(len(arr)-1):
+    solver.add(arr[i] <= arr[i+1])
+
+# All distinct for Python list
+from z3 import Distinct
+solver.add(Distinct(arr))
+
+# Contains value for Python list
+solver.add(Or([arr[i] == value for i in range(len(arr))]))
+```
+
+- **`exactly_k(bool_vars, k)`** - Exactly k boolean variables must be true
+- **`at_most_k(bool_vars, k)`** - At most k boolean variables can be true
+- **`at_least_k(bool_vars, k)`** - At least k boolean variables must be true
+
+Example usage:
+```python
+from z3 import *
+from mcp_solver.z3 import export_solution
+
+# Create array of 8 integers
+arr = [Int(f"x_{i}") for i in range(8)]
+
+solver = Solver()
+
+# For sorting constraint with Python lists, use loops:
+for i in range(7):
+    solver.add(arr[i] <= arr[i+1])
+
+# Or if using Z3 Arrays (different from Python lists):
+# z3_arr = Array('arr', IntSort(), IntSort())
+# from z3_templates import array_is_sorted
+# solver.add(array_is_sorted(z3_arr, 8))
+
+# Add other constraints using loops
+for i in range(8):
+    solver.add(arr[i] >= 1)
+    solver.add(arr[i] <= 15)
+
+# Check solution
+if solver.check() == sat:
+    export_solution(solver=solver, variables={f"x_{i}": arr[i] for i in range(8)})
+```
+
+## Important: Two Types of Indexing
+
+1. **Model Item Indexing**: Always 0-based
+   - First item is at index 0
+   - Used with add_item, replace_item, delete_item
+   - Example: `add_item(0, "# First item")` adds at the beginning
+
+2. **Z3 Variables**: Use descriptive names
+   - Z3 uses named variables, not numeric indices
+   - Example: `x = Int('x')`, `arr_0 = Int('arr_0')`
+   - Variable names are strings and can be anything meaningful
+
 ## Z3 Variable Types and Common Errors
 
 ### Python Primitives vs. Z3 Variables

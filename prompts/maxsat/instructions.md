@@ -707,3 +707,35 @@ Before submitting your solution, verify:
 - **Direct Approach**: Build constraints explicitly without abstractions
 - **Weight Semantics**: Remember weights are penalties for UNSATISFIED clauses
 - **Review Output**: Check confirmation messages after each tool call
+
+## Important: Two Types of Indexing
+
+1. **Model Item Indexing**: Always 0-based
+   - First item is at index 0 (imports)
+   - Used with add_item, replace_item, delete_item
+   - Example: `add_item(0, "# Import statements")` adds at the beginning
+
+2. **SAT Variable Numbering**: Must be positive integers (1, 2, 3, ...)
+   - MaxSAT requires variables to be numbered starting from 1
+   - Variable 0 is invalid in SAT solvers
+   - Example: `item1 = 1`, `item2 = 2`, etc.
+
+## Variable Mapping Pattern
+
+When mapping problem entities to SAT variables:
+
+```python
+# Good: Clear mapping with 1-based variables
+var_count = 0
+nurse_shift = {}
+for n in range(num_nurses):      # 0-based iteration
+    for s in range(num_shifts):
+        var_count += 1
+        nurse_shift[(n, s)] = var_count  # 1-based variable
+
+# Alternative: Direct formula
+def get_var(nurse, shift, num_shifts):
+    return nurse * num_shifts + shift + 1  # +1 for 1-based
+```
+
+**Remember:** Iterate with 0-based indices, map to 1-based variables!
