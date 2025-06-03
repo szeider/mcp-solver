@@ -337,6 +337,7 @@ def if_then_else(condition, then_var, else_var):
             # Check if _LAST_SOLUTION was set by export_solution
             # Import the solution module to get _LAST_SOLUTION
             from . import solution as sol_module
+
             solution = getattr(sol_module, "_LAST_SOLUTION", None)
 
             # Return success result with output and solution

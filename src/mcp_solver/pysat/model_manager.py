@@ -50,10 +50,10 @@ class PySATModelManager(BaseModelManager):
             A dictionary with a message indicating the model was cleared
         """
         result = await super().clear_model()
-        
+
         # Reset the dictionary misuse validator
         self.dict_validator = DictionaryMisuseValidator()
-        
+
         self.logger.info("Model cleared")
         return {"message": "Model cleared successfully"}
 
@@ -78,7 +78,7 @@ class PySATModelManager(BaseModelManager):
 
             # First call parent's add_item to handle list operations
             result = await super().add_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 
@@ -123,7 +123,7 @@ class PySATModelManager(BaseModelManager):
 
             # First call parent's replace_item
             result = await super().replace_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 

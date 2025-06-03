@@ -340,19 +340,21 @@ def get_standardized_response(
     if error is not None and success:
         # This is inconsistent - if there's an error, success should be False
         # Log this with a stack trace to identify the source
-        logger.error(f"CRITICAL INCONSISTENCY DETECTED: success=True with error='{error}'", 
-                    exc_info=True)
-        
+        logger.error(
+            f"CRITICAL INCONSISTENCY DETECTED: success=True with error='{error}'",
+            exc_info=True,
+        )
+
         # Always override success to be False if there's an error
         success = False  # This ensures the response is consistent
-    
+
     response = {"message": message, "success": success}
 
     # Add error if provided
     if error:
         response["error"] = error
         # Ensure status is also set for errors
-        response["status"] = "error" 
+        response["status"] = "error"
 
     # Add any additional keyword arguments to the response
     response.update(kwargs)
@@ -491,7 +493,7 @@ class DictMisuseVisitor(ast.NodeVisitor):
                 # Check if we're assigning a non-dictionary value
                 if not self._is_dict_value(node.value):
                     line_num = getattr(node, "lineno", "?")
-                    
+
                     # Avoid false positives for variable names like "solution" or "model"
                     # which are commonly used for solver results and aren't dictionary misuse
                     if var_name.lower() not in ["solution", "model", "result"]:

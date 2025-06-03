@@ -141,7 +141,9 @@ def maxsat_error_handler(func: Callable[..., T]) -> Callable[..., T]:
             )
 
             # Raise our enhanced error
-            raise MaxSATError(friendly_message, original_error=e, context=context) from e
+            raise MaxSATError(
+                friendly_message, original_error=e, context=context
+            ) from e
 
     return wrapper
 
@@ -232,9 +234,7 @@ def validate_wcnf(formula: Any) -> list[str]:
                 continue
 
             if not isinstance(weight, (int, float)) or weight <= 0:
-                errors.append(
-                    f"Soft clause {i + 1} has invalid weight: {weight}"
-                )
+                errors.append(f"Soft clause {i + 1} has invalid weight: {weight}")
 
             for j, lit in enumerate(clause):
                 if not isinstance(lit, int):

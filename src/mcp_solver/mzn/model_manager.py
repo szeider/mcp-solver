@@ -110,7 +110,7 @@ class MiniZincModelManager(BaseModelManager):
 
         # First, let the parent handle the list operation
         result = await super().add_item(index, content)
-        
+
         if not result.get("success"):
             # Convert parent's error format to MiniZinc's error format
             return error_response(
@@ -128,7 +128,7 @@ class MiniZincModelManager(BaseModelManager):
             # Rollback the change
             del self.code_items[index]
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-            
+
         return {"message": f"Item added\nCurrent model:\n{self.model_string}"}
 
     async def delete_item(
@@ -139,14 +139,14 @@ class MiniZincModelManager(BaseModelManager):
                 "MODEL_EMPTY",
                 "Operation 'delete_item' cannot be performed on an empty model",
             )
-            
+
         # Store the item to restore if validation fails
         if 0 <= index < len(self.code_items):
             removed_item = self.code_items[index]
-        
+
         # Let parent handle the delete
         result = await super().delete_item(index)
-        
+
         if not result.get("success"):
             return error_response(
                 "INVALID_INDEX",
@@ -163,7 +163,7 @@ class MiniZincModelManager(BaseModelManager):
             # Rollback the change
             self.code_items.insert(index, removed_item)
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-            
+
         return {"message": f"Item deleted\nCurrent model:\n{self.model_string}"}
 
     async def replace_item(
@@ -180,10 +180,10 @@ class MiniZincModelManager(BaseModelManager):
         # Store old content for rollback
         if 0 <= index < len(self.code_items):
             old_content = self.code_items[index]
-            
+
         # Let parent handle the replace
         result = await super().replace_item(index, content)
-        
+
         if not result.get("success"):
             return error_response(
                 "INVALID_INDEX",
@@ -200,7 +200,7 @@ class MiniZincModelManager(BaseModelManager):
             # Rollback the change
             self.code_items[index] = old_content
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-            
+
         return {"message": f"Item replaced\nCurrent model:\n{self.model_string}"}
 
     async def clear_model(self) -> dict[str, Any]:
@@ -318,7 +318,7 @@ class MiniZincModelManager(BaseModelManager):
             "status": str(result.status),
             "values": solution.get("solution", {}),
         }
-        
+
         if "objective" in solution:
             self.last_solution["objective"] = solution["objective"]
         if "optimal" in solution:

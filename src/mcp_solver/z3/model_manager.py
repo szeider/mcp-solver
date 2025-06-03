@@ -51,11 +51,11 @@ class Z3ModelManager(BaseModelManager):
             A dictionary with a message indicating the model was cleared
         """
         result = await super().clear_model()
-        
+
         # Clear the registry when model is cleared
         self._registry = {"variables": {}, "solver": None}
         self.logger.info("Model cleared")
-        
+
         return get_standardized_response(success=True, message="Model cleared")
 
     async def add_item(self, index: int, content: str) -> dict[str, Any]:
@@ -76,13 +76,13 @@ class Z3ModelManager(BaseModelManager):
 
             # First call parent's add_item to handle list operations
             result = await super().add_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 
             # Get current model for response
             model = self.get_model()
-            
+
             self.logger.info(f"Added item at index {index}")
             return get_standardized_response(
                 success=True,
@@ -119,13 +119,13 @@ class Z3ModelManager(BaseModelManager):
         """
         # First call parent's delete_item
         result = await super().delete_item(index)
-        
+
         if not result.get("success"):
             return result
 
         # Get current model for response
         model = self.get_model()
-        
+
         self.logger.info(f"Deleted item at index {index}")
         return get_standardized_response(
             success=True,
@@ -151,13 +151,13 @@ class Z3ModelManager(BaseModelManager):
 
             # First call parent's replace_item
             result = await super().replace_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 
             # Get current model for response
             model = self.get_model()
-            
+
             self.logger.info(f"Replaced item at index {index}")
             return get_standardized_response(
                 success=True,
@@ -168,10 +168,10 @@ class Z3ModelManager(BaseModelManager):
         except ValidationError as e:
             error_msg = str(e)
             self.logger.error(f"Validation error in replace_item: {error_msg}")
-            
+
             # Get current model for error response
             model = self.get_model()
-            
+
             return get_standardized_response(
                 success=False,
                 message=f"Failed to replace item: {error_msg}",
@@ -181,10 +181,10 @@ class Z3ModelManager(BaseModelManager):
         except Exception as e:
             error_msg = f"Unexpected error in replace_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
-            
+
             # Get current model for error response
             model = self.get_model()
-            
+
             return get_standardized_response(
                 success=False,
                 message="Failed to replace item due to an internal error",

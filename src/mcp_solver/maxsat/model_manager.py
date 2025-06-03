@@ -50,10 +50,10 @@ class MaxSATModelManager(BaseModelManager):
             A dictionary with a message indicating the model was cleared
         """
         result = await super().clear_model()
-        
+
         # Reset the dictionary misuse validator
         self.dict_validator = DictionaryMisuseValidator()
-        
+
         self.logger.info("Model cleared")
         return {"message": "Model cleared successfully"}
 
@@ -78,7 +78,7 @@ class MaxSATModelManager(BaseModelManager):
 
             # First call parent's add_item to handle list operations
             result = await super().add_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 
@@ -123,7 +123,7 @@ class MaxSATModelManager(BaseModelManager):
 
             # First call parent's replace_item
             result = await super().replace_item(index, content)
-            
+
             if not result.get("success"):
                 return result
 
@@ -304,9 +304,7 @@ class MaxSATModelManager(BaseModelManager):
                             export_calls += 1
 
                 if export_calls == 0:
-                    self.logger.warning(
-                        "No export_solution() call found in the code"
-                    )
+                    self.logger.warning("No export_solution() call found in the code")
                     # Generate a warning but don't return an error anymore
                     # since it might be using a different solution export approach
                     if "warnings" not in self.last_solution:
@@ -314,47 +312,61 @@ class MaxSATModelManager(BaseModelManager):
                     self.last_solution["warnings"].append(
                         "Recommendation: Use export_solution() to return MaxSAT results. This function is automatically available in the environment."
                     )
-                    
+
                 # Check for common logical errors in the code
                 line_issues = []
-                
+
                 # Check for incorrect item value summation (a common error)
                 for node in ast.walk(ast_tree):
-                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sum':
+                    if (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "sum"
+                    ):
                         # Check if we're summing a dictionary directly instead of values
                         if len(node.args) == 1 and isinstance(node.args[0], ast.Name):
                             dict_name = node.args[0].id
                             # If it looks like a dictionary with values
-                            if dict_name.endswith('_values') or dict_name.endswith('_weights'):
-                                line_num = getattr(node, 'lineno', '?')
-                                line_issues.append({
-                                    'line': line_num,
-                                    'issue': f"Incorrect summation: sum({dict_name}) will sum the dictionary keys, not values. Use sum({dict_name}.values()) instead."
-                                })
-                
+                            if dict_name.endswith("_values") or dict_name.endswith(
+                                "_weights"
+                            ):
+                                line_num = getattr(node, "lineno", "?")
+                                line_issues.append(
+                                    {
+                                        "line": line_num,
+                                        "issue": f"Incorrect summation: sum({dict_name}) will sum the dictionary keys, not values. Use sum({dict_name}.values()) instead.",
+                                    }
+                                )
+
                 # Check for incomplete assignments (like missing value after equals sign)
-                for i, line in enumerate(code_string.split('\n')):
+                for i, line in enumerate(code_string.split("\n")):
                     # Look for lines that end with an equals sign or have incomplete assignments
-                    if re.search(r'=\s*$', line) or re.search(r'=\s*#', line):
-                        line_issues.append({
-                            'line': i + 1,
-                            'issue': f"Incomplete assignment: Line ends with '=' but has no value assigned."
-                        })
-                    
+                    if re.search(r"=\s*$", line) or re.search(r"=\s*#", line):
+                        line_issues.append(
+                            {
+                                "line": i + 1,
+                                "issue": "Incomplete assignment: Line ends with '=' but has no value assigned.",
+                            }
+                        )
+
                     # Check for incomplete wcnf.append() calls - a common error
-                    if re.search(r'wcnf\.append\(\s*,\s*weight', line):
-                        line_issues.append({
-                            'line': i + 1,
-                            'issue': f"Incomplete append: wcnf.append call is missing the list of literals. Use wcnf.append([x], weight=1) instead of wcnf.append(, weight=1)."
-                        })
-                    
+                    if re.search(r"wcnf\.append\(\s*,\s*weight", line):
+                        line_issues.append(
+                            {
+                                "line": i + 1,
+                                "issue": "Incomplete append: wcnf.append call is missing the list of literals. Use wcnf.append([x], weight=1) instead of wcnf.append(, weight=1).",
+                            }
+                        )
+
                     # Check for wcnf.append without literals list
-                    if re.search(r'wcnf\.append\([^[]', line) and 'weight=' in line:
+                    if re.search(r"wcnf\.append\([^[]", line) and "weight=" in line:
                         # If it has something other than a list but has weight=
-                        line_issues.append({
-                            'line': i + 1,
-                            'issue': f"Incorrect append format: Literals must be in a list. Use wcnf.append([x], weight=1) with square brackets."
-                        })
+                        line_issues.append(
+                            {
+                                "line": i + 1,
+                                "issue": "Incorrect append format: Literals must be in a list. Use wcnf.append([x], weight=1) with square brackets.",
+                            }
+                        )
 
             except SyntaxError as e:
                 line_num = e.lineno if hasattr(e, "lineno") else "?"
@@ -366,7 +378,7 @@ class MaxSATModelManager(BaseModelManager):
                 self.logger.error(
                     f"Syntax error in code at line {line_num}, column {col_num}: {e!s}"
                 )
-                
+
                 # Find the actual line of code in the user's original code
                 # by looking at the line numbers in the original code items
                 original_line = "unknown"
@@ -374,17 +386,17 @@ class MaxSATModelManager(BaseModelManager):
                 if isinstance(line_num, int):
                     line_count = 0
                     for item_index, item_content in enumerate(self.code_items):
-                        item_lines = item_content.count('\n') + 1
+                        item_lines = item_content.count("\n") + 1
                         if line_count + item_lines >= line_num:
                             # This is the item containing the error
                             original_item = item_index + 1  # 1-based indexing
                             relative_line = line_num - line_count
-                            item_lines_list = item_content.split('\n')
+                            item_lines_list = item_content.split("\n")
                             if 0 <= relative_line - 1 < len(item_lines_list):
                                 original_line = item_lines_list[relative_line - 1]
                             break
                         line_count += item_lines
-                
+
                 # Create a detailed error response with original line information
                 error_response = {
                     "success": False,
@@ -415,19 +427,24 @@ class MaxSATModelManager(BaseModelManager):
             # If we found logical issues in static analysis, warn the user before executing
             if line_issues:
                 # Format the issues into a warning message
-                warnings = [f"Line {issue['line']}: {issue['issue']}" for issue in line_issues]
-                warning_msg = "Potential logical issues detected in your code:\n" + "\n".join(warnings)
-                
+                warnings = [
+                    f"Line {issue['line']}: {issue['issue']}" for issue in line_issues
+                ]
+                warning_msg = (
+                    "Potential logical issues detected in your code:\n"
+                    + "\n".join(warnings)
+                )
+
                 self.logger.warning(f"Logical issues detected: {warnings}")
-                
+
                 # Include warnings but still proceed with execution
                 response = get_standardized_response(
                     success=True,  # Not a fatal error
                     message="Your code contains potential logical issues that may affect the result.",
                     warnings=warnings,
-                    code_analysis="Potential logical issues detected"
+                    code_analysis="Potential logical issues detected",
                 )
-                
+
                 # Log the warning but proceed with execution
 
             # Execute code with timeout
@@ -441,7 +458,7 @@ class MaxSATModelManager(BaseModelManager):
             if self.last_result.get("error"):
                 error_msg = self.last_result["error"]
                 self.logger.error(f"Error executing code: {error_msg}")
-                
+
                 # Include any logical issues we found earlier in the error response
                 if line_issues:
                     error_response = {
@@ -451,8 +468,11 @@ class MaxSATModelManager(BaseModelManager):
                         "status": "error",
                         "error_details": {
                             "execution_error": error_msg,
-                            "logical_issues": [f"Line {issue['line']}: {issue['issue']}" for issue in line_issues]
-                        }
+                            "logical_issues": [
+                                f"Line {issue['line']}: {issue['issue']}"
+                                for issue in line_issues
+                            ],
+                        },
                     }
                 else:
                     error_response = {
@@ -461,13 +481,17 @@ class MaxSATModelManager(BaseModelManager):
                         "error": "Execution error",
                         "status": "error",
                     }
-                
+
                 # With automatic injection, we shouldn't see NameError for export_maxsat_solution anymore
                 # But keep error handling just in case something else goes wrong
                 if "NameError" in error_msg and "export_maxsat_solution" in error_msg:
-                    error_response["message"] = "Error accessing export_maxsat_solution function. This is likely an internal error with the MaxSAT environment."
-                    error_response["error"] = "Error with export_maxsat_solution function"
-                
+                    error_response["message"] = (
+                        "Error accessing export_maxsat_solution function. This is likely an internal error with the MaxSAT environment."
+                    )
+                    error_response["error"] = (
+                        "Error with export_maxsat_solution function"
+                    )
+
                 return error_response
 
             # Extract solver output to check for solution data
@@ -937,20 +961,20 @@ class MaxSATModelManager(BaseModelManager):
         )
 
         modified_code = debug_header + code_string
-        
+
         # Add line number comments to help with error reporting
         lines = modified_code.split("\n")
-        
+
         # Add line number comments at the start of each line
         lines_with_numbers = []
         for i, line in enumerate(lines):
             # Add comment with line number, but only to non-empty lines
             if line.strip() and not line.strip().startswith("#"):
-                # Preserve indentation and add comment 
-                lines_with_numbers.append(f"{line}  # __LINE_NUMBER_{i+1}__")
+                # Preserve indentation and add comment
+                lines_with_numbers.append(f"{line}  # __LINE_NUMBER_{i + 1}__")
             else:
                 lines_with_numbers.append(line)
-        
+
         modified_code = "\n".join(lines_with_numbers)
 
         # Modify the code to add debug info around solver.compute() calls

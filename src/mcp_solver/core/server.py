@@ -330,7 +330,7 @@ async def serve() -> None:
                     result = await model_mgr.add_item(
                         arguments["index"], arguments["content"]
                     )
-                    
+
                     # Check if the operation was successful
                     if result.get("success", True):
                         items = model_mgr.get_model()
@@ -359,7 +359,7 @@ async def serve() -> None:
                         ]
 
                     result = await model_mgr.delete_item(arguments["index"])
-                    
+
                     # Check if the operation was successful
                     if result.get("success", True):
                         items = model_mgr.get_model()
@@ -398,7 +398,7 @@ async def serve() -> None:
                     result = await model_mgr.replace_item(
                         arguments["index"], arguments["content"]
                     )
-                    
+
                     # Check if the operation was successful
                     if result.get("success", True):
                         items = model_mgr.get_model()

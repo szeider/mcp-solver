@@ -10,6 +10,7 @@ import os
 import sys
 from typing import Any
 
+
 # IMPORTANT: Properly import the PySAT library (not our local package)
 # First, remove the current directory from the path to avoid importing ourselves
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -21,6 +22,7 @@ if parent_dir in sys.path:
 
 # Add site-packages to the front of the path
 import site
+
 
 site_packages = site.getsitepackages()
 for p in reversed(site_packages):
@@ -37,6 +39,7 @@ except ImportError:
 
 # Import our error handling utilities
 from .error_handling import MaxSATError, validate_variables
+
 
 # Set up logger
 logger = logging.getLogger(__name__)
