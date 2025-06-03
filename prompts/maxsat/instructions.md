@@ -58,8 +58,8 @@ wcnf = WCNF()
 # Add all soft constraints with weights
 # wcnf.append([literals], weight=value)
 
-# Item 4: Solve and export solution
-# Use RC2 solver and export results
+# Item 4: Solve and export solution (MANDATORY)
+# MUST instantiate RC2, call compute(), and export results
 ```
 
 ## 📋 Quick Reference Card
@@ -123,11 +123,13 @@ wcnf.append([itemC], weight=2)   # Lose 2 points if itemC=FALSE (not selected)
 
 ### Item 4: Solve and export
 ```python
-# Solve with RC2 MaxSAT solver
+# MANDATORY: You MUST instantiate and use the RC2 solver
 with RC2(wcnf) as solver:
-    model = solver.compute()
+    # MANDATORY: Call compute() to solve the problem
+    model = solver.compute()  # Returns variable assignments or None
     
     if model:
+        # Solution found - model contains true variables
         # Create solution dictionary
         solution = {
             "itemA": itemA in model,
@@ -135,12 +137,14 @@ with RC2(wcnf) as solver:
             "itemC": itemC in model
         }
         
+        # MANDATORY: Call export_solution with results
         export_solution({
             "satisfiable": True,
-            "cost": solver.cost,
+            "cost": solver.cost,  # Total weight of unsatisfied soft clauses
             "assignment": solution
         })
     else:
+        # No solution exists (hard constraints cannot be satisfied)
         export_solution({
             "satisfiable": False,
             "message": "No solution exists"
@@ -150,6 +154,7 @@ with RC2(wcnf) as solver:
 ## ⚠️ Common Pitfalls
 
 - **Blueprint Violations**: ALWAYS use the 5-item structure (0-indexed). Do NOT combine or skip items!
+- **Missing RC2 Solver**: MUST instantiate RC2 solver and call compute() - don't just build the WCNF!
 - **Incorrect Problem Parameters**: ALWAYS encode the EXACT problem specifications
 - **Export Solution**: Always include `export_solution()` - it's automatically available
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
@@ -188,18 +193,34 @@ for clause in exactly_k(vars, 2):
     wcnf.append(clause)
 ```
 
-### 4. Missing Solution Export
+### 4. Missing RC2 Solver Instantiation
+```python
+# ❌ WRONG - Forgetting to use RC2 solver
+# Just building wcnf without solving
+wcnf = WCNF()
+# ... add constraints ...
+# No solver usage!
+
+# ✅ CORRECT - MUST instantiate and use RC2
+with RC2(wcnf) as solver:
+    model = solver.compute()
+    if model:
+        export_solution({...})
+```
+
+### 5. Missing Solution Export
 ```python
 # ❌ WRONG - No export
 if solver.compute():
     print(solver.model)
 
 # ✅ CORRECT - Always export
-if solver.compute():
+model = solver.compute()
+if model:
     export_solution({
         "satisfiable": True,
         "cost": solver.cost,
-        "solution": solver.model
+        "solution": model
     })
 ```
 
@@ -680,12 +701,13 @@ When you encounter unsatisfiability:
 # This is UNSATISFIABLE (3 items can't fit in 2 single-item slots)
 
 # After adding constraints and solving:
-if not solver.compute():
-    export_solution({
-        "satisfiable": False,
-        "message": "Cannot fit 3 items in 2 slots with capacity 1 each",
-        "conflict": "3 items require 3 slots, but only 2 available"
-    })
+with RC2(wcnf) as solver:
+    if not solver.compute():
+        export_solution({
+            "satisfiable": False,
+            "message": "Cannot fit 3 items in 2 slots with capacity 1 each",
+            "conflict": "3 items require 3 slots, but only 2 available"
+        })
 ```
 
 ## ✅ Final Checklist
@@ -696,7 +718,7 @@ Before submitting your solution, verify:
 - [ ] **Item 1**: Defines all variables with clear comments and parameter verification
 - [ ] **Item 2**: Adds all hard constraints using wcnf.append()
 - [ ] **Item 3**: Adds all soft constraints with appropriate weights
-- [ ] **Item 4**: Uses RC2 solver with compute() and calls export_solution()
+- [ ] **Item 4**: MANDATORY - Instantiates RC2(wcnf), calls solver.compute(), and exports solution
 - [ ] **Parameters**: All problem parameters match exactly (no modifications!)
 - [ ] **Variables**: All variables are positive integers
 - [ ] **Export**: Solution includes satisfiable, cost, and problem-specific data
