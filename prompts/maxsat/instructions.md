@@ -44,6 +44,27 @@ wcnf = WCNF()
 # Use RC2 solver and export results
 ```
 
+## 📋 Quick Reference Card
+
+### MaxSAT Optimization Patterns
+```python
+# MAXIMIZE value → Penalize NOT selecting
+wcnf.append([item], weight=value)        # Penalty if item=FALSE
+
+# MINIMIZE cost → Penalize selecting  
+wcnf.append([-item], weight=cost)        # Penalty if item=TRUE
+
+# Exactly k items
+for clause in exactly_k(items, k):
+    wcnf.append(clause)
+
+# Handle UNSAT
+if not solver.compute():
+    export_solution({"satisfiable": False})
+```
+
+**Remember**: You penalize what you DON'T want!
+
 ## Quick Start Example
 
 ### Item 1: Imports and initialization
@@ -186,6 +207,22 @@ if solver.compute():
 
 ## Weight Semantics in MaxSAT
 
+### 🚨 CRITICAL PATTERN - GET THIS RIGHT!
+
+```python
+# Problem: Maximize total value of selected items
+
+# ❌ WRONG - This MINIMIZES value (opposite of what you want!)
+for item, value in items.items():
+    wcnf.append([-item], weight=value)  # NO! Penalizes selecting valuable items!
+
+# ✅ CORRECT - This MAXIMIZES value  
+for item, value in items.items():
+    wcnf.append([item], weight=value)  # YES! Penalizes NOT selecting valuable items!
+```
+
+**The #1 error in MaxSAT**: Getting the polarity backwards!
+
 ### Understanding Soft Constraints
 - **Soft clause weight** = penalty for NOT satisfying the clause
 - MaxSAT minimizes the total weight of unsatisfied soft clauses
@@ -246,12 +283,12 @@ The following helper functions are automatically available in your code (no impo
 - `exactly_k(variables, k)` - Returns clauses for exactly k variables true
 - `at_most_k(variables, k)` - Returns clauses for at most k variables true
 - `at_least_k(variables, k)` - Returns clauses for at least k variables true
+- `exactly_one(variables)` - Returns clauses for exactly one variable true
+- `at_most_one(variables)` - Returns clauses for at most one variable true
 
-### Basic Constraints:
-- `exactly_one(variables)` - Exactly one variable must be true
-- `at_most_one(variables)` - At most one variable can be true
-- `implies(a, b)` - If a then b
-- `mutually_exclusive(variables)` - Variables are mutually exclusive
+### Logical Constraints:
+- `implies(a, b)` - Returns clause for: if a then b
+- `mutually_exclusive(variables)` - Same as at_most_one (mutually exclusive)
 - `if_then_else(condition, then_var, else_var)` - If-then-else construct
 
 ### ⚠️ IMPORTANT: No Import Needed!
@@ -578,6 +615,52 @@ export_solution(solver, variables=var_mapping, objective=total_value)
 - Structure data using custom dictionaries that reflect your problem domain
 - For optimization problems, include `cost` from the solver
 - The function marks solutions with `_is_maxsat_solution` for identification
+
+## Handling Unsatisfiable Problems
+
+### When MaxSAT Returns UNSATISFIABLE
+
+If the RC2 solver cannot find a solution:
+
+```python
+with RC2(wcnf) as solver:
+    if solver.compute():
+        # Process solution as normal
+        export_solution({
+            "satisfiable": True,
+            "cost": solver.cost,
+            # ... solution details ...
+        })
+    else:
+        # Problem is UNSATISFIABLE
+        export_solution({
+            "satisfiable": False,
+            "message": "No solution exists - hard constraints cannot all be satisfied"
+        })
+```
+
+### ⚠️ CRITICAL: Never Remove Constraints!
+
+When you encounter unsatisfiability:
+1. **DO NOT** remove constraints to make the problem satisfiable
+2. **DO NOT** modify the problem to find "some" solution
+3. **DO** report that the problem is unsatisfiable
+4. **DO** explain which constraints likely conflict if possible
+
+### Example: Detecting Conflicting Constraints
+
+```python
+# Problem: Schedule 3 items in 2 slots, each slot holds at most 1 item
+# This is UNSATISFIABLE (3 items can't fit in 2 single-item slots)
+
+# After adding constraints and solving:
+if not solver.compute():
+    export_solution({
+        "satisfiable": False,
+        "message": "Cannot fit 3 items in 2 slots with capacity 1 each",
+        "conflict": "3 items require 3 slots, but only 2 available"
+    })
+```
 
 ## ✅ Final Checklist
 

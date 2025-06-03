@@ -1,6 +1,6 @@
 # MaxSAT Solution Review Template
 
-Your task is to review a MaxSAT solution for correctness, optimality, and quality.
+Your task is to review a MaxSAT solution for basic correctness and proper formatting.
 
 ## Problem Statement
 
@@ -16,38 +16,53 @@ ${SOLUTION}
 
 ## Review Guidelines
 
-Carefully review the solution and assess its correctness based on the following criteria:
+⚠️ **IMPORTANT**: Do NOT try to verify that constraint encodings are correct. However, DO verify that the solution satisfies the hard constraints stated in the problem.
 
-1. **Encoding Correctness**
-   - Is the problem correctly formulated as a MaxSAT problem?
-   - Are hard constraints properly encoded (no weights)?
-   - Are soft constraints properly encoded with appropriate weights?
-   - Is the WCNF formula used correctly?
-   - Is the RC2 solver used for optimization?
+Focus on these checks:
 
-2. **Solution Correctness**
-   - Are all hard constraints satisfied in the solution?
-   - Is the solution cost (sum of weights of violated soft constraints) correctly calculated?
-   - Is the objective value reasonable for the problem?
-   - Are the variable assignments consistent with the problem requirements?
+1. **Structural Correctness**
+   - Is WCNF (not CNF) used for the MaxSAT problem?
+   - Are hard constraints added WITHOUT weights? (just `wcnf.append([literals])`)
+   - Are soft constraints added WITH weights? (`wcnf.append([literals], weight=value)`)
+   - Is the RC2 solver used and called correctly?
+   - Is export_solution() called with results?
 
-3. **Implementation Quality**
-   - Is the code well-structured and readable?
-   - Are variables named meaningfully?
-   - Is the export_maxsat_solution function used correctly?
-   - Are there any potential issues or bugs in the implementation?
+2. **Hard Constraint Satisfaction**
+   - Based on the solution values, check if obvious hard constraints are satisfied
+   - For example: If problem says "at most 2 items per slot", verify no slot has 3+ items
+   - For example: If problem says "A requires B", verify that if A is selected, B is also selected
+   - Focus on constraints you can easily verify from the problem statement
+   - If you're unsure about complex constraint encodings, skip them
 
-4. **Optimality**
-   - Is the solution optimal (minimizing cost/maximizing objective)?
-   - Could there be a better solution that the solver missed?
-   - Are there any violated soft constraints that could be satisfied without violating hard constraints?
+3. **Solution Format & Completeness**
+   - Does the solution include `"satisfiable": True/False`?
+   - If satisfiable, does it include the cost from solver.cost?
+   - Are the required outputs from the problem statement included?
+   - Do the variable counts match the problem (e.g., if 5 items mentioned, are 5 items in solution)?
+   - Does the solution format match what the problem asks for?
+
+4. **Basic Sanity Checks**
+   - If unsatisfiable, is this explained properly?
+   - Are positive integer variables used (1, 2, 3...)?
+   - Is the cost a non-negative number?
+   - Are the reported values consistent (e.g., if cost=10, which soft constraints were violated?)
+
+5. **DO NOT Check**
+   - ❌ Whether the constraint encoding logic is correct (e.g., don't verify if `[-a, -b, c]` correctly encodes "if a and b then c")
+   - ❌ Whether the solution is optimal (trust the solver)
+   - ❌ Whether there could be a "better" solution
+   - ❌ Complex Boolean formula transformations
+   - ❌ Whether soft constraint polarities match your interpretation
 
 ## Final Verdict
 
 Based on your review, provide a final verdict with one of the following:
 
-<verdict>correct</verdict> - If the solution is correct, optimal, and well-implemented
-<verdict>incorrect</verdict> - If there are significant issues with the solution
+<verdict>correct</verdict> - If the solution follows proper MaxSAT structure and formats results correctly
+<verdict>incorrect</verdict> - If there are structural issues (wrong solver, missing weights, bad format, etc.)
 <verdict>unknown</verdict> - If you cannot determine correctness based on the information provided
 
-Your review should be detailed, constructive, and focus on the MaxSAT aspects of the solution. Provide specific examples and suggestions for improvement where applicable.
+**Remember**: 
+- If the solver found a solution (satisfiable=True), the constraint logic is almost certainly correct
+- Focus on structure and format, not mathematical correctness
+- A solution can be "correct" even if you don't understand the constraint encodings
