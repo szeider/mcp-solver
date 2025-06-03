@@ -62,6 +62,35 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 - **Optimization**: Optimize with respect to objective functions
 - **Quantifiers**: Express constraints with universal and existential quantifiers
 
+## Model Manipulation Tools
+
+Z3 mode provides these tools for building your model incrementally:
+
+- **clear_model**: Reset the Z3 model to empty
+- **add_item**: Insert Python code at a specific position
+- **replace_item**: Replace code at a specific position  
+- **delete_item**: Remove code at a specific position
+- **get_model**: View the current model
+- **solve_model**: Execute and solve the model
+
+### List Semantics (0-based indexing)
+
+The model items follow standard list semantics:
+
+- **add_item(index, content)**: Inserts code at the position, shifting existing items at that index and after to the right
+  - Example: Model [A, B, C] → add_item(1, X) → [A, X, B, C]
+  - Valid indices: 0 to length (inclusive, can append at end)
+  
+- **delete_item(index)**: Removes the item, shifting subsequent items to the left
+  - Example: Model [A, B, C, D] → delete_item(1) → [A, C, D]  
+  - Valid indices: 0 to length-1
+  
+- **replace_item(index, content)**: Replaces the item at index in-place (no shifting)
+  - Example: Model [A, B, C] → replace_item(1, X) → [A, X, C]
+  - Valid indices: 0 to length-1
+
+**Important**: All indices are 0-based. The first item is at index 0.
+
 ## Best Practices for Problem Modeling
 
 1. **Translate all constraints correctly**:

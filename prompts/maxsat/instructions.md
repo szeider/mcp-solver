@@ -16,6 +16,24 @@ The MCP Solver integrates MaxSAT solving with the Model Context Protocol, allowi
 
 These tools let you construct your model incrementally and solve it using a MaxSAT solver.
 
+## List Semantics for Model Operations
+
+The model uses 0-based indexing and standard list semantics:
+
+- **add_item(index, content)**: Inserts code at position, shifting items at index and after to the right
+  - Example: Items [0, 1, 2] → add_item(1, X) → [0, X, 1, 2]
+  - Valid indices: 0 to length (can append at end)
+  
+- **delete_item(index)**: Removes item, shifting subsequent items left
+  - Example: Items [0, 1, 2, 3] → delete_item(1) → [0, 2, 3]
+  - Valid indices: 0 to length-1
+  
+- **replace_item(index, content)**: Replaces item at index (no shifting)
+  - Example: Items [0, 1, 2] → replace_item(1, X) → [0, X, 2]
+  - Valid indices: 0 to length-1
+
+**Critical**: Indices start at 0! First item is index 0, second is index 1, etc.
+
 ## 📋 MANDATORY Blueprint Structure
 
 **EVERY MaxSAT model MUST follow this exact 5-item structure (0-indexed):**

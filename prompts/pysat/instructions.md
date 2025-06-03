@@ -164,7 +164,23 @@ assert num_pieces == required_pieces, f"Wrong number of pieces"
 
 > **Timeout Handling:** When using `solve_model`, always specify a timeout (in seconds) to prevent long-running computations. If your model times out, you'll receive a response with `"status": "timeout"` and `"timeout": true`, but the connection will be maintained so you can modify and retry your model.
 
+## List Semantics for Model Operations
 
+The model items behave like a standard Python list with 0-based indexing:
+
+- **add_item(index, content)**: Inserts code at the specified position, shifting subsequent items to the right.
+  - Example: Model has 3 items. `add_item(1, "new code")` inserts at position 1, shifting items 1+ to the right.
+  - Valid indices: 0 to length (inclusive)
+  
+- **delete_item(index)**: Removes the item at index, shifting subsequent items to the left.
+  - Example: Model has 4 items. `delete_item(1)` removes item 1, items 2→1, 3→2, etc.
+  - Valid indices: 0 to length-1
+  
+- **replace_item(index, content)**: Replaces item at index in-place. No shifting.
+  - Example: `replace_item(1, "updated code")` changes only item 1.
+  - Valid indices: 0 to length-1
+
+**Remember**: First item is at index 0, not 1!
 
 ## ⚠️ WARNING: Do Not Modify Problem Parameters
 
