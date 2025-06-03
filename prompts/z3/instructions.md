@@ -613,12 +613,12 @@ If your solution isn't being properly captured:
 
    ```python
    # Instead of one large item:
-   # add_item(index=1, content=very_large_code)
+   # add_item(index=0, content=very_large_code)
    
    # Use multiple smaller items:
-   add_item(index=1, content="# Item 1: Setup and imports")
-   add_item(index=2, content="# Item 2: Core logic")
-   add_item(index=3, content="# Item 3: Results and export")
+   add_item(index=0, content="# Setup and imports")
+   add_item(index=1, content="# Core logic")
+   add_item(index=2, content="# Results and export")
    ```
 
 ## Common Error Patterns and Solutions

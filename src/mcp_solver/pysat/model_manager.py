@@ -1,5 +1,5 @@
 """
-PySAT model manager implementation.
+PySAT model manager implementation using BaseModelManager.
 
 This module implements the SolverManager abstract base class for PySAT,
 providing methods for managing PySAT models.
@@ -11,24 +11,20 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from ..core.base_manager import SolverManager
+from ..core.base_model_manager import BaseModelManager
 from ..core.constants import MAX_SOLVE_TIMEOUT, MIN_SOLVE_TIMEOUT
 from ..core.validation import (
     DictionaryMisuseValidator,
     ValidationError,
     get_standardized_response,
     validate_content,
-    validate_index,
     validate_python_code_safety,
     validate_timeout,
 )
 from .environment import execute_pysat_code
 
 
-# Validation constants are now imported from validation module
-
-
-class PySATModelManager(SolverManager):
+class PySATModelManager(BaseModelManager):
     """
     PySAT model manager implementation.
 
@@ -41,15 +37,9 @@ class PySATModelManager(SolverManager):
         Initialize a new PySAT model manager.
         """
         super().__init__()
-        self.code_items: list[tuple[int, str]] = []
-        self.last_result: dict[str, Any] | None = None
-        self.last_solution: dict[str, Any] | None = None
-        self.last_solve_time: float = 0.0
         self.initialized = True
         self.logger = logging.getLogger(__name__)
-        self.dict_validator = (
-            DictionaryMisuseValidator()
-        )  # Initialize the dictionary misuse validator
+        self.dict_validator = DictionaryMisuseValidator()
         self.logger.info("PySAT model manager initialized")
 
     async def clear_model(self) -> dict[str, Any]:
@@ -59,24 +49,13 @@ class PySATModelManager(SolverManager):
         Returns:
             A dictionary with a message indicating the model was cleared
         """
-        self.code_items = []
-        self.last_result = None
-        self.last_solution = None
-
+        result = await super().clear_model()
+        
         # Reset the dictionary misuse validator
         self.dict_validator = DictionaryMisuseValidator()
-
+        
         self.logger.info("Model cleared")
         return {"message": "Model cleared successfully"}
-
-    def get_model(self) -> list[tuple[int, str]]:
-        """
-        Get the current model content with indices.
-
-        Returns:
-            A list of (index, content) tuples
-        """
-        return self.code_items
 
     async def add_item(self, index: int, content: str) -> dict[str, Any]:
         """
@@ -93,31 +72,21 @@ class PySATModelManager(SolverManager):
             ValidationError: If the input is invalid
         """
         try:
-            # Validate inputs
-            validate_index(index, self.code_items, one_based=True)
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
+
+            # First call parent's add_item to handle list operations
+            result = await super().add_item(index, content)
+            
+            if not result.get("success"):
+                return result
 
             # Add the code fragment to the dictionary misuse validator
             self.dict_validator.add_fragment(content, index)
             self.logger.debug(f"Added fragment to dictionary validator: item {index}")
 
-            # Check if an item with the same index already exists
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    # Replace existing item
-                    self.code_items[i] = (index, content)
-                    self.logger.info(f"Replaced item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Replaced item at index {index}"
-                    )
-
-            # Add new item
-            self.code_items.append((index, content))
-            self.logger.info(f"Added item at index {index}")
-            return get_standardized_response(
-                success=True, message=f"Added item at index {index}"
-            )
+            return result
 
         except ValidationError as e:
             error_msg = str(e)
@@ -136,52 +105,6 @@ class PySATModelManager(SolverManager):
                 error=error_msg,
             )
 
-    async def delete_item(self, index: int) -> dict[str, Any]:
-        """
-        Delete an item from the model at the specified index.
-
-        Args:
-            index: The index of the item to delete
-
-        Returns:
-            A dictionary with the result of the operation
-        """
-        try:
-            # Basic index validation - only check if it's a valid integer
-            validate_index(index, one_based=True)
-
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    del self.code_items[i]
-                    self.logger.info(f"Deleted item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Deleted item at index {index}"
-                    )
-
-            self.logger.warning(f"Item at index {index} not found")
-            return get_standardized_response(
-                success=False,
-                message=f"Item at index {index} not found",
-                error="Item not found",
-            )
-
-        except ValidationError as e:
-            error_msg = str(e)
-            self.logger.error(f"Validation error in delete_item: {error_msg}")
-            return get_standardized_response(
-                success=False,
-                message=f"Failed to delete item: {error_msg}",
-                error=error_msg,
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error in delete_item: {e!s}"
-            self.logger.error(error_msg, exc_info=True)
-            return get_standardized_response(
-                success=False,
-                message="Failed to delete item due to an internal error",
-                error=error_msg,
-            )
-
     async def replace_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Replace an item in the model at the specified index.
@@ -194,28 +117,21 @@ class PySATModelManager(SolverManager):
             A dictionary with the result of the operation
         """
         try:
-            # Validate inputs
-            validate_index(index, self.code_items, one_based=True)
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
+
+            # First call parent's replace_item
+            result = await super().replace_item(index, content)
+            
+            if not result.get("success"):
+                return result
 
             # Add the code fragment to the dictionary misuse validator
             self.dict_validator.add_fragment(content, index)
             self.logger.debug(f"Added fragment to dictionary validator: item {index}")
 
-            # Check if the item exists
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    # Replace existing item
-                    self.code_items[i] = (index, content)
-                    self.logger.info(f"Replaced item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Replaced item at index {index}"
-                    )
-
-            # Item not found, add as new
-            self.logger.warning(f"Item at index {index} not found, adding as new")
-            return await self.add_item(index, content)
+            return result
 
         except ValidationError as e:
             error_msg = str(e)
@@ -286,11 +202,8 @@ class PySATModelManager(SolverManager):
                     },
                 )
 
-            # Sort code items by index
-            sorted_items = sorted(self.code_items, key=lambda x: x[0])
-
-            # Join code items into a single string
-            code_string = "\n".join(content for _, content in sorted_items)
+            # Get full code using parent's method
+            code_string = self._get_full_code()
 
             # Perform static analysis on the code before executing it
             try:

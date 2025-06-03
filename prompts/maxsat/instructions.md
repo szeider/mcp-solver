@@ -18,29 +18,29 @@ These tools let you construct your model incrementally and solve it using a MaxS
 
 ## 📋 MANDATORY Blueprint Structure
 
-**EVERY MaxSAT model MUST follow this exact structure with these item numbers:**
+**EVERY MaxSAT model MUST follow this exact 5-item structure (0-indexed):**
 
 ### Blueprint Template:
 ```python
-# Item 1: Imports and WCNF initialization
+# Item 0: Imports and WCNF initialization
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
 # Note: Helper functions (exactly_k, at_most_k, etc.) are already available - no import needed
 wcnf = WCNF()
 
-# Item 2: Problem parameters and variables
+# Item 1: Problem parameters and variables
 # Define all variables with clear comments
 # var = number
 
-# Item 3: Hard constraints
+# Item 2: Hard constraints
 # Add all hard constraints (must be satisfied)
 # wcnf.append([literals])
 
-# Item 4: Soft constraints
+# Item 3: Soft constraints
 # Add all soft constraints with weights
 # wcnf.append([literals], weight=value)
 
-# Item 5: Solve and export solution
+# Item 4: Solve and export solution
 # Use RC2 solver and export results
 ```
 
@@ -67,7 +67,7 @@ if not solver.compute():
 
 ## Quick Start Example
 
-### Item 1: Imports and initialization
+### Item 0: Imports and initialization
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
@@ -76,7 +76,7 @@ from pysat.examples.rc2 import RC2
 wcnf = WCNF()
 ```
 
-### Item 2: Variables
+### Item 1: Variables
 ```python
 # Problem: Select items to maximize value
 # Variables: 1=itemA, 2=itemB, 3=itemC
@@ -85,13 +85,13 @@ itemB = 2
 itemC = 3
 ```
 
-### Item 3: Hard constraints
+### Item 2: Hard constraints
 ```python
 # Hard constraint: Can't select both A and B
 wcnf.append([-itemA, -itemB])
 ```
 
-### Item 4: Soft constraints
+### Item 3: Soft constraints
 ```python
 # Soft constraints: We want to MAXIMIZE total value
 # Remember: MaxSAT MINIMIZES penalties, so we penalize NOT selecting valuable items
@@ -103,7 +103,7 @@ wcnf.append([itemC], weight=2)   # Lose 2 points if itemC=FALSE (not selected)
 # MaxSAT will select items to minimize penalties → maximizes value!
 ```
 
-### Item 5: Solve and export
+### Item 4: Solve and export
 ```python
 # Solve with RC2 MaxSAT solver
 with RC2(wcnf) as solver:
@@ -131,7 +131,7 @@ with RC2(wcnf) as solver:
 
 ## ⚠️ Common Pitfalls
 
-- **Blueprint Violations**: ALWAYS use the 5-item structure. Do NOT combine or skip items!
+- **Blueprint Violations**: ALWAYS use the 5-item structure (0-indexed). Do NOT combine or skip items!
 - **Incorrect Problem Parameters**: ALWAYS encode the EXACT problem specifications
 - **Export Solution**: Always include `export_solution()` - it's automatically available
 - **Variable Ranges**: MaxSAT variables must be positive integers (1, 2, 3, ...)
@@ -192,7 +192,7 @@ if solver.compute():
 ### Before encoding ANY problem:
 
 1. **Extract ALL numeric parameters** from the problem statement
-2. **Add verification comments** in Item 2:
+2. **Add verification comments** in Item 1:
    ```python
    # Problem parameters (DO NOT CHANGE):
    # - Number of items: 10
@@ -303,7 +303,7 @@ The following helper functions are automatically available in your code (no impo
 These functions are **embedded** in the environment. Just use them directly:
 
 ```python
-# Item 3: Hard constraints
+# Item 2: Hard constraints
 # CORRECT - Just use the function directly
 for clause in exactly_k([item1, item2, item3], 2):
     wcnf.append(clause)
@@ -314,7 +314,7 @@ for clause in exactly_k([item1, item2, item3], 2):
 
 ## Example: Feature Selection
 
-### Item 1: Imports
+### Item 0: Imports
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
@@ -323,7 +323,7 @@ from pysat.examples.rc2 import RC2
 wcnf = WCNF()
 ```
 
-### Item 2: Variables
+### Item 1: Variables
 ```python
 # PARAMETER VERIFICATION
 # Problem parameters (DO NOT CHANGE):
@@ -349,7 +349,7 @@ values = {
 }
 ```
 
-### Item 3: Hard constraints
+### Item 2: Hard constraints
 ```python
 # Hard constraints: Dependencies
 # If AI selected, must have cloud
@@ -359,7 +359,7 @@ wcnf.append([-ai, cloud])  # NOT ai OR cloud
 wcnf.append([-analytics, integration])
 ```
 
-### Item 4: Soft constraints
+### Item 3: Soft constraints
 ```python
 # Goal: Maximize total value of selected features
 # Strategy: Penalize NOT selecting each feature by its value
@@ -372,7 +372,7 @@ for feature, value in values.items():
 # MaxSAT minimizes penalties → selects high-value features
 ```
 
-### Item 5: Solve and export
+### Item 4: Solve and export
 ```python
 with RC2(wcnf) as solver:
     if solver.compute():
@@ -406,7 +406,7 @@ with RC2(wcnf) as solver:
 
 ## Example: Nurse Scheduling
 
-### Item 1: Imports
+### Item 0: Imports
 ```python
 from pysat.formula import WCNF
 from pysat.examples.rc2 import RC2
@@ -415,7 +415,7 @@ from pysat.examples.rc2 import RC2
 wcnf = WCNF()
 ```
 
-### Item 2: Variables
+### Item 1: Variables
 ```python
 # PARAMETER VERIFICATION
 # Problem parameters (DO NOT CHANGE):
@@ -440,7 +440,7 @@ for n in range(num_nurses):
 assert len(nurse_shift) == num_nurses * num_shifts, "Wrong number of variables"
 ```
 
-### Item 3: Hard constraints
+### Item 2: Hard constraints
 ```python
 # Hard constraint: Exactly 2 nurses per shift
 for shift in range(num_shifts):
@@ -449,7 +449,7 @@ for shift in range(num_shifts):
         wcnf.append(clause)
 ```
 
-### Item 4: Soft constraints
+### Item 3: Soft constraints
 ```python
 # Soft preference: Each nurse works at least 1 shift (weight 10)
 for nurse in range(num_nurses):
@@ -466,7 +466,7 @@ for nurse in range(num_nurses):
     ], weight=5)
 ```
 
-### Item 5: Solve and export
+### Item 4: Solve and export
 ```python
 with RC2(wcnf) as solver:
     model = solver.compute()
@@ -674,18 +674,18 @@ if not solver.compute():
 
 Before submitting your solution, verify:
 
-- [ ] **Item 1**: Imports WCNF and RC2, creates wcnf = WCNF()
-- [ ] **Item 2**: Defines all variables with clear comments and parameter verification
-- [ ] **Item 3**: Adds all hard constraints using wcnf.append()
-- [ ] **Item 4**: Adds all soft constraints with appropriate weights
-- [ ] **Item 5**: Uses RC2 solver with compute() and calls export_solution()
+- [ ] **Item 0**: Imports WCNF and RC2, creates wcnf = WCNF()
+- [ ] **Item 1**: Defines all variables with clear comments and parameter verification
+- [ ] **Item 2**: Adds all hard constraints using wcnf.append()
+- [ ] **Item 3**: Adds all soft constraints with appropriate weights
+- [ ] **Item 4**: Uses RC2 solver with compute() and calls export_solution()
 - [ ] **Parameters**: All problem parameters match exactly (no modifications!)
 - [ ] **Variables**: All variables are positive integers
 - [ ] **Export**: Solution includes satisfiable, cost, and problem-specific data
 
 ## Final Notes
 
-- **Blueprint Compliance**: ALWAYS follow the 5-item structure
+- **Blueprint Compliance**: ALWAYS follow the 5-item structure (0-indexed)
 - **Direct Approach**: Build constraints explicitly without abstractions
 - **Weight Semantics**: Remember weights are penalties for UNSATISFIED clauses
 - **Review Output**: Check confirmation messages after each tool call

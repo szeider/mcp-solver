@@ -210,10 +210,10 @@ async def serve() -> None:
                 name="add_item",
                 description=get_description(
                     {
-                        "mzn": "Add new minizinc item to the model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
-                        "z3": "Add new Python code to the Z3 model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
-                        "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
-                        "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
+                        "mzn": "Add new minizinc item to the model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "z3": "Add new Python code to the Z3 model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -330,13 +330,25 @@ async def serve() -> None:
                     result = await model_mgr.add_item(
                         arguments["index"], arguments["content"]
                     )
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+                    
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to add item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to add item: {error_msg}",
+                            )
+                        ]
                 case "delete_item":
                     if "index" not in arguments:
                         return [
@@ -347,13 +359,25 @@ async def serve() -> None:
                         ]
 
                     result = await model_mgr.delete_item(arguments["index"])
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+                    
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to delete item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to delete item: {error_msg}",
+                            )
+                        ]
                 case "replace_item":
                     # Check if required parameters are provided
                     if "index" not in arguments:
@@ -374,13 +398,25 @@ async def serve() -> None:
                     result = await model_mgr.replace_item(
                         arguments["index"], arguments["content"]
                     )
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item replaced\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+                    
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item replaced\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to replace item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to replace item: {error_msg}",
+                            )
+                        ]
                 case "clear_model":
                     result = await model_mgr.clear_model()
                     return [types.TextContent(type="text", text="Model cleared")]

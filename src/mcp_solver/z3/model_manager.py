@@ -1,5 +1,5 @@
 """
-Z3 model manager implementation.
+Z3 model manager implementation using BaseModelManager.
 
 This module provides the Z3ModelManager class, which implements the SolverManager
 interface for the Z3 SMT solver.
@@ -12,20 +12,19 @@ from typing import Any
 # Import z3 for status constant comparison
 import z3
 
-from ..core.base_manager import SolverManager
+from ..core.base_model_manager import BaseModelManager
 from ..core.constants import MAX_SOLVE_TIMEOUT, MIN_SOLVE_TIMEOUT
 from ..core.validation import (
     ValidationError,
     get_standardized_response,
     validate_content,
-    validate_index,
     validate_python_code_safety,
     validate_timeout,
 )
 from .environment import execute_z3_code
 
 
-class Z3ModelManager(SolverManager):
+class Z3ModelManager(BaseModelManager):
     """
     Z3 model manager implementation.
 
@@ -38,9 +37,6 @@ class Z3ModelManager(SolverManager):
         Initialize a new Z3 model manager.
         """
         super().__init__()
-        self.code_items = []  # List of (index, content) tuples
-        self.last_result = None
-        self.last_solution = None
         self.initialized = True
         # Add a registry to store variables and solver across different scopes
         self._registry = {"variables": {}, "solver": None}
@@ -54,55 +50,44 @@ class Z3ModelManager(SolverManager):
         Returns:
             A dictionary with a message indicating the model was cleared
         """
-        self.code_items = []
-        self.last_result = None
-        self.last_solution = None
+        result = await super().clear_model()
+        
         # Clear the registry when model is cleared
         self._registry = {"variables": {}, "solver": None}
         self.logger.info("Model cleared")
+        
         return get_standardized_response(success=True, message="Model cleared")
-
-    def get_model(self) -> list[tuple[int, str]]:
-        """
-        Get the current model content with indexes.
-
-        Returns:
-            A list of (index, content) tuples
-        """
-        return [(i + 1, content) for i, content in enumerate(self.code_items)]
 
     async def add_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Add an item to the model at the specified index.
 
         Args:
-            index: The index at which to add the item (1-based)
+            index: The index at which to add the item (0-based)
             content: The content to add
 
         Returns:
             A dictionary with the result of the operation
         """
         try:
-            # Validate inputs - Z3 uses 1-based indexing in API, but 0-based internally
-            validate_index(
-                index,
-                [(i + 1, c) for i, c in enumerate(self.code_items)],
-                one_based=True,
-            )
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
 
-            # Adjust index to 0-based for internal storage
-            index_0 = max(0, min(len(self.code_items), index - 1))
+            # First call parent's add_item to handle list operations
+            result = await super().add_item(index, content)
+            
+            if not result.get("success"):
+                return result
 
-            # Insert the item
-            self.code_items.insert(index_0, content)
-
+            # Get current model for response
+            model = self.get_model()
+            
             self.logger.info(f"Added item at index {index}")
             return get_standardized_response(
                 success=True,
                 message=f"Added item at index {index}",
-                model=self.get_model(),
+                model=model,
             )
 
         except ValidationError as e:
@@ -112,7 +97,6 @@ class Z3ModelManager(SolverManager):
                 success=False,
                 message=f"Failed to add item: {error_msg}",
                 error=error_msg,
-                model=self.get_model(),
             )
         except Exception as e:
             error_msg = f"Unexpected error in add_item: {e!s}"
@@ -121,7 +105,6 @@ class Z3ModelManager(SolverManager):
                 success=False,
                 message="Failed to add item due to an internal error",
                 error=error_msg,
-                model=self.get_model(),
             )
 
     async def delete_item(self, index: int) -> dict[str, Any]:
@@ -129,112 +112,84 @@ class Z3ModelManager(SolverManager):
         Delete an item from the model at the specified index.
 
         Args:
-            index: The index of the item to delete (1-based)
+            index: The index of the item to delete (0-based)
 
         Returns:
             A dictionary with the result of the operation
         """
-        try:
-            # Validate index
-            validate_index(index, one_based=True)
+        # First call parent's delete_item
+        result = await super().delete_item(index)
+        
+        if not result.get("success"):
+            return result
 
-            # Adjust index to 0-based for internal storage
-            index_0 = index - 1
-
-            # Check if index is valid for the array
-            if index_0 < 0 or index_0 >= len(self.code_items):
-                return get_standardized_response(
-                    success=False,
-                    message=f"Invalid index: {index}",
-                    error="Index out of range",
-                    model=self.get_model(),
-                )
-
-            # Delete the item
-            del self.code_items[index_0]
-
-            self.logger.info(f"Deleted item at index {index}")
-            return get_standardized_response(
-                success=True,
-                message=f"Deleted item at index {index}",
-                model=self.get_model(),
-            )
-
-        except ValidationError as e:
-            error_msg = str(e)
-            self.logger.error(f"Validation error in delete_item: {error_msg}")
-            return get_standardized_response(
-                success=False,
-                message=f"Failed to delete item: {error_msg}",
-                error=error_msg,
-                model=self.get_model(),
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error in delete_item: {e!s}"
-            self.logger.error(error_msg, exc_info=True)
-            return get_standardized_response(
-                success=False,
-                message="Failed to delete item due to an internal error",
-                error=error_msg,
-                model=self.get_model(),
-            )
+        # Get current model for response
+        model = self.get_model()
+        
+        self.logger.info(f"Deleted item at index {index}")
+        return get_standardized_response(
+            success=True,
+            message=f"Deleted item at index {index}",
+            model=model,
+        )
 
     async def replace_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Replace an item in the model at the specified index.
 
         Args:
-            index: The index of the item to replace (1-based)
+            index: The index of the item to replace (0-based)
             content: The new content
 
         Returns:
             A dictionary with the result of the operation
         """
         try:
-            # Validate inputs
-            validate_index(index, one_based=True)
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
 
-            # Adjust index to 0-based for internal storage
-            index_0 = index - 1
+            # First call parent's replace_item
+            result = await super().replace_item(index, content)
+            
+            if not result.get("success"):
+                return result
 
-            # Check if index is valid for the array
-            if index_0 < 0 or index_0 >= len(self.code_items):
-                return get_standardized_response(
-                    success=False,
-                    message=f"Invalid index: {index}",
-                    error="Index out of range",
-                    model=self.get_model(),
-                )
-
-            # Replace the item
-            self.code_items[index_0] = content
-
+            # Get current model for response
+            model = self.get_model()
+            
             self.logger.info(f"Replaced item at index {index}")
             return get_standardized_response(
                 success=True,
                 message=f"Replaced item at index {index}",
-                model=self.get_model(),
+                model=model,
             )
 
         except ValidationError as e:
             error_msg = str(e)
             self.logger.error(f"Validation error in replace_item: {error_msg}")
+            
+            # Get current model for error response
+            model = self.get_model()
+            
             return get_standardized_response(
                 success=False,
                 message=f"Failed to replace item: {error_msg}",
                 error=error_msg,
-                model=self.get_model(),
+                model=model,
             )
         except Exception as e:
             error_msg = f"Unexpected error in replace_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
+            
+            # Get current model for error response
+            model = self.get_model()
+            
             return get_standardized_response(
                 success=False,
                 message="Failed to replace item due to an internal error",
                 error=error_msg,
-                model=self.get_model(),
+                model=model,
             )
 
     async def solve_model(self, timeout: timedelta) -> dict[str, Any]:
@@ -257,8 +212,8 @@ class Z3ModelManager(SolverManager):
             # Validate timeout
             validate_timeout(timeout, MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT)
 
-            # Combine code items into a single string
-            combined_code = "\n".join(self.code_items)
+            # Get full code using parent's method
+            combined_code = self._get_full_code()
 
             # Add wrapper for export_solution to capture variables and solver
             combined_code = (

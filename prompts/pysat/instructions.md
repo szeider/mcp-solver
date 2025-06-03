@@ -11,7 +11,7 @@ This service provides access to PySAT (Python SAT Solver) with a simplified inte
 The MCP Solver integrates PySAT solving with the Model Context Protocol, allowing you to create, modify, and solve PySAT encodings for satisfiability problems. The following tools are available:
 
 - **clear_model**
-- **add_item**
+- **add_item** (uses 0-based indexing: first item is index=0)
 - **replace_item**
 - **delete_item**
 - **solve_model**
