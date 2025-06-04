@@ -345,7 +345,9 @@ class VariableMap:
                 "NotImplementedError": NotImplementedError,
                 "StopIteration": StopIteration,
                 "AssertionError": AssertionError,
-                "assert": lambda cond, msg="": None if cond else (_ for _ in ()).throw(AssertionError(msg)),
+                "assert": lambda cond, msg="": None
+                if cond
+                else (_ for _ in ()).throw(AssertionError(msg)),
                 "type": type,
                 "repr": repr,
                 "hash": hash,
@@ -446,11 +448,11 @@ class VariableMap:
                 error_msg += f"\n  {e.text.strip()}"
                 if e.offset:
                     error_msg += f"\n  {' ' * (e.offset - 1)}^"
-            
+
             result["error"] = error_msg
             result["output"] = error_msg
             result["success"] = False
-            
+
         except Exception as e:
             # Handle any other exception
             error_msg = f"Error: {type(e).__name__}: {e!s}"
