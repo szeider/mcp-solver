@@ -23,8 +23,8 @@ from mcp_solver.core.prompt_loader import load_prompt
 
 # Core dependencies
 from .llm_factory import LLMFactory
-from .token_counter import TokenCounter
 from .token_callback import TokenUsageCallbackHandler
+from .token_counter import TokenCounter
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
@@ -478,10 +478,14 @@ def call_reviewer(state: dict, model: Any) -> dict:
         print("Calling model for review...", flush=True)
 
         # Create a callback handler for the reviewer
-        reviewer_callback = TokenUsageCallbackHandler(token_counter, agent_type="reviewer")
+        reviewer_callback = TokenUsageCallbackHandler(
+            token_counter, agent_type="reviewer"
+        )
 
         # Invoke the model with the callback handler
-        response = model.invoke([review_message], config={"callbacks": [reviewer_callback]})
+        response = model.invoke(
+            [review_message], config={"callbacks": [reviewer_callback]}
+        )
         response_text = response.content
 
         # Track reviewer tokens (fallback for providers without exact counts)
@@ -667,20 +671,21 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                             recursion_limit = 200
 
                     print(f"Using recursion limit: {recursion_limit}", flush=True)
-                    
+
                     # Ensure token counter is initialized before agent runs
                     token_counter = TokenCounter.get_instance()
                     # Do not reset token counts - this prevents proper tracking
                     # token_counter.main_input_tokens = 0
                     # token_counter.main_output_tokens = 0
-                    
+
                     # Create a callback handler for the main agent
-                    main_callback = TokenUsageCallbackHandler(token_counter, agent_type="main")
-                    
+                    main_callback = TokenUsageCallbackHandler(
+                        token_counter, agent_type="main"
+                    )
+
                     # Create config with callbacks
                     config = RunnableConfig(
-                        recursion_limit=recursion_limit,
-                        callbacks=[main_callback]
+                        recursion_limit=recursion_limit, callbacks=[main_callback]
                     )
 
                     # Simplified agent start message
@@ -721,8 +726,10 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                     # print(f"State update: {key} = {value}", flush=True)
 
                             # If we didn't get explicit token counts and we don't have exact counts from callbacks, estimate them
-                            if not token_counter.main_is_exact and token_counter.main_input_tokens == 0 and response.get(
-                                "messages"
+                            if (
+                                not token_counter.main_is_exact
+                                and token_counter.main_input_tokens == 0
+                                and response.get("messages")
                             ):
                                 # Estimate tokens from input messages
                                 # Don't print annoying message: print("No token counts found, estimating from messages...", flush=True)
@@ -951,7 +958,10 @@ def display_combined_stats():
             format_token_count(token_counter.main_output_tokens),
         )
         tool_table.add_row(
-            "Token", f"ReAct Agent Total{main_type}", format_token_count(main_total), style="bold"
+            "Token",
+            f"ReAct Agent Total{main_type}",
+            format_token_count(main_total),
+            style="bold",
         )
 
         # Reviewer agent tokens
@@ -959,7 +969,9 @@ def display_combined_stats():
             token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
         )
         if reviewer_total > 0:
-            reviewer_type = " (exact)" if token_counter.reviewer_is_exact else " (approx)"
+            reviewer_type = (
+                " (exact)" if token_counter.reviewer_is_exact else " (approx)"
+            )
             tool_table.add_row(
                 "Token",
                 f"Reviewer Input{reviewer_type}",

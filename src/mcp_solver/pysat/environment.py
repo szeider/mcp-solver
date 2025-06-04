@@ -457,12 +457,12 @@ class VariableMap:
             # Handle any other exception
             error_msg = f"Error: {type(e).__name__}: {e!s}"
             result["error"] = error_msg
-            
+
             # Get stdout/stderr before checking for solution
             stdout = stdout_capture.getvalue()
             stderr = stderr_capture.getvalue()
             result["output"] = f"{error_msg}\n{stdout}\n{stderr}"
-            
+
             # IMPORTANT: Check if we already have a solution before marking as failure
             # This preserves UNSAT/SAT status even if there's a post-export error
             # Look for solution in the debug output
@@ -472,17 +472,28 @@ class VariableMap:
                 # Try to extract the solution from debug output
                 try:
                     import re as regex_module
-                    solution_match = regex_module.search(r"DEBUG - _LAST_SOLUTION set to: ({.*?})\n", stdout, regex_module.DOTALL)
+
+                    solution_match = regex_module.search(
+                        r"DEBUG - _LAST_SOLUTION set to: ({.*?})\n",
+                        stdout,
+                        regex_module.DOTALL,
+                    )
                     if solution_match:
                         # Parse the solution dictionary
                         solution_str = solution_match.group(1)
                         # Convert Python literals to JSON format
-                        solution_str = solution_str.replace("'", '"').replace("False", "false").replace("True", "true")
+                        solution_str = (
+                            solution_str.replace("'", '"')
+                            .replace("False", "false")
+                            .replace("True", "true")
+                        )
                         solution = json.loads(solution_str)
                         result["solution"] = solution
                 except:
                     # If parsing fails, still mark as success but note the issue
-                    result["solution"] = {"note": "Solution was exported but couldn't be parsed from output"}
+                    result["solution"] = {
+                        "note": "Solution was exported but couldn't be parsed from output"
+                    }
             else:
                 result["success"] = False  # Only mark as failure if no solution
 

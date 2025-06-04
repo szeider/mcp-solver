@@ -47,12 +47,12 @@ class TokenCounter:
         """Count output tokens for main agent (only if not exact)."""
         if not self.main_is_exact:
             self.main_output_tokens = count_tokens_approximately(messages)
-    
+
     def count_reviewer_input(self, messages):
         """Count input tokens for reviewer (only if not exact)."""
         if not self.reviewer_is_exact:
             self.reviewer_input_tokens = count_tokens_approximately(messages)
-    
+
     def count_reviewer_output(self, messages):
         """Count output tokens for reviewer (only if not exact)."""
         if not self.reviewer_is_exact:
@@ -62,17 +62,17 @@ class TokenCounter:
     def total_main_tokens(self):
         """Get total tokens for main agent."""
         return self.main_input_tokens + self.main_output_tokens
-    
+
     @property
     def total_reviewer_tokens(self):
         """Get total tokens for reviewer."""
         return self.reviewer_input_tokens + self.reviewer_output_tokens
-    
+
     @property
     def total_tokens(self):
         """Get total tokens across all agents."""
         return self.total_main_tokens + self.total_reviewer_tokens
-    
+
     def format_token_count(self, count: int) -> str:
         """Format token count with k/M suffixes."""
         if count >= 1_000_000:
@@ -96,7 +96,7 @@ class TokenCounter:
             self.format_token_count(self.main_input_tokens),
             self.format_token_count(self.main_output_tokens),
             self.format_token_count(self.total_main_tokens),
-            "Exact" if self.main_is_exact else "Approx"
+            "Exact" if self.main_is_exact else "Approx",
         )
 
         # Reviewer row
@@ -105,17 +105,24 @@ class TokenCounter:
             self.format_token_count(self.reviewer_input_tokens),
             self.format_token_count(self.reviewer_output_tokens),
             self.format_token_count(self.total_reviewer_tokens),
-            "Exact" if self.reviewer_is_exact else "Approx"
+            "Exact" if self.reviewer_is_exact else "Approx",
         )
 
         # Combined row
         table.add_row(
             "COMBINED",
-            self.format_token_count(self.main_input_tokens + self.reviewer_input_tokens),
-            self.format_token_count(self.main_output_tokens + self.reviewer_output_tokens),
+            self.format_token_count(
+                self.main_input_tokens + self.reviewer_input_tokens
+            ),
+            self.format_token_count(
+                self.main_output_tokens + self.reviewer_output_tokens
+            ),
             self.format_token_count(self.total_tokens),
-            "Mixed" if (self.main_is_exact or self.reviewer_is_exact) and not (self.main_is_exact and self.reviewer_is_exact) else ("Exact" if self.main_is_exact else "Approx"),
-            style="bold"
+            "Mixed"
+            if (self.main_is_exact or self.reviewer_is_exact)
+            and not (self.main_is_exact and self.reviewer_is_exact)
+            else ("Exact" if self.main_is_exact else "Approx"),
+            style="bold",
         )
 
         return table
