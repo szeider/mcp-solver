@@ -7,6 +7,7 @@ separately for the main agent and reviewer agent.
 
 from typing import Any
 
+from langchain_core.messages.utils import count_tokens_approximately
 from rich.console import Console
 from rich.table import Table
 
@@ -25,122 +26,96 @@ class TokenCounter:
 
     def __init__(self):
         """Initialize token counter."""
+        self.reset()
+        self.console = Console()
+
+    def reset(self):
+        """Reset all token counts."""
         self.main_input_tokens = 0
         self.main_output_tokens = 0
         self.reviewer_input_tokens = 0
         self.reviewer_output_tokens = 0
-        self.console = Console()
-        # Use 3.5 characters per token as default ratio - a reasonable average for many models
-        self.chars_per_token = 3.5
+        self.main_is_exact = False
+        self.reviewer_is_exact = False
 
-    def set_chars_per_token(self, ratio: float):
-        """Set the characters per token ratio for estimation."""
-        self.chars_per_token = ratio
+    def count_main_input(self, messages):
+        """Count input tokens for main agent (only if not exact)."""
+        if not self.main_is_exact:
+            self.main_input_tokens = count_tokens_approximately(messages)
 
-    def estimate_tokens(self, content: str | list[Any]) -> int:
-        """Estimate the number of tokens based on characters.
+    def count_main_output(self, messages):
+        """Count output tokens for main agent (only if not exact)."""
+        if not self.main_is_exact:
+            self.main_output_tokens = count_tokens_approximately(messages)
+    
+    def count_reviewer_input(self, messages):
+        """Count input tokens for reviewer (only if not exact)."""
+        if not self.reviewer_is_exact:
+            self.reviewer_input_tokens = count_tokens_approximately(messages)
+    
+    def count_reviewer_output(self, messages):
+        """Count output tokens for reviewer (only if not exact)."""
+        if not self.reviewer_is_exact:
+            self.reviewer_output_tokens = count_tokens_approximately(messages)
 
-        Args:
-            content: String or list of objects with content attributes
-
-        Returns:
-            Estimated token count
-        """
-        if isinstance(content, str):
-            # Simple case - just a string
-            return int(len(content) / self.chars_per_token)
-        elif isinstance(content, list):
-            # If it's a list, try to extract content from each item
-            char_count = 0
-            for item in content:
-                if hasattr(item, "content"):
-                    char_count += len(str(item.content))
-                elif isinstance(item, dict) and "content" in item:
-                    char_count += len(str(item["content"]))
-                else:
-                    # Fallback: use the string representation
-                    char_count += len(str(item))
-            return int(char_count / self.chars_per_token)
-        else:
-            # Any other object - use string representation
-            return int(len(str(content)) / self.chars_per_token)
-
-    def count_main_input(self, content):
-        """Count tokens for main agent input."""
-        tokens = self.estimate_tokens(content)
-        self.add_main_input_tokens(tokens)
-        return tokens
-
-    def count_main_output(self, content):
-        """Count tokens for main agent output."""
-        tokens = self.estimate_tokens(content)
-        self.add_main_output_tokens(tokens)
-        return tokens
-
-    def count_reviewer_input(self, content):
-        """Count tokens for reviewer input."""
-        tokens = self.estimate_tokens(content)
-        self.add_reviewer_input_tokens(tokens)
-        return tokens
-
-    def count_reviewer_output(self, content):
-        """Count tokens for reviewer output."""
-        tokens = self.estimate_tokens(content)
-        self.add_reviewer_output_tokens(tokens)
-        return tokens
-
-    def add_main_input_tokens(self, count):
-        """Add input tokens to main agent counter."""
-        self.main_input_tokens += count
-
-    def add_main_output_tokens(self, count):
-        """Add output tokens to main agent counter."""
-        self.main_output_tokens += count
-
-    def add_reviewer_input_tokens(self, count):
-        """Add input tokens to reviewer agent counter."""
-        self.reviewer_input_tokens += count
-
-    def add_reviewer_output_tokens(self, count):
-        """Add output tokens to reviewer agent counter."""
-        self.reviewer_output_tokens += count
+    @property
+    def total_main_tokens(self):
+        """Get total tokens for main agent."""
+        return self.main_input_tokens + self.main_output_tokens
+    
+    @property
+    def total_reviewer_tokens(self):
+        """Get total tokens for reviewer."""
+        return self.reviewer_input_tokens + self.reviewer_output_tokens
+    
+    @property
+    def total_tokens(self):
+        """Get total tokens across all agents."""
+        return self.total_main_tokens + self.total_reviewer_tokens
+    
+    def format_token_count(self, count: int) -> str:
+        """Format token count with k/M suffixes."""
+        if count >= 1_000_000:
+            return f"{count / 1_000_000:.1f}M"
+        elif count >= 1_000:
+            return f"{count / 1_000:.1f}k"
+        return str(count)
 
     def get_stats_table(self):
         """Get token usage statistics as a Rich table."""
-        from mcp_solver.client.client import format_token_count
-
         table = Table(title="Token Usage Statistics")
-        table.add_column("Agent", style="cyan")
-        table.add_column("Input", style="green")
-        table.add_column("Output", style="magenta")
-        table.add_column("Total", style="yellow")
+        table.add_column("Agent", style="cyan", no_wrap=True)
+        table.add_column("Input", justify="right", style="green")
+        table.add_column("Output", justify="right", style="blue")
+        table.add_column("Total", justify="right", style="magenta")
+        table.add_column("Type", justify="center", style="yellow")
 
         # Main agent row
-        main_total = self.main_input_tokens + self.main_output_tokens
         table.add_row(
             "ReAct Agent",
-            format_token_count(self.main_input_tokens),
-            format_token_count(self.main_output_tokens),
-            format_token_count(main_total),
+            self.format_token_count(self.main_input_tokens),
+            self.format_token_count(self.main_output_tokens),
+            self.format_token_count(self.total_main_tokens),
+            "Exact" if self.main_is_exact else "Approx"
         )
 
-        # Reviewer agent row
-        reviewer_total = self.reviewer_input_tokens + self.reviewer_output_tokens
+        # Reviewer row
         table.add_row(
             "Reviewer",
-            format_token_count(self.reviewer_input_tokens),
-            format_token_count(self.reviewer_output_tokens),
-            format_token_count(reviewer_total),
+            self.format_token_count(self.reviewer_input_tokens),
+            self.format_token_count(self.reviewer_output_tokens),
+            self.format_token_count(self.total_reviewer_tokens),
+            "Exact" if self.reviewer_is_exact else "Approx"
         )
 
-        # Total row
-        grand_total = main_total + reviewer_total
+        # Combined row
         table.add_row(
             "COMBINED",
-            format_token_count(self.main_input_tokens + self.reviewer_input_tokens),
-            format_token_count(self.main_output_tokens + self.reviewer_output_tokens),
-            format_token_count(grand_total),
-            style="bold",
+            self.format_token_count(self.main_input_tokens + self.reviewer_input_tokens),
+            self.format_token_count(self.main_output_tokens + self.reviewer_output_tokens),
+            self.format_token_count(self.total_tokens),
+            "Mixed" if (self.main_is_exact or self.reviewer_is_exact) and not (self.main_is_exact and self.reviewer_is_exact) else ("Exact" if self.main_is_exact else "Approx"),
+            style="bold"
         )
 
         return table
@@ -151,8 +126,8 @@ class TokenCounter:
         self.console.print("\n")
         self.console.print(table)
 
-    def get_total_tokens(self):
-        """Get the total number of tokens used."""
-        main_total = self.main_input_tokens + self.main_output_tokens
-        reviewer_total = self.reviewer_input_tokens + self.reviewer_output_tokens
-        return main_total + reviewer_total
+    def display_token_usage(self):
+        """Display token usage in a table."""
+        table = self.get_stats_table()
+        self.console.print("\n")
+        self.console.print(table)

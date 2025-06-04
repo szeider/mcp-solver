@@ -24,6 +24,7 @@ from mcp_solver.core.prompt_loader import load_prompt
 # Core dependencies
 from .llm_factory import LLMFactory
 from .token_counter import TokenCounter
+from .token_callback import TokenUsageCallbackHandler
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
@@ -468,21 +469,25 @@ def call_reviewer(state: dict, model: Any) -> dict:
     print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
 
     try:
-        # Track reviewer input tokens using the TokenCounter
+        # Get token counter instance
         token_counter = TokenCounter.get_instance()
-        token_counter.count_reviewer_input(reviewer_prompt)
 
         # Create a human message with the prompt
         review_message = HumanMessage(content=reviewer_prompt)
 
         print("Calling model for review...", flush=True)
 
-        # Invoke the model normally
-        response = model.invoke([review_message])
+        # Create a callback handler for the reviewer
+        reviewer_callback = TokenUsageCallbackHandler(token_counter, agent_type="reviewer")
+
+        # Invoke the model with the callback handler
+        response = model.invoke([review_message], config={"callbacks": [reviewer_callback]})
         response_text = response.content
 
-        # Track reviewer output tokens
-        token_counter.count_reviewer_output(response_text)
+        # Track reviewer tokens (fallback for providers without exact counts)
+        if not token_counter.reviewer_is_exact:
+            token_counter.count_reviewer_input([review_message])
+            token_counter.count_reviewer_output([response])
 
         # Parse the verdict from the response using regex
         verdict_match = re.search(
@@ -662,17 +667,25 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                             recursion_limit = 200
 
                     print(f"Using recursion limit: {recursion_limit}", flush=True)
-                    config = RunnableConfig(recursion_limit=recursion_limit)
-
-                    # Simplified agent start message
-                    log_system("Entering ReAct Agent")
-                    sys.stdout.flush()
-
+                    
                     # Ensure token counter is initialized before agent runs
                     token_counter = TokenCounter.get_instance()
                     # Do not reset token counts - this prevents proper tracking
                     # token_counter.main_input_tokens = 0
                     # token_counter.main_output_tokens = 0
+                    
+                    # Create a callback handler for the main agent
+                    main_callback = TokenUsageCallbackHandler(token_counter, agent_type="main")
+                    
+                    # Create config with callbacks
+                    config = RunnableConfig(
+                        recursion_limit=recursion_limit,
+                        callbacks=[main_callback]
+                    )
+
+                    # Simplified agent start message
+                    log_system("Entering ReAct Agent")
+                    sys.stdout.flush()
 
                     try:
                         # Initialize the agent with tools
@@ -707,23 +720,8 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                     # Debug print only if needed
                                     # print(f"State update: {key} = {value}", flush=True)
 
-                            # Explicitly update token counter from response
-                            if "mem_main_input_tokens" in response:
-                                input_tokens = response.get("mem_main_input_tokens", 0)
-                                # print(f"Main agent input tokens: {input_tokens}", flush=True)
-                                if input_tokens > 0:
-                                    token_counter.main_input_tokens = input_tokens
-
-                            if "mem_main_output_tokens" in response:
-                                output_tokens = response.get(
-                                    "mem_main_output_tokens", 0
-                                )
-                                # print(f"Main agent output tokens: {output_tokens}", flush=True)
-                                if output_tokens > 0:
-                                    token_counter.main_output_tokens = output_tokens
-
-                            # If we didn't get explicit token counts but we got messages, estimate them
-                            if token_counter.main_input_tokens == 0 and response.get(
+                            # If we didn't get explicit token counts and we don't have exact counts from callbacks, estimate them
+                            if not token_counter.main_is_exact and token_counter.main_input_tokens == 0 and response.get(
                                 "messages"
                             ):
                                 # Estimate tokens from input messages
@@ -742,12 +740,6 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                     if isinstance(msg, AIMessage)
                                 ]
                                 token_counter.count_main_output(output_msgs)
-
-                            # Log the final token counts
-                            print(
-                                f"Final token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}",
-                                flush=True,
-                            )
                         else:
                             print(
                                 "Warning: No message content found in response",
@@ -947,18 +939,19 @@ def display_combined_stats():
 
         # Main agent tokens
         main_total = token_counter.main_input_tokens + token_counter.main_output_tokens
+        main_type = " (exact)" if token_counter.main_is_exact else " (approx)"
         tool_table.add_row(
             "Token",
-            "ReAct Agent Input",
+            f"ReAct Agent Input{main_type}",
             format_token_count(token_counter.main_input_tokens),
         )
         tool_table.add_row(
             "Token",
-            "ReAct Agent Output",
+            f"ReAct Agent Output{main_type}",
             format_token_count(token_counter.main_output_tokens),
         )
         tool_table.add_row(
-            "Token", "ReAct Agent Total", format_token_count(main_total), style="bold"
+            "Token", f"ReAct Agent Total{main_type}", format_token_count(main_total), style="bold"
         )
 
         # Reviewer agent tokens
@@ -966,19 +959,20 @@ def display_combined_stats():
             token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
         )
         if reviewer_total > 0:
+            reviewer_type = " (exact)" if token_counter.reviewer_is_exact else " (approx)"
             tool_table.add_row(
                 "Token",
-                "Reviewer Input",
+                f"Reviewer Input{reviewer_type}",
                 format_token_count(token_counter.reviewer_input_tokens),
             )
             tool_table.add_row(
                 "Token",
-                "Reviewer Output",
+                f"Reviewer Output{reviewer_type}",
                 format_token_count(token_counter.reviewer_output_tokens),
             )
             tool_table.add_row(
                 "Token",
-                "Reviewer Total",
+                f"Reviewer Total{reviewer_type}",
                 format_token_count(reviewer_total),
                 style="bold",
             )
