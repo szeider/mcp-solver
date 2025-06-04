@@ -457,9 +457,34 @@ class VariableMap:
             # Handle any other exception
             error_msg = f"Error: {type(e).__name__}: {e!s}"
             result["error"] = error_msg
-            result["output"] = (
-                f"{error_msg}\n{stdout_capture.getvalue()}\n{stderr_capture.getvalue()}"
-            )
+            
+            # Get stdout/stderr before checking for solution
+            stdout = stdout_capture.getvalue()
+            stderr = stderr_capture.getvalue()
+            result["output"] = f"{error_msg}\n{stdout}\n{stderr}"
+            
+            # IMPORTANT: Check if we already have a solution before marking as failure
+            # This preserves UNSAT/SAT status even if there's a post-export error
+            # Look for solution in the debug output
+            if "DEBUG - _LAST_SOLUTION set to:" in stdout:
+                # Solution was exported, so mark as success even with error
+                result["success"] = True
+                # Try to extract the solution from debug output
+                try:
+                    import re as regex_module
+                    solution_match = regex_module.search(r"DEBUG - _LAST_SOLUTION set to: ({.*?})\n", stdout, regex_module.DOTALL)
+                    if solution_match:
+                        # Parse the solution dictionary
+                        solution_str = solution_match.group(1)
+                        # Convert Python literals to JSON format
+                        solution_str = solution_str.replace("'", '"').replace("False", "false").replace("True", "true")
+                        solution = json.loads(solution_str)
+                        result["solution"] = solution
+                except:
+                    # If parsing fails, still mark as success but note the issue
+                    result["solution"] = {"note": "Solution was exported but couldn't be parsed from output"}
+            else:
+                result["success"] = False  # Only mark as failure if no solution
 
         # Send the result back through the queue
         result_queue.put(result)
@@ -573,5 +598,4 @@ def execute_pysat_code(code: str, timeout: float = 10.0) -> dict[str, Any]:
             "error": f"Execution error: {e!s}",
             "error_details": {"type": type(e).__name__, "message": str(e)},
             "solution": None,
-            "status": "error",  # Indicate that there was an error even though success=True
         }
