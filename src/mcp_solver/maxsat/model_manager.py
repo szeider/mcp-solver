@@ -1003,21 +1003,22 @@ class MaxSATModelManager(BaseModelManager):
                     )
 
             # Add debugging for model = solver.compute():
-            if re.search(r"\w+\s*=\s*\w+\.compute\(\)", line):
-                # Capture the solver variable name
-                solver_var = re.search(r"\w+\s*=\s*(\w+)\.compute\(\)", line)
-                if solver_var:
-                    solver_name = solver_var.group(1)
-                    # Indent level of the original line
-                    indent = re.match(r"^(\s*)", line).group(1)
+            compute_match = re.search(r"(\w+)\s*=\s*(\w+)\.compute\(\)", line)
+            if compute_match:
+                # Capture both the result variable and solver variable names
+                result_var = compute_match.group(1)
+                solver_name = compute_match.group(2)
+                # Indent level of the original line
+                indent = re.match(r"^(\s*)", line).group(1)
 
-                    # Add debug prints after the compute call
-                    modified_lines.append(
-                        f'{indent}print(f"PYSAT_DEBUG_OUTPUT: model_is_satisfiable={{True if {solver_name}.model is not None else False}}")'
-                    )
-                    modified_lines.append(
-                        f'{indent}print(f"PYSAT_DEBUG_OUTPUT: solver={solver_name!r}")'
-                    )
+                # Add debug prints after the compute call
+                # Note: RC2's compute() returns the model directly, not as an attribute
+                modified_lines.append(
+                    f'{indent}print(f"PYSAT_DEBUG_OUTPUT: compute_returned_value={{True if {result_var} else False}}")'
+                )
+                modified_lines.append(
+                    f'{indent}print(f"PYSAT_DEBUG_OUTPUT: solver={solver_name!r}")'
+                )
 
             # Add exception handling around export_maxsat_solution calls
             if "export_maxsat_solution(" in line:
