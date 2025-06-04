@@ -4,6 +4,12 @@ Welcome to the MCP Solver. This document provides concise guidelines on how to i
 
 This service provides access to PySAT (Python SAT Solver) with a simplified interface for propositional constraint modeling using CNF (Conjunctive Normal Form).
 
+**IMPORTANT**: PySAT is fully available in this environment. Always start your code with the standard imports shown in the examples below. Never attempt manual solutions - always use proper SAT encoding.
+
+**YOU MUST USE ACTUAL PYSAT**: The environment has PySAT pre-installed and ready to use. DO NOT create mock solvers or try to simulate SAT solving manually. If you have any issues with imports, check your syntax - the environment definitely has PySAT available.
+
+**CRITICAL**: The `export_solution` function is automatically available in the environment - you do NOT need to import it. Just use it directly as shown in the examples.
+
 
 
 ## Overview
@@ -18,6 +24,24 @@ The MCP Solver integrates PySAT solving with the Model Context Protocol, allowin
 
 These tools let you construct your model incrementally and solve it using a SAT solver.
 
+
+## Required Imports
+
+**ALWAYS start your code with these imports:**
+
+```python
+from pysat.formula import CNF
+from pysat.solvers import Glucose3
+```
+
+**Optional imports for advanced features:**
+```python
+from pysat.card import *  # For cardinality constraints (at_most_k, exactly_k, etc.)
+```
+
+**DO NOT import:**
+- `export_solution` - it's automatically available
+- Helper functions like `at_most_one`, `exactly_one`, etc. - they're automatically available
 
 ## Quick Start Example
 
@@ -262,10 +286,10 @@ The MCP Solver provides two categories of helpers to make encoding easier:
 
 ### 1. Pre-Implemented Constraint Helpers
 
-These functions simplify encoding common logical patterns:
+These functions simplify encoding common logical patterns and are **automatically available without any import**:
 
 ```python
-# These are available by default
+# NO IMPORT NEEDED - these are available by default
 at_most_one([1, 2, 3])        # At most one variable is true
 exactly_one([1, 2, 3])        # Exactly one variable is true
 implies(1, 2)                 # If var1 is true, then var2 must be true
@@ -663,7 +687,7 @@ var_mapping = {}
 var_count = 1
 
 def create_var(name):
-    nonlocal var_count
+    global var_count  # Use global for module-level variables
     var_mapping[name] = var_count
     var_count += 1
     return var_mapping[name]
@@ -728,6 +752,20 @@ solver.delete()
 - If multiple dictionaries contain the same key, values are preserved by prefixing keys with their parent dictionary name
 - Keys that appear in only one dictionary won't be prefixed
 
+## Troubleshooting
+
+### If you encounter import errors:
+1. Make sure you're using the exact imports shown above
+2. DO NOT create mock objects or use `types.SimpleNamespace` 
+3. DO NOT try to work around missing imports - the environment has everything you need
+
+### Common mistakes to avoid:
+- Creating fake solver objects: `solver = types.SimpleNamespace()` ❌
+- Theoretical reasoning without SAT encoding ❌
+- Manual constraint checking without using a SAT solver ❌
+
+**If imports fail, the problem is likely in your code syntax, not the environment.**
+
 ## Final Notes
 
 - **Review Return Information:**  
@@ -735,5 +773,6 @@ solver.delete()
 - **Split long code parts** into smaller items.
 - **Verification:**  
   Always verify the solution after a solve operation by checking that all constraints are satisfied and justified.
+- **Always use actual PySAT solvers** - never create mock objects or try manual solutions.
 
 Happy modeling with MCP Solver!

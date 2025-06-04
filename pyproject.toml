@@ -96,32 +96,38 @@ select = [
     "B",    # flake8-bugbear (likely bugs)
     "SIM",  # flake8-simplify (code simplification)
     "RUF",  # Ruff-specific rules
+    "ARG",  # flake8-unused-arguments
+    "LOG",  # flake8-logging (logging best practices)
 ]
 
 # Ignore annoying/controversial rules
 ignore = [
     "E501",   # Line length (formatter handles this)
     "B008",   # Function calls in defaults
-    "SIM108", # Ternary operator (if/else can be clearer)
     "E402",   # Module level import not at top of file (common in test files)
-    "E722",   # Do not use bare 'except'
-    "F401",   # Imported but unused - many template modules have purposeful imports
-    "F841",   # Local variable is assigned but never used
-    "SIM105", # Use contextlib.suppress - too many changes needed
-    "SIM102", # Use a single if statement - readability preference
-    "SIM117", # Use a single with statement - readability preference
-    "RUF001", # String contains ambiguous character - intentional emoji usage
-    "RUF012", # Mutable class attributes - existing pattern
-    "RUF013", # PEP 484 prohibits implicit Optional - backward compatibility
-    "UP007",  # Use X | Y for type annotations - backward compatibility
-    "B904",   # Raise from err - existing error handling pattern
-    "SIM118", # Use key in dict instead of key in dict.keys() - readability preference
+    "E722",   # Do not use bare 'except' - needed for broad exception handling
+    "F401",   # Imported but unused - template modules have purposeful imports
     "F403",   # Star imports - used intentionally for re-exports
     "F821",   # Undefined name - used for type annotations with quotes
-    "UP038",  # Use X | Y in isinstance - existing pattern
-    "SIM101", # Multiple isinstance calls - readability preference
+    "F841",   # Local variable assigned but never used - some test setups
+    "RUF001", # String contains ambiguous character - intentional emoji usage
+    "RUF012", # Mutable class attributes - existing singleton pattern
+    "RUF013", # PEP 484 prohibits implicit Optional - backward compatibility
+    "UP007",  # Use X | Y for type annotations - backward compatibility
+    "UP038",  # Use X | Y in isinstance - backward compatibility
+    "B904",   # Raise from err - existing error handling pattern
     "B007",   # Loop control variable not used - simple iteration patterns
-    "RUF022"  # __all__ is not sorted - custom ordering preferences
+    "SIM102", # Use single if statement - readability preference
+    "SIM105", # Use contextlib.suppress - explicit exception handling preferred
+    "SIM108", # Use ternary operator - if/else can be clearer
+    "SIM117", # Use single with statement - readability preference
+    "SIM118", # Use key in dict instead of dict.keys() - explicit is better
+    "SIM101", # Multiple isinstance calls - readability for complex checks
+    "RUF022", # __all__ is not sorted - custom ordering for documentation
+    "ARG001", # Unused function argument - protocol requirements
+    "ARG002", # Unused method argument - interface compatibility
+    "ARG005", # Unused lambda argument - fallback lambdas
+    "LOG015", # Root logger usage - simple CLI scripts
 ]
 
 [tool.ruff.lint.isort]

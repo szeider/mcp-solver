@@ -65,6 +65,7 @@ from .constraints import (
 )
 from .solution import export_solution
 from .templates.cardinality_templates import at_least_k, at_most_k, exactly_k
+from .templates.mapping import VariableMap
 
 
 # Exception for timeouts
@@ -253,6 +254,44 @@ def exactly_k(variables, k):
     at_least = at_least_k(variables, k)
     return at_most + at_least
 
+# Variable mapping helper class
+class VariableMap:
+    \"\"\"Helper class for mapping between meaningful variable names and SAT variable IDs.\"\"\"
+    
+    def __init__(self):
+        self.var_to_id = {}
+        self.id_to_var = {}
+        self.next_id = 1
+    
+    def create_var(self, var_name):
+        \"\"\"Create or get variable ID for a named variable\"\"\"
+        if var_name not in self.var_to_id:
+            self.var_to_id[var_name] = self.next_id
+            self.id_to_var[self.next_id] = var_name
+            self.next_id += 1
+        return self.var_to_id[var_name]
+    
+    def create_vars(self, var_names):
+        \"\"\"Create multiple variables at once\"\"\"
+        return {name: self.create_var(name) for name in var_names}
+    
+    def get_name(self, var_id):
+        \"\"\"Get variable name from ID\"\"\"
+        return self.id_to_var.get(abs(var_id), f"unknown_{abs(var_id)}")
+    
+    def interpret_model(self, model):
+        \"\"\"Convert SAT model to dictionary of variable assignments\"\"\"
+        result = {}
+        for lit in model:
+            var_id = abs(lit)
+            if var_id in self.id_to_var:
+                result[self.id_to_var[var_id]] = lit > 0
+        return result
+    
+    def get_mapping(self):
+        \"\"\"Return a copy of the current variable mapping\"\"\"
+        return self.var_to_id.copy()
+
 """ + "\n".join(regular_lines)
 
         # Setup restricted globals for execution (same as in original function)
@@ -296,6 +335,42 @@ def exactly_k(variables, k):
                 "ValueError": ValueError,
                 "TypeError": TypeError,
                 "__import__": safe_import,
+                "__build_class__": __build_class__,  # Needed for class definitions
+                "__name__": "__main__",  # Needed for some constructs
+                "NameError": NameError,
+                "KeyError": KeyError,
+                "IndexError": IndexError,
+                "AttributeError": AttributeError,
+                "RuntimeError": RuntimeError,
+                "NotImplementedError": NotImplementedError,
+                "StopIteration": StopIteration,
+                "AssertionError": AssertionError,
+                "assert": lambda cond, msg="": None if cond else (_ for _ in ()).throw(AssertionError(msg)),
+                "type": type,
+                "repr": repr,
+                "hash": hash,
+                "getattr": getattr,
+                "setattr": setattr,
+                "hasattr": hasattr,
+                "delattr": delattr,
+                "vars": vars,
+                "dir": dir,
+                "globals": lambda: restricted_globals,
+                "locals": locals,
+                "callable": callable,
+                "chr": chr,
+                "ord": ord,
+                "hex": hex,
+                "oct": oct,
+                "bin": bin,
+                "format": format,
+                "pow": pow,
+                "slice": slice,
+                "property": property,
+                "staticmethod": staticmethod,
+                "classmethod": classmethod,
+                "super": super,
+                "object": object,
             },
             # Provide the PySAT environment - only include stable solvers
             "CNF": CNF,
@@ -323,6 +398,8 @@ def exactly_k(variables, k):
             "implies": implies,
             "mutually_exclusive": mutually_exclusive,
             "if_then_else": if_then_else,
+            # Add VariableMap helper (already defined in processed_code)
+            "VariableMap": VariableMap,
         }
 
         # Add common variable types needed for PySAT code
@@ -362,8 +439,20 @@ def exactly_k(variables, k):
             result["output"] = stdout + "\n" + stderr
             result["solution"] = solution
 
+        except SyntaxError as e:
+            # Handle syntax errors with detailed information
+            error_msg = f"SyntaxError at line {e.lineno}: {e.msg}"
+            if e.text:
+                error_msg += f"\n  {e.text.strip()}"
+                if e.offset:
+                    error_msg += f"\n  {' ' * (e.offset - 1)}^"
+            
+            result["error"] = error_msg
+            result["output"] = error_msg
+            result["success"] = False
+            
         except Exception as e:
-            # Handle any exception
+            # Handle any other exception
             error_msg = f"Error: {type(e).__name__}: {e!s}"
             result["error"] = error_msg
             result["output"] = (

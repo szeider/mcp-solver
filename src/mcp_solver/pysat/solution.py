@@ -128,15 +128,6 @@ def export_solution(
 
         return error_solution
 
-    # Add some model data if available
-    if hasattr(data, "model") and data.model is not None:
-        result["model"] = data.model
-
-    # Set the last solution
-    _LAST_SOLUTION = result
-
-    return result
-
 
 # Removed export_maxsat_solution function as it's now in the MaxSAT module
 

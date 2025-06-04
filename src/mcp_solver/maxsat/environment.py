@@ -287,6 +287,42 @@ def if_then_else(condition, then_var, else_var):
                 "ValueError": ValueError,
                 "TypeError": TypeError,
                 "__import__": safe_import,
+                "__build_class__": __build_class__,  # Needed for class definitions
+                "__name__": "__main__",  # Needed for some constructs
+                "NameError": NameError,
+                "KeyError": KeyError,
+                "IndexError": IndexError,
+                "AttributeError": AttributeError,
+                "RuntimeError": RuntimeError,
+                "NotImplementedError": NotImplementedError,
+                "StopIteration": StopIteration,
+                "AssertionError": AssertionError,
+                "assert": lambda cond, msg="": None if cond else (_ for _ in ()).throw(AssertionError(msg)),
+                "type": type,
+                "repr": repr,
+                "hash": hash,
+                "getattr": getattr,
+                "setattr": setattr,
+                "hasattr": hasattr,
+                "delattr": delattr,
+                "vars": vars,
+                "dir": dir,
+                "globals": lambda: restricted_globals,
+                "locals": locals,
+                "callable": callable,
+                "chr": chr,
+                "ord": ord,
+                "hex": hex,
+                "oct": oct,
+                "bin": bin,
+                "format": format,
+                "pow": pow,
+                "slice": slice,
+                "property": property,
+                "staticmethod": staticmethod,
+                "classmethod": classmethod,
+                "super": super,
+                "object": object,
             },
             # Provide the PySAT/MaxSAT environment
             "CNF": CNF,
@@ -345,8 +381,20 @@ def if_then_else(condition, then_var, else_var):
             result["output"] = stdout + "\n" + stderr
             result["solution"] = solution
 
+        except SyntaxError as e:
+            # Handle syntax errors with detailed information
+            error_msg = f"SyntaxError at line {e.lineno}: {e.msg}"
+            if e.text:
+                error_msg += f"\n  {e.text.strip()}"
+                if e.offset:
+                    error_msg += f"\n  {' ' * (e.offset - 1)}^"
+            
+            result["error"] = error_msg
+            result["output"] = error_msg
+            result["success"] = False
+            
         except Exception as e:
-            # Handle any exception
+            # Handle any other exception
             error_msg = f"Error: {type(e).__name__}: {e!s}"
             result["error"] = error_msg
             result["output"] = (

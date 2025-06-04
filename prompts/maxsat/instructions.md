@@ -4,6 +4,12 @@ Welcome to the MCP Solver. This document provides concise guidelines on how to i
 
 This service provides access to MaxSAT (Maximum Satisfiability) optimization with a simplified interface for weighted constraint problems using WCNF (Weighted Conjunctive Normal Form).
 
+**IMPORTANT**: MaxSAT/PySAT is fully available in this environment. Always use the actual RC2 solver as shown in the examples. Never attempt manual optimization or create mock solvers.
+
+**YOU MUST USE ACTUAL RC2**: The environment has PySAT and RC2 pre-installed and ready to use. DO NOT create mock solvers or try to simulate optimization manually. If you have any issues with imports, check your syntax - the environment definitely has MaxSAT available.
+
+**CRITICAL**: The `export_solution` function is automatically available in the environment - you do NOT need to import it. Just use it directly as shown in the examples.
+
 ## Overview
 
 The MCP Solver integrates MaxSAT solving with the Model Context Protocol, allowing you to create, modify, and solve weighted constraint optimization problems. The following tools are available:
@@ -761,3 +767,43 @@ def get_var(nurse, shift, num_shifts):
 ```
 
 **Remember:** Iterate with 0-based indices, map to 1-based variables!
+
+## Troubleshooting
+
+### "NameError" or Import Errors
+
+If you see errors like `NameError: name 'RC2' is not defined` or `__build_class__ not found`, the issue is likely a **syntax error** in your code, not a missing import. The environment has all necessary imports available.
+
+**Common causes:**
+- Missing closing parenthesis, bracket, or quote
+- Incorrect indentation
+- Typo in variable or function names
+
+**Solution:** Carefully check your syntax. The error message will usually point to the line with the issue.
+
+### Common mistakes to avoid:
+
+1. **Creating fake solver objects** ❌
+```python
+# NEVER DO THIS - The environment has real RC2!
+import types
+solver = types.SimpleNamespace()
+solver.compute = lambda: True
+solver.model = [1, 2, 3]
+```
+
+2. **Trying to mock MaxSAT optimization** ❌
+```python
+# NEVER DO THIS - Use actual RC2!
+def fake_optimize(wcnf):
+    # Manual "optimization" logic
+    return some_solution
+```
+
+3. **Assuming the environment doesn't have MaxSAT** ❌
+```python
+# NEVER DO THIS
+print("MaxSAT not available, using heuristic instead")
+```
+
+**REMEMBER**: The environment has PySAT and RC2 fully installed and ready to use. Always use the actual MaxSAT solver as shown in the examples. If you encounter any import errors, it's likely a syntax error in your code, not a missing module.
