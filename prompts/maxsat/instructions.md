@@ -217,8 +217,9 @@ with RC2(wcnf) as solver:
 ### 5. Missing Solution Export
 ```python
 # ❌ WRONG - No export
-if solver.compute():
-    print(solver.model)
+model = solver.compute()
+if model:
+    print(model)  # Just printing, not exporting
 
 # ✅ CORRECT - Always export
 model = solver.compute()
@@ -420,9 +421,8 @@ for feature, value in values.items():
 ### Item 4: Solve and export
 ```python
 with RC2(wcnf) as solver:
-    if solver.compute():
-        model = solver.model
-        
+    model = solver.compute()
+    if model:
         # Extract selected features
         selected_features = {
             "cloud": cloud in model,
@@ -788,8 +788,7 @@ If you see errors like `NameError: name 'RC2' is not defined` or `__build_class_
 # NEVER DO THIS - The environment has real RC2!
 import types
 solver = types.SimpleNamespace()
-solver.compute = lambda: True
-solver.model = [1, 2, 3]
+solver.compute = lambda: [1, 2, 3]  # compute() returns the model directly
 ```
 
 2. **Trying to mock MaxSAT optimization** ❌
