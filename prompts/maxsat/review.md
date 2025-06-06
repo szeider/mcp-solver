@@ -53,7 +53,13 @@ Focus on these checks:
    - Is the cost a non-negative number for satisfiable solutions?
    - Are the reported values consistent (e.g., if cost=10, which soft constraints were violated?)
 
-6. **DO NOT Check**
+6. **Optimality Verification**
+   - If solver reports "optimal" with cost > 0, verify if this makes sense:
+     - Does the solution satisfy all explicit requirements in the problem?
+     - For "select at least k items" problems, check if k items were actually selected
+     - Note: "Solution optimal with cost X" doesn't mean perfect - it means best possible given the encoding
+
+7. **DO NOT Check**
    - ❌ Whether the constraint encoding logic is correct (e.g., don't verify if `[-a, -b, c]` correctly encodes "if a and b then c")
    - ❌ Whether the solution is optimal (trust the solver)
    - ❌ Whether there could be a "better" solution

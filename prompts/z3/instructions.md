@@ -53,6 +53,30 @@ The `export_solution` function supports the following parameters:
 - `objective`: Optional objective expression for optimization problems
 - `is_property_verification`: Boolean flag indicating if this is a property verification problem
 
+## Solution Output Guidelines
+
+When outputting results:
+
+- **Print high-level status messages only** (e.g., "Solution found!", "Property verified successfully")
+- **DO NOT print detailed variable values** - export_solution automatically handles this
+- **DO NOT print example outputs** like arrays, matrices, or individual values
+- **Focus on what the solution means**, not raw data  
+- **Keep output minimal and meaningful**
+
+Example:
+```python
+# GOOD - Simple status messages
+if solver.check() == sat:
+    print("Solution found!")
+    export_solution(solver=solver, variables=vars)
+
+# BAD - Printing detailed values
+if solver.check() == sat:
+    model = solver.model()
+    print(f"Array: {[model.evaluate(arr[i]) for i in range(n)]}")  # Don't do this!
+    print(f"x = {model.evaluate(x)}, y = {model.evaluate(y)}")     # Don't do this!
+```
+
 ## Core Features
 
 Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
@@ -361,8 +385,7 @@ property_verified = Bool('property_verified')
 if result == sat:
     # Found a counterexample - the solver successfully found a case where the property fails
     # This means the counterexample search was satisfiable (but the property is false)
-    print(f"Input X = {solver.model().evaluate(X)}, parity = {solver.model().evaluate(parity)}")
-    print(f"Z = {solver.model().evaluate(Z)}, which differs from parity")
+    print("Property verification failed. Counterexample found.")
     # Export with solver result (sat) and the property_verified value (false)
     solver.add(property_verified == False)
     export_solution(solver=solver, variables={"property_verified": property_verified})
@@ -429,8 +452,7 @@ if result == unsat:
 else:
     # Found a counterexample - the solver successfully found inputs where expressions differ
     # The counterexample search was satisfiable, meaning the equality is disproven
-    model = solver.model()
-    print("Found counterexample:", model)
+    print("Equality disproven. Counterexample found.")
     solver.add(equality_proven == False)
     export_solution(solver=solver, variables={"equality_proven": equality_proven})
 ```

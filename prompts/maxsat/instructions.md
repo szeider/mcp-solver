@@ -329,6 +329,26 @@ When balancing multiple objectives (e.g., minimize cost while maximizing value):
 - **Only adjust if needed** - if the solution heavily favors one objective
 - **Example**: If costs are 1-5 and values are 10-50, consider scaling to similar ranges
 
+### Encoding "At Least K" Requirements
+
+When a problem requires "select at least k items":
+- **If it's a hard requirement**: Use `at_least_k(variables, k)` as hard constraints
+- **If it's a soft preference with other objectives**:
+  - Option 1: Add at_least_k as hard constraint if the requirement is explicit
+  - Option 2: For true optimization, penalize shortfall:
+    ```python
+    # Penalize each missing item below k
+    shortfall_vars = []
+    for i in range(1, k):
+        var = wcnf.nv + 1
+        wcnf.nv = var
+        shortfall_vars.append(var)
+        # var is true if we have exactly i items (less than k)
+        for clause in exactly_k(selected_vars, i):
+            wcnf.append(clause + [-var])
+        wcnf.append([var], weight=penalty_per_missing * (k - i))
+    ```
+
 ## Available Helper Functions
 
 The following helper functions are automatically available in your code (no import needed):

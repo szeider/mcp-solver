@@ -36,7 +36,8 @@ except ImportError:
     )
 
 # Default model for testing
-DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"
+DEFAULT_MODEL = "AT:claude-sonnet-4-20250514"  # Anthropic Claude Sonnet 4
+
 # LM Studio model for testing
 LMSTUDIO_MODEL = "LM:ministral-8b-instruct-2410@http://localhost:1234/v1"
 
