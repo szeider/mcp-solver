@@ -14,6 +14,7 @@ The *MCP Solver* integrates SAT, SMT and Constraint Solving with LLMs through th
 
 - Constraint models in [MiniZinc](https://www.minizinc.org/)
 - SAT models in [PySAT](https://pysathq.github.io/)
+- MaxSAT optimization problems in [PySAT](https://pysathq.github.io/)
 - SMT formulas in [Z3 Python](https://ericpony.github.io/z3py-tutorial/guide-examples.htm)
 
 For a detailed description of the *MCP Solver's* system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.

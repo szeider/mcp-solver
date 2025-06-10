@@ -1,5 +1,14 @@
 # Changelog
 
+### [3.3.0] - 2025-06-10
+
+- **New Feature:** Added MaxSAT as a 4th mode for weighted optimization problems using RC2 solver
+- **Improvement:** Implemented exact token counting with callback handlers for better usage tracking
+- **Update:** Replaced Black with Ruff for code formatting and linting
+- **Improvement:** Enhanced MaxSAT and Z3 instructions with clearer guidance and examples
+- **Fix:** Resolved error handling issues in PySAT/MaxSAT to preserve UNSAT status correctly
+- **Update:** Added MaxSAT test infrastructure and aligned test problems with experiment6
+- **Improvement:** Added cardinality constraint templates and helper functions for MaxSAT
 
 ### [3.2.0] - 2025-05-11
 
