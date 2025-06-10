@@ -10,10 +10,8 @@ Note: This script only tests Z3 mode functionality.
 For core MiniZinc testing, use the main test-setup script.
 """
 
-import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 # Import our centralized prompt loader
 from mcp_solver.core.prompt_loader import load_prompt
@@ -21,17 +19,15 @@ from mcp_solver.core.prompt_loader import load_prompt
 
 class Z3SetupTest:
     def __init__(self):
-        self.successes: List[Tuple[str, str]] = []  # (test_name, details)
-        self.failures: List[Tuple[str, str]] = []  # (test_name, error_details)
+        self.successes: list[tuple[str, str]] = []  # (test_name, details)
+        self.failures: list[tuple[str, str]] = []  # (test_name, error_details)
         self.base_dir = Path(__file__).resolve().parents[3]
         self.GREEN = "\033[92m"
         self.RED = "\033[91m"
         self.RESET = "\033[0m"
         self.BOLD = "\033[1m"
 
-    def print_result(
-        self, test_name: str, success: bool, details: Optional[str] = None
-    ):
+    def print_result(self, test_name: str, success: bool, details: str | None = None):
         """Print a test result with color and proper formatting."""
         mark = "✓" if success else "✗"
         color = self.GREEN if success else self.RED
@@ -39,7 +35,7 @@ class Z3SetupTest:
         if details:
             print(f"  └─ {details}")
 
-    def record_test(self, test_name: str, success: bool, details: Optional[str] = None):
+    def record_test(self, test_name: str, success: bool, details: str | None = None):
         """Record a test result and print it."""
         if success:
             self.successes.append((test_name, details if details else ""))
@@ -72,13 +68,13 @@ class Z3SetupTest:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Prompt file not found",
+                    "Prompt file not found",
                 )
             except Exception as e:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Error loading prompt: {str(e)}",
+                    f"Error loading prompt: {e!s}",
                 )
 
         # Test other required files
@@ -111,7 +107,7 @@ class Z3SetupTest:
             self.record_test(
                 "z3-solver package",
                 False,
-                f"Error importing z3: {str(e)}\nPlease install with: pip install z3-solver",
+                f"Error importing z3: {e!s}\nPlease install with: pip install z3-solver",
             )
             return
 
@@ -125,7 +121,7 @@ class Z3SetupTest:
             self.record_test(
                 "Z3 solver initialization",
                 False,
-                f"Error initializing solver: {str(e)}",
+                f"Error initializing solver: {e!s}",
             )
 
     def test_basic_functionality(self):
@@ -149,7 +145,7 @@ class Z3SetupTest:
             )
         except Exception as e:
             self.record_test(
-                "Constraint creation", False, f"Error creating constraints: {str(e)}"
+                "Constraint creation", False, f"Error creating constraints: {e!s}"
             )
             return
 
@@ -166,9 +162,7 @@ class Z3SetupTest:
                     "Solver execution", False, f"Unexpected result: {result}"
                 )
         except Exception as e:
-            self.record_test(
-                "Solver execution", False, f"Error during solving: {str(e)}"
-            )
+            self.record_test("Solver execution", False, f"Error during solving: {e!s}")
 
     def run_all_tests(self):
         """Run all setup tests and display results."""

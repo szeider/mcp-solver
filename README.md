@@ -14,6 +14,7 @@ The *MCP Solver* integrates SAT, SMT and Constraint Solving with LLMs through th
 
 - Constraint models in [MiniZinc](https://www.minizinc.org/)
 - SAT models in [PySAT](https://pysathq.github.io/)
+- MaxSAT optimization problems in [PySAT](https://pysathq.github.io/)
 - SMT formulas in [Z3 Python](https://ericpony.github.io/z3py-tutorial/guide-examples.htm)
 
 For a detailed description of the *MCP Solver's* system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
@@ -61,7 +62,7 @@ uv pip install -e ".[all]"  # Install all solvers
 
 ## Available Modes / Solving Backends
 
-The MCP Solver provides three distinct operational modes, each integrating with a different constraint solving backend. Each mode requires specific dependencies and offers unique capabilities for addressing different classes of problems.
+The MCP Solver provides four distinct operational modes, each integrating with a different constraint solving backend. Each mode requires specific dependencies and offers unique capabilities for addressing different classes of problems.
 
 ### MiniZinc Mode
 
@@ -95,6 +96,23 @@ PySAT mode allows interaction with the Python SAT solving toolkit with the follo
 
 ```
 mcp-solver-pysat
+```
+
+### MaxSAT Mode
+
+MaxSAT mode provides specialized support for optimization problems with PySAT, featuring:
+
+- Weighted Conjunctive Normal Form (WCNF) support
+- Integration with the RC2 MaxSAT solver
+- Optimization capabilities with objective tracking
+- Support for both hard and soft constraints
+
+**Dependencies**: Requires the `python-sat` package (`uv pip install -e ".[pysat]"`)
+
+**Configuration**: To run in MaxSAT mode, use:
+
+```
+mcp-solver-maxsat
 ```
 
 ### Z3 Mode
@@ -142,6 +160,9 @@ uv run run-test mzn --problem <path/to/problem.md>
 
 # PySAT mode
 uv run run-test pysat --problem <path/to/problem.md>
+
+# MaxSAT mode
+uv run run-test maxsat --problem <path/to/problem.md>
 
 # Z3 mode
 uv run run-test z3 --problem <path/to/problem.md>

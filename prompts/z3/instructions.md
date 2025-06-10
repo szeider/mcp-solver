@@ -53,6 +53,30 @@ The `export_solution` function supports the following parameters:
 - `objective`: Optional objective expression for optimization problems
 - `is_property_verification`: Boolean flag indicating if this is a property verification problem
 
+## Solution Output Guidelines
+
+When outputting results:
+
+- **Print high-level status messages only** (e.g., "Solution found!", "Property verified successfully")
+- **DO NOT print detailed variable values** - export_solution automatically handles this
+- **DO NOT print example outputs** like arrays, matrices, or individual values
+- **Focus on what the solution means**, not raw data  
+- **Keep output minimal and meaningful**
+
+Example:
+```python
+# GOOD - Simple status messages
+if solver.check() == sat:
+    print("Solution found!")
+    export_solution(solver=solver, variables=vars)
+
+# BAD - Printing detailed values
+if solver.check() == sat:
+    model = solver.model()
+    print(f"Array: {[model.evaluate(arr[i]) for i in range(n)]}")  # Don't do this!
+    print(f"x = {model.evaluate(x)}, y = {model.evaluate(y)}")     # Don't do this!
+```
+
 ## Core Features
 
 Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
@@ -61,6 +85,35 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
 - **Constraint solving**: Solve complex constraint satisfaction problems
 - **Optimization**: Optimize with respect to objective functions
 - **Quantifiers**: Express constraints with universal and existential quantifiers
+
+## Model Manipulation Tools
+
+Z3 mode provides these tools for building your model incrementally:
+
+- **clear_model**: Reset the Z3 model to empty
+- **add_item**: Insert Python code at a specific position
+- **replace_item**: Replace code at a specific position  
+- **delete_item**: Remove code at a specific position
+- **get_model**: View the current model
+- **solve_model**: Execute and solve the model
+
+### List Semantics (0-based indexing)
+
+The model items follow standard list semantics:
+
+- **add_item(index, content)**: Inserts code at the position, shifting existing items at that index and after to the right
+  - Example: Model [A, B, C] → add_item(1, X) → [A, X, B, C]
+  - Valid indices: 0 to length (inclusive, can append at end)
+  
+- **delete_item(index)**: Removes the item, shifting subsequent items to the left
+  - Example: Model [A, B, C, D] → delete_item(1) → [A, C, D]  
+  - Valid indices: 0 to length-1
+  
+- **replace_item(index, content)**: Replaces the item at index in-place (no shifting)
+  - Example: Model [A, B, C] → replace_item(1, X) → [A, X, C]
+  - Valid indices: 0 to length-1
+
+**Important**: All indices are 0-based. The first item is at index 0.
 
 ## Best Practices for Problem Modeling
 
@@ -101,6 +154,110 @@ Z3 mode provides SMT (Satisfiability Modulo Theories) solving capabilities:
    - Add checks that verify all constraints are satisfied
    - Output detailed information for debugging purposes
    - Test edge cases explicitly
+
+## Z3 Best Practices
+
+### Working with Arrays and Sequences
+
+When working with arrays or sequences in Z3, use Pythonic approaches for cleaner, more efficient code:
+
+```python
+# GOOD: Use list comprehensions for variable creation
+arr = [Int(f"arr_{i}") for i in range(8)]
+
+# AVOID: Verbose individual declarations
+# arr_0 = Int('arr_0')
+# arr_1 = Int('arr_1')
+# ... etc
+
+# GOOD: Use loops for adding constraints
+for i in range(7):
+    solver.add(arr[i] <= arr[i+1])
+
+# AVOID: Repetitive individual constraints
+# solver.add(arr[0] <= arr[1])
+# solver.add(arr[1] <= arr[2])
+# ... etc
+```
+
+### Array Helper Functions
+
+Z3 provides pre-defined helper functions for Z3 Array objects (not Python lists):
+
+**Note**: These helpers work with Z3's `Array` type, not Python lists. For Python lists of Z3 variables, use loops as shown in the examples above.
+
+- **`array_is_sorted(arr, size, strict=False)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object (created with `Array()`)
+  - `size`: Number of elements
+  - `strict`: If True, uses strict inequality (<) instead of (<=)
+
+- **`all_distinct(arr, size)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object
+  - `size`: Number of elements
+
+- **`array_contains(arr, size, value)`** - For Z3 Arrays only
+  - `arr`: Z3 Array object
+  - `size`: Number of elements
+  - `value`: The value that must be present
+
+**For Python lists of variables (most common case), use direct constraints:**
+```python
+# Sorting constraint for Python list
+for i in range(len(arr)-1):
+    solver.add(arr[i] <= arr[i+1])
+
+# All distinct for Python list
+from z3 import Distinct
+solver.add(Distinct(arr))
+
+# Contains value for Python list
+solver.add(Or([arr[i] == value for i in range(len(arr))]))
+```
+
+- **`exactly_k(bool_vars, k)`** - Exactly k boolean variables must be true
+- **`at_most_k(bool_vars, k)`** - At most k boolean variables can be true
+- **`at_least_k(bool_vars, k)`** - At least k boolean variables must be true
+
+Example usage:
+```python
+from z3 import *
+from mcp_solver.z3 import export_solution
+
+# Create array of 8 integers
+arr = [Int(f"x_{i}") for i in range(8)]
+
+solver = Solver()
+
+# For sorting constraint with Python lists, use loops:
+for i in range(7):
+    solver.add(arr[i] <= arr[i+1])
+
+# Or if using Z3 Arrays (different from Python lists):
+# z3_arr = Array('arr', IntSort(), IntSort())
+# from z3_templates import array_is_sorted
+# solver.add(array_is_sorted(z3_arr, 8))
+
+# Add other constraints using loops
+for i in range(8):
+    solver.add(arr[i] >= 1)
+    solver.add(arr[i] <= 15)
+
+# Check solution
+if solver.check() == sat:
+    export_solution(solver=solver, variables={f"x_{i}": arr[i] for i in range(8)})
+```
+
+## Important: Two Types of Indexing
+
+1. **Model Item Indexing**: Always 0-based
+   - First item is at index 0
+   - Used with add_item, replace_item, delete_item
+   - Example: `add_item(0, "# First item")` adds at the beginning
+
+2. **Z3 Variables**: Use descriptive names
+   - Z3 uses named variables, not numeric indices
+   - Example: `x = Int('x')`, `arr_0 = Int('arr_0')`
+   - Variable names are strings and can be anything meaningful
 
 ## Z3 Variable Types and Common Errors
 
@@ -228,8 +385,7 @@ property_verified = Bool('property_verified')
 if result == sat:
     # Found a counterexample - the solver successfully found a case where the property fails
     # This means the counterexample search was satisfiable (but the property is false)
-    print(f"Input X = {solver.model().evaluate(X)}, parity = {solver.model().evaluate(parity)}")
-    print(f"Z = {solver.model().evaluate(Z)}, which differs from parity")
+    print("Property verification failed. Counterexample found.")
     # Export with solver result (sat) and the property_verified value (false)
     solver.add(property_verified == False)
     export_solution(solver=solver, variables={"property_verified": property_verified})
@@ -296,8 +452,7 @@ if result == unsat:
 else:
     # Found a counterexample - the solver successfully found inputs where expressions differ
     # The counterexample search was satisfiable, meaning the equality is disproven
-    model = solver.model()
-    print("Found counterexample:", model)
+    print("Equality disproven. Counterexample found.")
     solver.add(equality_proven == False)
     export_solution(solver=solver, variables={"equality_proven": equality_proven})
 ```
@@ -613,12 +768,12 @@ If your solution isn't being properly captured:
 
    ```python
    # Instead of one large item:
-   # add_item(index=1, content=very_large_code)
+   # add_item(index=0, content=very_large_code)
    
    # Use multiple smaller items:
-   add_item(index=1, content="# Item 1: Setup and imports")
-   add_item(index=2, content="# Item 2: Core logic")
-   add_item(index=3, content="# Item 3: Results and export")
+   add_item(index=0, content="# Setup and imports")
+   add_item(index=1, content="# Core logic")
+   add_item(index=2, content="# Results and export")
    ```
 
 ## Common Error Patterns and Solutions

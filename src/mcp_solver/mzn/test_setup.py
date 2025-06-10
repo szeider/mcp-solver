@@ -10,11 +10,10 @@ Note: This script only tests core functionality.
 Optional solvers (Z3, PySAT) have their own setup verification.
 """
 
-import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
-from minizinc import Model, Instance, Solver, MiniZincError
+
+from minizinc import Instance, Model, Solver
 
 # Import our centralized prompt loader
 from mcp_solver.core.prompt_loader import load_prompt
@@ -22,17 +21,15 @@ from mcp_solver.core.prompt_loader import load_prompt
 
 class SetupTest:
     def __init__(self):
-        self.successes: List[Tuple[str, str]] = []  # (test_name, details)
-        self.failures: List[Tuple[str, str]] = []  # (test_name, error_details)
+        self.successes: list[tuple[str, str]] = []  # (test_name, details)
+        self.failures: list[tuple[str, str]] = []  # (test_name, error_details)
         self.base_dir = Path(__file__).resolve().parents[3]
         self.GREEN = "\033[92m"
         self.RED = "\033[91m"
         self.RESET = "\033[0m"
         self.BOLD = "\033[1m"
 
-    def print_result(
-        self, test_name: str, success: bool, details: Optional[str] = None
-    ):
+    def print_result(self, test_name: str, success: bool, details: str | None = None):
         """Print a test result with color and proper formatting."""
         mark = "✓" if success else "✗"
         color = self.GREEN if success else self.RED
@@ -40,7 +37,7 @@ class SetupTest:
         if details:
             print(f"  └─ {details}")
 
-    def record_test(self, test_name: str, success: bool, details: Optional[str] = None):
+    def record_test(self, test_name: str, success: bool, details: str | None = None):
         """Record a test result and print it."""
         if success:
             self.successes.append((test_name, details if details else ""))
@@ -73,13 +70,13 @@ class SetupTest:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Prompt file not found",
+                    "Prompt file not found",
                 )
             except Exception as e:
                 self.record_test(
                     f"Prompt file: {mode}/{prompt_type}.md",
                     False,
-                    f"Error loading prompt: {str(e)}",
+                    f"Error loading prompt: {e!s}",
                 )
 
         # Test other required files
@@ -109,7 +106,7 @@ class SetupTest:
             self.record_test(
                 "MiniZinc Chuffed solver",
                 False,
-                f"Chuffed solver not found: {str(e)}\nPlease install MiniZinc with Chuffed solver",
+                f"Chuffed solver not found: {e!s}\nPlease install MiniZinc with Chuffed solver",
             )
             return  # Skip further tests if solver not found
 
@@ -121,7 +118,7 @@ class SetupTest:
             self.record_test(
                 "MiniZinc Python binding",
                 False,
-                f"Error importing minizinc: {str(e)}\nPlease install minizinc Python package",
+                f"Error importing minizinc: {e!s}\nPlease install minizinc Python package",
             )
 
     def test_basic_functionality(self):
@@ -139,7 +136,7 @@ class SetupTest:
             model.add_string(model_code)
             self.record_test("Model creation", True)
         except Exception as e:
-            self.record_test("Model creation", False, f"Error creating model: {str(e)}")
+            self.record_test("Model creation", False, f"Error creating model: {e!s}")
             return
 
         # Test solver execution
@@ -149,9 +146,7 @@ class SetupTest:
             result = instance.solve()
             self.record_test("Solver execution", True, "Successfully executed solver")
         except Exception as e:
-            self.record_test(
-                "Solver execution", False, f"Error during solving: {str(e)}"
-            )
+            self.record_test("Solver execution", False, f"Error during solving: {e!s}")
 
     def run_all_tests(self):
         """Run all setup tests and display results."""

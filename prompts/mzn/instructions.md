@@ -28,6 +28,24 @@ These tools let you construct your model incrementally and solve it using the Ch
 - **Indices Start at 0:**  
   Items are added one by one, starting with index 0 (i.e., index=0, index=1, etc.).
 
+## List Semantics for Model Operations
+
+The model items behave like a standard programming list with these exact semantics:
+
+- **add_item(index, content)**: Inserts the item at the specified position, shifting all items at that index and after to the right. 
+  - Example: If model has items [A, B, C] and you call add_item(1, X), result is [A, X, B, C]
+  - Valid index range: 0 to length (inclusive) where length is the current number of items
+  
+- **delete_item(index)**: Removes the item at the specified index, shifting all subsequent items to the left.
+  - Example: If model has items [A, B, C, D] and you call delete_item(1), result is [A, C, D]
+  - Valid index range: 0 to length-1 (inclusive)
+  
+- **replace_item(index, content)**: Replaces the item at the specified index in-place. No shifting occurs.
+  - Example: If model has items [A, B, C] and you call replace_item(1, X), result is [A, X, C]
+  - Valid index range: 0 to length-1 (inclusive)
+
+**Important**: All indices are 0-based. The first item is at index 0, the second at index 1, etc.
+
 ## Tool Input and Output Details
 
 1. **clear_model**  
@@ -85,6 +103,16 @@ These tools let you construct your model incrementally and solve it using the Ch
 
 - **When to Clear the Model:**  
   Use `clear_model` only when extensive changes are required and starting over is necessary.
+
+## Important: Model Item Indexing
+
+MiniZinc mode uses **0-based indexing** for all model operations:
+- First item is at index 0
+- Used with add_item, replace_item, delete_item
+- Example: `add_item(0, "int: n = 8;")` adds at the beginning
+- Example: `replace_item(2, "constraint: alldifferent(queens);")` replaces the third item
+
+Note: This is different from MiniZinc arrays which typically use 1-based indexing by default.
 
 ## Final Notes
 

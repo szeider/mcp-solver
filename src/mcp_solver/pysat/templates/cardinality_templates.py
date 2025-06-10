@@ -6,21 +6,21 @@ cardinality constraints.
 """
 
 import sys
-import os
-from typing import List, Dict, Any, Optional, Callable, Union
+from typing import Any
+
 
 # Import PySAT but protect against failure
 try:
-    from pysat.formula import CNF
     from pysat.card import CardEnc, EncType
+    from pysat.formula import CNF
 except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
 
 def at_most_k(
-    variables: List[int], k: int, encoding: EncType = EncType.seqcounter
-) -> List[List[int]]:
+    variables: list[int], k: int, encoding: EncType = EncType.seqcounter
+) -> list[list[int]]:
     """
     Create clauses ensuring at most k variables can be true.
 
@@ -63,8 +63,8 @@ def at_most_k(
 
 
 def at_least_k(
-    variables: List[int], k: int, encoding: EncType = EncType.seqcounter
-) -> List[List[int]]:
+    variables: list[int], k: int, encoding: EncType = EncType.seqcounter
+) -> list[list[int]]:
     """
     Create clauses ensuring at least k variables must be true.
 
@@ -94,7 +94,7 @@ def at_least_k(
 
 
 def exactly_k(
-    variables: List[int], k: int, encoding: EncType = EncType.seqcounter
+    variables: list[int], k: int, encoding: EncType = EncType.seqcounter
 ) -> CNF:
     """
     Create CNF formula enforcing exactly k variables are true.
@@ -111,7 +111,7 @@ def exactly_k(
 
 
 def one_hot_encoding(
-    variables: List[int], encoding: EncType = EncType.seqcounter
+    variables: list[int], encoding: EncType = EncType.seqcounter
 ) -> CNF:
     """
     Create CNF formula enforcing exactly one variable is true.
@@ -129,7 +129,7 @@ def one_hot_encoding(
 def add_cardinality_constraint(
     formula: CNF,
     constraint_type: str,
-    variables: List[int],
+    variables: list[int],
     k: int,
     encoding: EncType = EncType.seqcounter,
 ) -> CNF:
@@ -164,8 +164,8 @@ def add_cardinality_constraint(
 
 
 def create_balanced_partitioning(
-    variables: List[int], num_parts: int = 2, encoding: EncType = EncType.seqcounter
-) -> Dict[str, Any]:
+    variables: list[int], num_parts: int = 2, encoding: EncType = EncType.seqcounter
+) -> dict[str, Any]:
     """
     Create a balanced partitioning of variables.
 

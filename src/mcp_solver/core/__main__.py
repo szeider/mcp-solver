@@ -2,9 +2,8 @@
 Main entry point for running the MCP Solver package.
 """
 
-import sys
 import logging
-import asyncio
+import sys
 
 
 def main():
@@ -48,6 +47,15 @@ def main_pysat():
 
     # Set command line arguments for PySAT mode
     sys.argv = [sys.argv[0], "--pysat"]
+    return server_main()
+
+
+def main_maxsat():
+    """Entry point for MaxSAT optimization mode"""
+    from .server import main as server_main
+
+    # Set command line arguments for MaxSAT mode
+    sys.argv = [sys.argv[0], "--maxsat"]
     return server_main()
 
 

@@ -1,32 +1,33 @@
-import sys
-import os
-import asyncio
 import argparse
+import asyncio
 import json
-from datetime import datetime
-from typing import Dict, Any, Sequence, Optional
-from rich.console import Console
-import traceback
-from pathlib import Path
+import os
 import re
+import sys
+import traceback
+from datetime import datetime
 from string import Template
+from typing import Any
 
-# Core dependencies
-from .llm_factory import LLMFactory
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
-from mcp_solver.core.prompt_loader import load_prompt
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
-from langchain_core.tools import BaseTool
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # LangGraph agent implementation
 from langgraph.prebuilt import create_react_agent
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+from rich.console import Console
+
+from mcp_solver.client.mcp_tool_adapter import load_mcp_tools
+from mcp_solver.core.prompt_loader import load_prompt
+
+# Core dependencies
+from .llm_factory import LLMFactory
+from .token_callback import TokenUsageCallbackHandler
+from .token_counter import TokenCounter
 
 # Import tool stats tracking
 from .tool_stats import ToolStats
-from .token_counter import TokenCounter
 
 
 def format_token_count(count):
@@ -63,11 +64,19 @@ def format_token_count(count):
 
 
 # Default model to use
-DEFAULT_MODEL = "AT:claude-3-7-sonnet-20250219"  # Anthropic Claude 3.7 direct
+DEFAULT_MODEL = "AT:claude-sonnet-4-20250514"  # Anthropic Claude Sonnet 4
 
 # Default server configuration
 DEFAULT_SERVER_COMMAND = "uv"
 DEFAULT_SERVER_ARGS = ["run", "mcp-solver-mzn"]
+
+# Mode-specific server arguments
+MODE_SERVER_ARGS = {
+    "mzn": ["run", "mcp-solver-mzn"],
+    "z3": ["run", "mcp-solver-z3"],
+    "pysat": ["run", "mcp-solver-pysat"],
+    "maxsat": ["run", "mcp-solver-maxsat"],
+}
 
 # Global Rich Console instance with color support
 console = Console(color_system="truecolor")
@@ -116,7 +125,7 @@ class ClientError(Exception):
 def load_file_content(file_path):
     """Load content from a file."""
     try:
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(file_path, encoding="utf-8") as file:
             return file.read().strip()
     except Exception as e:
         print(f"Error loading file {file_path}: {e}")
@@ -137,7 +146,7 @@ def load_initial_state(query_path, mode):
         print(f"- Instructions: {len(instructions_prompt)} characters")
         print(f"- Review: {len(review_prompt)} characters")
     except Exception as e:
-        console.print(f"[bold red]Error loading prompts: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error loading prompts: {e!s}[/bold red]")
         sys.exit(1)
 
     # Create initial messages with ONLY the instructions prompt as system message
@@ -224,7 +233,7 @@ def wrap_tool(tool):
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
                                 log_system(
-                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                    f"Warning: Failed to capture model after solve: {e!s}"
                                 )
                                 pass  # Handle errors in get_model capture
 
@@ -237,7 +246,7 @@ def wrap_tool(tool):
 
                 return result
             except Exception as e:
-                error_msg = f"Tool execution failed: {str(e)}"
+                error_msg = f"Tool execution failed: {e!s}"
                 log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()
                 return ToolError(error_msg)
@@ -298,7 +307,7 @@ def wrap_tool(tool):
                                 tool_stats.record_tool_call("get_model")
                             except Exception as e:
                                 log_system(
-                                    f"Warning: Failed to capture model after solve: {str(e)}"
+                                    f"Warning: Failed to capture model after solve: {e!s}"
                                 )
                                 pass  # Handle errors in get_model capture
 
@@ -311,7 +320,7 @@ def wrap_tool(tool):
 
                 return result
             except Exception as e:
-                error_msg = f"Tool execution failed: {str(e)}"
+                error_msg = f"Tool execution failed: {e!s}"
                 log_system(f"✖ Error: {error_msg}")
                 sys.stdout.flush()
                 return ToolError(error_msg)
@@ -342,6 +351,12 @@ def parse_arguments():
         help='Server command to use. Format: "command arg1 arg2 arg3..."',
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["mzn", "z3", "pysat", "maxsat"],
+        help="Solver mode to use (overrides automatic detection)",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=DEFAULT_MODEL,
@@ -369,7 +384,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def call_reviewer(state: Dict, model: Any) -> Dict:
+def call_reviewer(state: dict, model: Any) -> dict:
     """Call a reviewer to assess the solution.
 
     This function takes the current state, which includes the solution,
@@ -441,9 +456,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
                                 processed_solution += f"{var} = {value}\n"
     except Exception as e:
         # Log errors in solution processing but continue
-        print(
-            f"Note: Solution preprocessing encountered an issue: {str(e)}", flush=True
-        )
+        print(f"Note: Solution preprocessing encountered an issue: {e!s}", flush=True)
         pass
 
     # Create reviewer prompt using Template
@@ -456,21 +469,29 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
     print(f"Preparing review prompt ({len(reviewer_prompt)} characters)...", flush=True)
 
     try:
-        # Track reviewer input tokens using the TokenCounter
+        # Get token counter instance
         token_counter = TokenCounter.get_instance()
-        token_counter.count_reviewer_input(reviewer_prompt)
 
         # Create a human message with the prompt
         review_message = HumanMessage(content=reviewer_prompt)
 
         print("Calling model for review...", flush=True)
 
-        # Invoke the model normally
-        response = model.invoke([review_message])
+        # Create a callback handler for the reviewer
+        reviewer_callback = TokenUsageCallbackHandler(
+            token_counter, agent_type="reviewer"
+        )
+
+        # Invoke the model with the callback handler
+        response = model.invoke(
+            [review_message], config={"callbacks": [reviewer_callback]}
+        )
         response_text = response.content
 
-        # Track reviewer output tokens
-        token_counter.count_reviewer_output(response_text)
+        # Track reviewer tokens (fallback for providers without exact counts)
+        if not token_counter.reviewer_is_exact:
+            token_counter.count_reviewer_input([review_message])
+            token_counter.count_reviewer_output([response])
 
         # Parse the verdict from the response using regex
         verdict_match = re.search(
@@ -513,7 +534,7 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         }
 
     except Exception as e:
-        print(f"Review process error: {str(e)}", flush=True)
+        print(f"Review process error: {e!s}", flush=True)
         import traceback
 
         print(f"Traceback: {traceback.format_exc()}", flush=True)
@@ -522,10 +543,10 @@ def call_reviewer(state: Dict, model: Any) -> Dict:
         return {
             "review_result": {
                 "correctness": "unknown",
-                "explanation": f"Error running reviewer: {str(e)}",
+                "explanation": f"Error running reviewer: {e!s}",
             },
             "mem_review_verdict": "unknown",
-            "mem_review_text": f"Error running reviewer: {str(e)}",
+            "mem_review_text": f"Error running reviewer: {e!s}",
             "messages": state.get("messages", []),  # Preserve existing messages
         }
 
@@ -568,9 +589,9 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                 state["messages"].append({"role": "assistant", "content": error_msg})
                 return state
     except Exception as e:
-        console.print(f"[bold red]Error parsing model code: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error parsing model code: {e!s}[/bold red]")
         state["messages"].append(
-            {"role": "assistant", "content": f"Error parsing model code: {str(e)}"}
+            {"role": "assistant", "content": f"Error parsing model code: {e!s}"}
         )
         return state
 
@@ -586,6 +607,7 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
 
     # Set up server command and args
     if state.get("server_command") and state.get("server_args"):
+        # Custom server command specified via --server argument
         mcp_command = state["server_command"]
         mcp_args = state["server_args"]
         print(
@@ -593,10 +615,12 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
             flush=True,
         )
     else:
+        # Use mode-specific server args
+        mode = state.get("mode", "mzn")
         mcp_command = DEFAULT_SERVER_COMMAND
-        mcp_args = DEFAULT_SERVER_ARGS
+        mcp_args = MODE_SERVER_ARGS.get(mode, DEFAULT_SERVER_ARGS)
         print(
-            f"Using default server command: {mcp_command} {' '.join(mcp_args)}",
+            f"Using {mode} mode server command: {mcp_command} {' '.join(mcp_args)}",
             flush=True,
         )
 
@@ -616,7 +640,7 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                     # Print tools for debugging
                     print("\n📋 Available tools:", flush=True)
                     for i, tool in enumerate(wrapped_tools):
-                        print(f"  {i+1}. {tool.name}", flush=True)
+                        print(f"  {i + 1}. {tool.name}", flush=True)
                     print("", flush=True)
                     sys.stdout.flush()
 
@@ -647,17 +671,26 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                             recursion_limit = 200
 
                     print(f"Using recursion limit: {recursion_limit}", flush=True)
-                    config = RunnableConfig(recursion_limit=recursion_limit)
-
-                    # Simplified agent start message
-                    log_system("Entering ReAct Agent")
-                    sys.stdout.flush()
 
                     # Ensure token counter is initialized before agent runs
                     token_counter = TokenCounter.get_instance()
                     # Do not reset token counts - this prevents proper tracking
                     # token_counter.main_input_tokens = 0
                     # token_counter.main_output_tokens = 0
+
+                    # Create a callback handler for the main agent
+                    main_callback = TokenUsageCallbackHandler(
+                        token_counter, agent_type="main"
+                    )
+
+                    # Create config with callbacks
+                    config = RunnableConfig(
+                        recursion_limit=recursion_limit, callbacks=[main_callback]
+                    )
+
+                    # Simplified agent start message
+                    log_system("Entering ReAct Agent")
+                    sys.stdout.flush()
 
                     try:
                         # Initialize the agent with tools
@@ -692,24 +725,11 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                     # Debug print only if needed
                                     # print(f"State update: {key} = {value}", flush=True)
 
-                            # Explicitly update token counter from response
-                            if "mem_main_input_tokens" in response:
-                                input_tokens = response.get("mem_main_input_tokens", 0)
-                                # print(f"Main agent input tokens: {input_tokens}", flush=True)
-                                if input_tokens > 0:
-                                    token_counter.main_input_tokens = input_tokens
-
-                            if "mem_main_output_tokens" in response:
-                                output_tokens = response.get(
-                                    "mem_main_output_tokens", 0
-                                )
-                                # print(f"Main agent output tokens: {output_tokens}", flush=True)
-                                if output_tokens > 0:
-                                    token_counter.main_output_tokens = output_tokens
-
-                            # If we didn't get explicit token counts but we got messages, estimate them
-                            if token_counter.main_input_tokens == 0 and response.get(
-                                "messages"
+                            # If we didn't get explicit token counts and we don't have exact counts from callbacks, estimate them
+                            if (
+                                not token_counter.main_is_exact
+                                and token_counter.main_input_tokens == 0
+                                and response.get("messages")
                             ):
                                 # Estimate tokens from input messages
                                 # Don't print annoying message: print("No token counts found, estimating from messages...", flush=True)
@@ -727,34 +747,28 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                                     if isinstance(msg, AIMessage)
                                 ]
                                 token_counter.count_main_output(output_msgs)
-
-                            # Log the final token counts
-                            print(
-                                f"Final token counter state - Input: {token_counter.main_input_tokens}, Output: {token_counter.main_output_tokens}, Total: {token_counter.main_input_tokens + token_counter.main_output_tokens}",
-                                flush=True,
-                            )
                         else:
                             print(
                                 "Warning: No message content found in response",
                                 flush=True,
                             )
                     except Exception as e:
-                        error_msg = f"Error during LLM invocation: {str(e)}"
+                        error_msg = f"Error during LLM invocation: {e!s}"
                         print(error_msg, flush=True)
                         state["messages"].append(
                             {
                                 "role": "assistant",
-                                "content": f"I encountered an error while processing your request: {str(e)}. Please try again with a simpler query or check the model.",
+                                "content": f"I encountered an error while processing your request: {e!s}. Please try again with a simpler query or check the model.",
                             }
                         )
                 except Exception as e:
-                    error_msg = f"Error initializing MCP session: {str(e)}"
+                    error_msg = f"Error initializing MCP session: {e!s}"
                     console.print(f"[bold red]{error_msg}[/bold red]")
                     state["messages"].append(
                         {"role": "assistant", "content": error_msg}
                     )
     except Exception as e:
-        error_msg = f"Error connecting to MCP server: {str(e)}"
+        error_msg = f"Error connecting to MCP server: {e!s}"
         console.print(f"[bold red]{error_msg}[/bold red]")
         state["messages"].append({"role": "assistant", "content": error_msg})
 
@@ -812,12 +826,12 @@ async def mcp_solver_node(state: dict, model_code: str) -> dict:
                 # Display review results immediately after completion
                 display_review_result(state)
             else:
-                print(f"Review result: ❓ Unknown format", flush=True)
+                print("Review result: ❓ Unknown format", flush=True)
         except Exception as e:
-            print(f"Error running reviewer: {str(e)}", flush=True)
+            print(f"Error running reviewer: {e!s}", flush=True)
             state["review_result"] = {
                 "correctness": "unknown",
-                "explanation": f"Error running reviewer: {str(e)}",
+                "explanation": f"Error running reviewer: {e!s}",
             }
 
             # Display review results even if there was an error
@@ -932,18 +946,22 @@ def display_combined_stats():
 
         # Main agent tokens
         main_total = token_counter.main_input_tokens + token_counter.main_output_tokens
+        main_type = " (exact)" if token_counter.main_is_exact else " (approx)"
         tool_table.add_row(
             "Token",
-            "ReAct Agent Input",
+            f"ReAct Agent Input{main_type}",
             format_token_count(token_counter.main_input_tokens),
         )
         tool_table.add_row(
             "Token",
-            "ReAct Agent Output",
+            f"ReAct Agent Output{main_type}",
             format_token_count(token_counter.main_output_tokens),
         )
         tool_table.add_row(
-            "Token", "ReAct Agent Total", format_token_count(main_total), style="bold"
+            "Token",
+            f"ReAct Agent Total{main_type}",
+            format_token_count(main_total),
+            style="bold",
         )
 
         # Reviewer agent tokens
@@ -951,19 +969,22 @@ def display_combined_stats():
             token_counter.reviewer_input_tokens + token_counter.reviewer_output_tokens
         )
         if reviewer_total > 0:
+            reviewer_type = (
+                " (exact)" if token_counter.reviewer_is_exact else " (approx)"
+            )
             tool_table.add_row(
                 "Token",
-                "Reviewer Input",
+                f"Reviewer Input{reviewer_type}",
                 format_token_count(token_counter.reviewer_input_tokens),
             )
             tool_table.add_row(
                 "Token",
-                "Reviewer Output",
+                f"Reviewer Output{reviewer_type}",
                 format_token_count(token_counter.reviewer_output_tokens),
             )
             tool_table.add_row(
                 "Token",
-                "Reviewer Total",
+                f"Reviewer Total{reviewer_type}",
                 format_token_count(reviewer_total),
                 style="bold",
             )
@@ -1050,7 +1071,7 @@ def generate_result_json(state, json_path):
             json.dump(json_data, f, indent=4, ensure_ascii=False)
         print(f"\nSaved JSON result to: {json_path}")
     except Exception as e:
-        print(f"\nError saving JSON result: {str(e)}")
+        print(f"\nError saving JSON result: {e!s}")
 
 
 async def main():
@@ -1066,15 +1087,23 @@ async def main():
     # Initialize token counter (always enabled regardless of --no-stats flag)
     _ = TokenCounter.get_instance()
 
-    # Determine mode from the server command, not from the model code
-    mode = "mzn"  # Default to MiniZinc
-
-    if args.server:
+    # Determine mode from arguments or server command
+    if args.mode:
+        # Use explicit mode if provided
+        mode = args.mode
+    elif args.server:
+        # Otherwise detect from server command
+        mode = "mzn"  # Default to MiniZinc
         server_cmd = args.server.lower()
         if "z3" in server_cmd:
             mode = "z3"
+        elif "maxsat" in server_cmd:
+            mode = "maxsat"
         elif "pysat" in server_cmd:
             mode = "pysat"
+    else:
+        # Default to MiniZinc if no mode or server specified
+        mode = "mzn"
 
     print(f"Detected mode: {mode}")
 
@@ -1085,13 +1114,13 @@ async def main():
     try:
         state = load_initial_state(args.query, mode)
     except Exception as e:
-        console.print(f"[bold red]Error loading files: {str(e)}[/bold red]")
+        console.print(f"[bold red]Error loading files: {e!s}[/bold red]")
         sys.exit(1)
 
     # Store args in state for later use
     state["args"] = args
 
-    # Store mode in state for later use in JSON output
+    # Store mode in state for later use in JSON output and server selection
     state["mode"] = mode
 
     # Initialize mem_solution and mem_model

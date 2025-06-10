@@ -1,31 +1,29 @@
-import sys
 import asyncio
-import logging
-import os
-from typing import List, Optional, Any, Tuple
-from datetime import timedelta
-from pathlib import Path
-from importlib.metadata import version
 import json
+import logging
+import sys
+from datetime import timedelta
+from importlib.metadata import version
+from typing import Any
 
-from mcp.server import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 from mcp.shared.exceptions import McpError
 
 from .constants import (
-    MIN_SOLVE_TIMEOUT,
-    MAX_SOLVE_TIMEOUT,
-    VALIDATION_TIMEOUT,
-    CLEANUP_TIMEOUT,
     ITEM_CHARS,
+    MAX_SOLVE_TIMEOUT,
+    MIN_SOLVE_TIMEOUT,
 )
 from .prompt_loader import load_prompt
+
 
 # Global flags for mode selection
 Z3_MODE = False
 PYSAT_MODE = False
+MAXSAT_MODE = False
 
 try:
     version_str = version("mcp-solver")
@@ -38,7 +36,7 @@ except Exception:
 
 
 def format_model_items(
-    items: List[Tuple[int, str]], max_chars: Optional[int] = None
+    items: list[tuple[int, str]], max_chars: int | None = None
 ) -> str:
     """Format model items with optional truncation."""
     if not items:
@@ -67,6 +65,11 @@ async def serve() -> None:
 
         model_mgr = PySATModelManager()
         logging.getLogger(__name__).info("Using PySAT model manager")
+    elif MAXSAT_MODE:
+        from ..maxsat.model_manager import MaxSATModelManager
+
+        model_mgr = MaxSATModelManager()
+        logging.getLogger(__name__).info("Using MaxSAT model manager")
     else:
         from ..mzn.model_manager import MiniZincModelManager
 
@@ -79,7 +82,7 @@ async def serve() -> None:
         Get the appropriate description based on the current mode.
 
         Args:
-            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'mzn')
+            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn')
                           or a string for a common description across all modes
 
         Returns:
@@ -92,7 +95,11 @@ async def serve() -> None:
             return descriptions["z3"]
         elif PYSAT_MODE and "pysat" in descriptions:
             return descriptions["pysat"]
-        elif not Z3_MODE and not PYSAT_MODE and "mzn" in descriptions:
+        elif MAXSAT_MODE and "maxsat" in descriptions:
+            return descriptions["maxsat"]
+        elif (
+            not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions
+        ):
             return descriptions["mzn"]
         elif "default" in descriptions:
             return descriptions["default"]
@@ -117,7 +124,14 @@ async def serve() -> None:
         # Choose the appropriate instruction prompt based on mode
         if name == "instructions":
             # Determine mode subfolder
-            mode_folder = "z3" if Z3_MODE else "pysat" if PYSAT_MODE else "mzn"
+            if Z3_MODE:
+                mode_folder = "z3"
+            elif PYSAT_MODE:
+                mode_folder = "pysat"
+            elif MAXSAT_MODE:
+                mode_folder = "maxsat"
+            else:
+                mode_folder = "mzn"
 
             logging.getLogger(__name__).info(
                 f"Loading {name} prompt for {mode_folder} mode"
@@ -127,7 +141,7 @@ async def serve() -> None:
                 content = load_prompt(mode_folder, "instructions")
 
                 # Add debugging logs
-                logging.getLogger(__name__).info(f"Prompt loaded successfully")
+                logging.getLogger(__name__).info("Prompt loaded successfully")
                 logging.getLogger(__name__).info(
                     f"Prompt content length: {len(content)}"
                 )
@@ -135,7 +149,7 @@ async def serve() -> None:
                     f"Prompt content first 100 chars: {content[:100]}"
                 )
             except Exception as e:
-                error_msg = f"Critical Error: {str(e)}"
+                error_msg = f"Critical Error: {e!s}"
                 logging.getLogger(__name__).error(error_msg)
                 raise McpError(error_msg)
 
@@ -153,14 +167,14 @@ async def serve() -> None:
             logging.getLogger(__name__).error(error_msg)
             raise McpError(error_msg)
 
-    def format_array_access(variable_name: str, indices: List[int]) -> str:
+    def format_array_access(variable_name: str, indices: list[int]) -> str:
         return (
             variable_name
             if not indices
             else f"{variable_name}[{','.join(str(i) for i in indices)}]"
         )
 
-    def get_array_value(array: Any, indices: List[int]) -> Any:
+    def get_array_value(array: Any, indices: list[int]) -> Any:
         if not indices:
             return array
         if not hasattr(array, "__getitem__"):
@@ -177,7 +191,7 @@ async def serve() -> None:
             raise ValueError("Invalid index type")
 
     @server.list_tools()
-    async def list_tools() -> List[types.Tool]:
+    async def list_tools() -> list[types.Tool]:
         # Tools for all modes
         tools = [
             types.Tool(
@@ -187,6 +201,7 @@ async def serve() -> None:
                         "mzn": "Remove all items from the minizinc model, effectively resetting it.",
                         "z3": "Remove all items from the Z3 Python model, effectively resetting it.",
                         "pysat": "Remove all items from the PySAT Python model, effectively resetting it.",
+                        "maxsat": "Remove all items from the MaxSAT optimization model, effectively resetting it.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -195,9 +210,10 @@ async def serve() -> None:
                 name="add_item",
                 description=get_description(
                     {
-                        "mzn": "Add new minizinc item to the model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
-                        "z3": "Add new Python code to the Z3 model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
-                        "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 1). Required parameters: 'index' and 'content'.",
+                        "mzn": "Add new minizinc item to the model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "z3": "Add new Python code to the Z3 model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -216,6 +232,7 @@ async def serve() -> None:
                         "mzn": "Replace an existing item in the minizinc model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "z3": "Replace an existing item in the Z3 Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "pysat": "Replace an existing item in the PySAT Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                        "maxsat": "Replace an existing item in the MaxSAT optimization model at a specified index with new content. Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -234,6 +251,7 @@ async def serve() -> None:
                         "mzn": "Delete an item from the minizinc model at the specified index. Required parameter: 'index'.",
                         "z3": "Delete an item from the Z3 Python model at the specified index. Required parameter: 'index'.",
                         "pysat": "Delete an item from the PySAT Python model at the specified index. Required parameter: 'index'.",
+                        "maxsat": "Delete an item from the MaxSAT optimization model at the specified index. Required parameter: 'index'.",
                     }
                 ),
                 inputSchema={
@@ -249,6 +267,7 @@ async def serve() -> None:
                         "mzn": "Fetch the current content of the minizinc model, listing each item with its index.",
                         "z3": "Fetch the current content of the Z3 Python model, listing each item with its index.",
                         "pysat": "Fetch the current content of the PySAT Python model, listing each item with its index.",
+                        "maxsat": "Fetch the current content of the MaxSAT optimization model, listing each item with its index.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -260,6 +279,7 @@ async def serve() -> None:
                         "mzn": "Solve the current minizinc model with a timeout parameter. Required parameter: 'timeout'.",
                         "z3": "Solve the current Z3 Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "pysat": "Solve the current PySAT Python model with a timeout parameter. Required parameter: 'timeout'.",
+                        "maxsat": "Solve the current MaxSAT optimization model with a timeout parameter. Required parameter: 'timeout'.",
                     }
                 ),
                 inputSchema={
@@ -277,7 +297,7 @@ async def serve() -> None:
         return tools
 
     @server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict) -> List[types.TextContent]:
+    async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         try:
             match name:
                 case "get_model":
@@ -310,13 +330,25 @@ async def serve() -> None:
                     result = await model_mgr.add_item(
                         arguments["index"], arguments["content"]
                     )
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item added\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to add item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to add item: {error_msg}",
+                            )
+                        ]
                 case "delete_item":
                     if "index" not in arguments:
                         return [
@@ -327,13 +359,25 @@ async def serve() -> None:
                         ]
 
                     result = await model_mgr.delete_item(arguments["index"])
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item deleted\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to delete item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to delete item: {error_msg}",
+                            )
+                        ]
                 case "replace_item":
                     # Check if required parameters are provided
                     if "index" not in arguments:
@@ -354,13 +398,25 @@ async def serve() -> None:
                     result = await model_mgr.replace_item(
                         arguments["index"], arguments["content"]
                     )
-                    items = model_mgr.get_model()
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"Item replaced\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
-                        )
-                    ]
+
+                    # Check if the operation was successful
+                    if result.get("success", True):
+                        items = model_mgr.get_model()
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Item replaced\nCurrent model:\n{format_model_items(items, ITEM_CHARS)}",
+                            )
+                        ]
+                    else:
+                        # Return the error message
+                        error_msg = result.get("error", "Failed to replace item")
+                        return [
+                            types.TextContent(
+                                type="text",
+                                text=f"Failed to replace item: {error_msg}",
+                            )
+                        ]
                 case "clear_model":
                     result = await model_mgr.clear_model()
                     return [types.TextContent(type="text", text="Model cleared")]
@@ -449,12 +505,12 @@ async def serve() -> None:
                             except Exception as e:
                                 # Catch any exceptions from the model manager
                                 logging.getLogger(__name__).error(
-                                    f"Error in model manager during solve: {str(e)}",
+                                    f"Error in model manager during solve: {e!s}",
                                     exc_info=True,
                                 )
                                 # Return a valid result even when errors occur
                                 error_result = {
-                                    "message": f"Error solving model: {str(e)}",
+                                    "message": f"Error solving model: {e!s}",
                                     "success": True,  # Important: still success=True
                                     "status": "error",
                                     "error": str(e),
@@ -465,7 +521,7 @@ async def serve() -> None:
                                     )
                                 ]
 
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # This should rarely happen since we use a timeout in model_mgr.solve_model
                         # But as an extra safety net, we handle it here at the server level
                         logging.getLogger(__name__).warning(
@@ -484,10 +540,10 @@ async def serve() -> None:
                     except Exception as e:
                         # Handle any other errors during timeout handling itself
                         logging.getLogger(__name__).error(
-                            f"Error in timeout handling: {str(e)}", exc_info=True
+                            f"Error in timeout handling: {e!s}", exc_info=True
                         )
                         error_result = {
-                            "message": f"Error in timeout handling: {str(e)}",
+                            "message": f"Error in timeout handling: {e!s}",
                             "success": True,  # Always success=True for client connection
                             "status": "error",
                             "error": str(e),
@@ -498,7 +554,7 @@ async def serve() -> None:
                     raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
             logging.getLogger(__name__).error("Tool execution failed", exc_info=True)
-            error_message = f"Tool execution failed: {str(e)}"
+            error_message = f"Tool execution failed: {e!s}"
             return [types.TextContent(type="text", text=error_message)]
 
     # Wrap the server run in try-except to handle unexpected errors
@@ -511,7 +567,7 @@ async def serve() -> None:
                 exception = context.get("exception")
                 if exception:
                     logging.getLogger(__name__).error(
-                        f"Uncaught exception: {str(exception)}", exc_info=exception
+                        f"Uncaught exception: {exception!s}", exc_info=exception
                     )
                 else:
                     logging.getLogger(__name__).error(
@@ -546,7 +602,7 @@ async def serve() -> None:
         except Exception as e:
             # Log the error but try to avoid crashing the server
             logging.getLogger(__name__).error(
-                f"Error in MCP server operation: {str(e)}", exc_info=True
+                f"Error in MCP server operation: {e!s}", exc_info=True
             )
             # Don't re-raise - this would terminate the server and disconnect clients
             # Instead, attempt to continue or at least shutdown more gracefully
@@ -568,17 +624,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MCP Solver")
     parser.add_argument("--z3", action="store_true", help="Use Z3 solver")
     parser.add_argument("--pysat", action="store_true", help="Use PySAT solver")
+    parser.add_argument(
+        "--maxsat", action="store_true", help="Use MaxSAT optimization solver"
+    )
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
     # Set global flags based on arguments
-    global Z3_MODE, PYSAT_MODE
+    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
+    MAXSAT_MODE = args.maxsat
 
     # Check for incompatible flags
-    if Z3_MODE and PYSAT_MODE:
-        print("Error: Cannot use both --z3 and --pysat flags at the same time")
+    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE]) > 1:
+        print("Error: Cannot use multiple solver mode flags at the same time")
         return 1
 
     # Log the mode
@@ -586,6 +646,10 @@ def main() -> int:
         logging.getLogger(__name__).info("Server running with Z3 solver")
     elif PYSAT_MODE:
         logging.getLogger(__name__).info("Server running with PySAT solver")
+    elif MAXSAT_MODE:
+        logging.getLogger(__name__).info(
+            "Server running with MaxSAT optimization solver"
+        )
     else:
         logging.getLogger(__name__).info("Server running with MiniZinc solver")
 

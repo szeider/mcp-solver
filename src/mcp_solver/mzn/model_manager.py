@@ -1,24 +1,25 @@
 import asyncio
-from typing import Dict, Optional, Any, List, Tuple
-from datetime import timedelta
-from minizinc import Model, Instance, Solver, Result, Status
-from minizinc.error import MiniZincError, SyntaxError, TypeError
 import logging
+from datetime import timedelta
+from typing import Any
 
-from ..core.base_manager import SolverManager
+from minizinc import Instance, Model, Result, Solver, Status
+from minizinc.error import MiniZincError, SyntaxError, TypeError
+
+from ..core.base_model_manager import BaseModelManager
 from ..core.constants import (
-    MIN_SOLVE_TIMEOUT,
+    CLEANUP_TIMEOUT,
     MAX_SOLVE_TIMEOUT,
     VALIDATION_TIMEOUT,
-    CLEANUP_TIMEOUT,
 )
+
 
 logger = logging.getLogger(__name__)
 
 
 def error_response(
-    code: str, message: str, details: Optional[dict] = None
-) -> Dict[str, Any]:
+    code: str, message: str, details: dict | None = None
+) -> dict[str, Any]:
     """Helper function to create a standardized error response."""
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
@@ -29,13 +30,11 @@ class ModelError(Exception):
     pass
 
 
-class MiniZincModelManager(SolverManager):
+class MiniZincModelManager(BaseModelManager):
     def __init__(self, solver_name: str = "chuffed"):
         super().__init__()
-        self.items: List[Tuple[int, str]] = []
-        self.current_solution: Optional[Any] = None
+        self.current_solution: Any | None = None
         self.solver = Solver.lookup(solver_name)
-        self.last_solve_time: Optional[float] = None
         self.current_process = None
         self.cleanup_lock = asyncio.Lock()
         self.solve_progress = 0.0
@@ -44,24 +43,13 @@ class MiniZincModelManager(SolverManager):
 
     @property
     def model_string(self) -> str:
-        return "\n".join(content for _, content in self.items)
-
-    def get_model(self) -> List[Tuple[int, str]]:
-        return self.items
-
-    async def clear_model(self) -> Dict[str, Any]:
-        self.items = []
-        self.current_solution = None
-        self.last_solve_time = None
-        self.solve_progress = 0.0
-        self.solve_status = ""
-        return {"message": "Model cleared"}
+        return self._get_full_code()
 
     def _update_progress(self, progress: float, status: str):
         self.solve_progress = progress
         self.solve_status = status
 
-    def get_solve_progress(self) -> Tuple[float, str]:
+    def get_solve_progress(self) -> tuple[float, str]:
         return self.solve_progress, self.solve_status
 
     async def _cleanup(self):
@@ -73,7 +61,7 @@ class MiniZincModelManager(SolverManager):
                         await asyncio.sleep(0.1)
                         if self.current_process.is_alive():
                             self.current_process.kill()
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning("Cleanup timeout reached, forcing process kill")
                     if self.current_process:
                         self.current_process.kill()
@@ -83,7 +71,7 @@ class MiniZincModelManager(SolverManager):
                     self.current_process = None
 
     async def _validate_hypothetical_model(
-        self, proposed_items: List[Tuple[int, str]], timeout: Optional[timedelta] = None
+        self, proposed_items: list[str], timeout: timedelta | None = None
     ) -> None:
         """Validates a hypothetical model state by creating a temporary instance"""
         timeout = timeout or VALIDATION_TIMEOUT
@@ -91,89 +79,97 @@ class MiniZincModelManager(SolverManager):
         try:
             async with asyncio.timeout(timeout.total_seconds()):
                 model = Model()
-                model_text = "\n".join(content for _, content in proposed_items)
+                model_text = "\n".join(proposed_items)
                 if model_text.strip():
                     if 'include "globals.mzn"' not in model_text:
                         model_text = 'include "globals.mzn";\n' + model_text
                     model.add_string(model_text)
                     instance = Instance(self.solver, model)
                     instance.analyse()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ModelError(
                 f"Model validation timed out after {timeout.total_seconds()} seconds"
             )
         except MiniZincError as e:
             if isinstance(e, SyntaxError):
-                raise ModelError(f"Syntax error: {str(e)}")
+                raise ModelError(f"Syntax error: {e!s}")
             elif isinstance(e, TypeError):
-                raise ModelError(f"Type error: {str(e)}")
+                raise ModelError(f"Type error: {e!s}")
             else:
-                raise ModelError(f"Model error: {str(e)}")
+                raise ModelError(f"Model error: {e!s}")
 
     async def add_item(
-        self, index: int, content: str, validation_timeout: Optional[timedelta] = None
-    ) -> Dict[str, Any]:
+        self, index: int, content: str, validation_timeout: timedelta | None = None
+    ) -> dict[str, Any]:
         """
-        Adds a new item at the specified index.
+        Adds a new item at the specified index (1-based).
         Returns a standardized error response if the index is invalid or validation fails.
         """
         if not content.strip():
             return error_response("EMPTY_CONTENT", "Content is empty")
 
-        if not 0 <= index <= len(self.items):
+        # First, let the parent handle the list operation
+        result = await super().add_item(index, content)
+
+        if not result.get("success"):
+            # Convert parent's error format to MiniZinc's error format
             return error_response(
                 "INVALID_INDEX",
-                f"Index {index} out of bounds (0-{len(self.items)})",
-                {"valid_range": f"0-{len(self.items)}"},
+                result.get("error", "Invalid index"),
+                {"valid_range": f"0-{len(self.code_items)}"},
             )
 
-        proposed_items = (
-            self.items[:index]
-            + [(index, content)]
-            + [(i + 1, c) for i, c in self.items[index:]]
-        )
-
+        # Validate the model after the change
         try:
             await self._validate_hypothetical_model(
-                proposed_items, timeout=validation_timeout
+                self.code_items, timeout=validation_timeout
             )
         except ModelError as e:
+            # Rollback the change
+            del self.code_items[index]
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-        self.items = proposed_items
+
         return {"message": f"Item added\nCurrent model:\n{self.model_string}"}
 
     async def delete_item(
-        self, index: int, validation_timeout: Optional[timedelta] = None
-    ) -> Dict[str, Any]:
-        if not self.items:
+        self, index: int, validation_timeout: timedelta | None = None
+    ) -> dict[str, Any]:
+        if not self.code_items:
             return error_response(
                 "MODEL_EMPTY",
                 "Operation 'delete_item' cannot be performed on an empty model",
             )
-        if not 0 <= index < len(self.items):
+
+        # Store the item to restore if validation fails
+        if 0 <= index < len(self.code_items):
+            removed_item = self.code_items[index]
+
+        # Let parent handle the delete
+        result = await super().delete_item(index)
+
+        if not result.get("success"):
             return error_response(
                 "INVALID_INDEX",
-                f"Index {index} out of bounds (0-{len(self.items)-1})",
-                {"valid_range": f"0-{len(self.items)-1}"},
+                result.get("error", "Invalid index"),
+                {"valid_range": f"0-{len(self.code_items) - 1}"},
             )
 
-        proposed_items = self.items[:index] + [
-            (i - 1, c) for i, c in self.items[index + 1 :]
-        ]
-
+        # Validate the model after deletion
         try:
             await self._validate_hypothetical_model(
-                proposed_items, timeout=validation_timeout
+                self.code_items, timeout=validation_timeout
             )
         except ModelError as e:
+            # Rollback the change
+            self.code_items.insert(index, removed_item)
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-        self.items = proposed_items
+
         return {"message": f"Item deleted\nCurrent model:\n{self.model_string}"}
 
     async def replace_item(
-        self, index: int, content: str, validation_timeout: Optional[timedelta] = None
-    ) -> Dict[str, Any]:
-        if not self.items:
+        self, index: int, content: str, validation_timeout: timedelta | None = None
+    ) -> dict[str, Any]:
+        if not self.code_items:
             return error_response(
                 "MODEL_EMPTY",
                 "Operation 'replace_item' cannot be performed on an empty model",
@@ -181,25 +177,39 @@ class MiniZincModelManager(SolverManager):
         if not content.strip():
             return error_response("EMPTY_CONTENT", "Content is empty")
 
-        if not 0 <= index < len(self.items):
+        # Store old content for rollback
+        if 0 <= index < len(self.code_items):
+            old_content = self.code_items[index]
+
+        # Let parent handle the replace
+        result = await super().replace_item(index, content)
+
+        if not result.get("success"):
             return error_response(
                 "INVALID_INDEX",
-                f"Index {index} out of bounds (0-{len(self.items)-1})",
-                {"valid_range": f"0-{len(self.items)-1}"},
+                result.get("error", "Invalid index"),
+                {"valid_range": f"0-{len(self.code_items) - 1}"},
             )
 
-        proposed_items = (
-            self.items[:index] + [(index, content)] + self.items[index + 1 :]
-        )
-
+        # Validate the model after replacement
         try:
             await self._validate_hypothetical_model(
-                proposed_items, timeout=validation_timeout
+                self.code_items, timeout=validation_timeout
             )
         except ModelError as e:
+            # Rollback the change
+            self.code_items[index] = old_content
             return error_response("MODEL_VALIDATION_FAILED", str(e))
-        self.items = proposed_items
+
         return {"message": f"Item replaced\nCurrent model:\n{self.model_string}"}
+
+    async def clear_model(self) -> dict[str, Any]:
+        """Override to maintain MiniZinc-specific state"""
+        result = await super().clear_model()
+        self.current_solution = None
+        self.solve_progress = 0.0
+        self.solve_status = ""
+        return {"message": "Model cleared"}
 
     # Reintroduce alias: if a tool call uses "insert_item", it is mapped to add_item.
     insert_item = add_item
@@ -210,7 +220,7 @@ class MiniZincModelManager(SolverManager):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._cleanup()
 
-    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> dict[str, Any]:
         if not self.model_string.strip():
             return error_response(
                 "MODEL_EMPTY", "Model is empty. Cannot solve an empty model."
@@ -218,7 +228,7 @@ class MiniZincModelManager(SolverManager):
         async with self:
             return await self._solve_model_impl(timeout)
 
-    async def _solve_model_impl(self, timeout: timedelta) -> Dict[str, Any]:
+    async def _solve_model_impl(self, timeout: timedelta) -> dict[str, Any]:
         # We should now always have a valid timeout from the server
         if timeout > MAX_SOLVE_TIMEOUT:
             return error_response(
@@ -245,7 +255,7 @@ class MiniZincModelManager(SolverManager):
 
             return self._process_result(result, timeout.total_seconds())
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._update_progress(1.0, "Timeout reached")
             if hasattr(instance, "cancel"):
                 await instance.cancel()
@@ -257,9 +267,9 @@ class MiniZincModelManager(SolverManager):
         except MiniZincError as e:
             self._update_progress(1.0, "Error occurred")
             logger.error("MiniZinc solve error", exc_info=True)
-            return error_response("MINIZINC_ERROR", f"MiniZinc error: {str(e)}")
+            return error_response("MINIZINC_ERROR", f"MiniZinc error: {e!s}")
 
-    def _process_result(self, result: Result, timeout_seconds: float) -> Dict[str, Any]:
+    def _process_result(self, result: Result, timeout_seconds: float) -> dict[str, Any]:
         self.current_solution = result
         self.last_solve_time = (
             result.statistics["solveTime"].total_seconds()
@@ -302,16 +312,28 @@ class MiniZincModelManager(SolverManager):
                 f"Solver status: {result.status} after {timeout_seconds} seconds"
             )
 
+        # Store in format compatible with BaseModelManager
+        self.last_solution = {
+            "satisfiable": solution.get("satisfiable", False),
+            "status": str(result.status),
+            "values": solution.get("solution", {}),
+        }
+
+        if "objective" in solution:
+            self.last_solution["objective"] = solution["objective"]
+        if "optimal" in solution:
+            self.last_solution["optimal"] = solution["optimal"]
+
         return solution
 
-    def get_solution(self) -> Dict[str, Any]:
+    def get_solution(self) -> dict[str, Any]:
         if not self.current_solution:
             return error_response(
                 "NO_SOLUTION", "No solution is available. Please solve the model first."
             )
         return self._process_result(self.current_solution, 0)
 
-    def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
+    def get_variable_value(self, variable_name: str) -> dict[str, Any]:
         if not self.current_solution:
             return error_response(
                 "NO_SOLUTION", "No solution is available. Please solve the model first."
@@ -328,7 +350,7 @@ class MiniZincModelManager(SolverManager):
             "value": self.current_solution.solution.__dict__[variable_name],
         }
 
-    def get_solve_time(self) -> Dict[str, Any]:
+    def get_solve_time(self) -> dict[str, Any]:
         if self.last_solve_time is None:
             return error_response(
                 "NO_SOLUTION", "No solve time available. Please solve the model first."

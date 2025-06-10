@@ -1,12 +1,11 @@
-import os
-import sys
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
+
 
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    pass
 
 # Potentially truncate items when sent back to client
 ITEM_CHARS = None  # or None to show full items

@@ -7,12 +7,12 @@ This module provides enhanced error handling for PySAT operations, including:
 - Structured error reporting for better user experience
 """
 
-import sys
-import traceback
-import logging
 import functools
-import re
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union, cast
+import logging
+import traceback
+from collections.abc import Callable
+from typing import Any, TypeVar
+
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -50,8 +50,8 @@ class PySATError(Exception):
     def __init__(
         self,
         message: str,
-        original_error: Optional[Exception] = None,
-        context: Optional[Dict[str, Any]] = None,
+        original_error: Exception | None = None,
+        context: dict[str, Any] | None = None,
     ):
         """
         Initialize PySAT error with enhanced context.
@@ -140,7 +140,7 @@ def pysat_error_handler(func: Callable[..., T]) -> Callable[..., T]:
     return wrapper
 
 
-def validate_variables(variables: Dict[str, int]) -> List[str]:
+def validate_variables(variables: dict[str, int]) -> list[str]:
     """
     Validate that all variables have proper types and values.
 
@@ -166,7 +166,7 @@ def validate_variables(variables: Dict[str, int]) -> List[str]:
             errors.append(f"Variable '{key}' has non-positive ID: {var_id}")
 
     # Check for duplicate IDs
-    id_to_keys: Dict[int, List[str]] = {}
+    id_to_keys: dict[int, list[str]] = {}
     for key, var_id in variables.items():
         if var_id not in id_to_keys:
             id_to_keys[var_id] = []
@@ -175,14 +175,13 @@ def validate_variables(variables: Dict[str, int]) -> List[str]:
     for var_id, keys in id_to_keys.items():
         if len(keys) > 1:
             errors.append(
-                f"Multiple variables ({', '.join(keys)}) "
-                f"share the same ID: {var_id}"
+                f"Multiple variables ({', '.join(keys)}) share the same ID: {var_id}"
             )
 
     return errors
 
 
-def validate_formula(formula: Any) -> List[str]:
+def validate_formula(formula: Any) -> list[str]:
     """
     Check formula structure for potential issues.
 
@@ -205,18 +204,18 @@ def validate_formula(formula: Any) -> List[str]:
     max_var = 0
     for i, clause in enumerate(formula.clauses):
         if not clause:
-            errors.append(f"Clause {i+1} is empty")
+            errors.append(f"Clause {i + 1} is empty")
             continue
 
         for j, lit in enumerate(clause):
             if not isinstance(lit, int):
                 errors.append(
-                    f"Clause {i+1}, literal {j+1} is not an integer: "
+                    f"Clause {i + 1}, literal {j + 1} is not an integer: "
                     f"{lit} (type: {type(lit).__name__})"
                 )
             elif lit == 0:
                 errors.append(
-                    f"Clause {i+1}, literal {j+1} is zero (not allowed in PySAT)"
+                    f"Clause {i + 1}, literal {j + 1} is zero (not allowed in PySAT)"
                 )
             else:
                 max_var = max(max_var, abs(lit))
@@ -233,7 +232,7 @@ def validate_formula(formula: Any) -> List[str]:
     return errors
 
 
-def format_solution_error(error: Exception) -> Dict[str, Any]:
+def format_solution_error(error: Exception) -> dict[str, Any]:
     """
     Format an error for inclusion in the solution.
 

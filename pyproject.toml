@@ -7,7 +7,7 @@ packages = ["src/mcp_solver", "tests"]
 
 [project]
 name = "mcp-solver"
-version = "3.2.0"
+version = "3.3.0"
 description = "MCP server for Constraint, SAT, and SMT solving"
 authors = [
     {name = "Stefan Szeider", email = "stefan@szeider.net"},
@@ -48,23 +48,97 @@ all = [
 dev = [
     "coverage>=7.7.1",
     "pytest>=8.3.5",
-    "black>=24.3.0",
+    "ruff>=0.4.10",
 ]
 
 [project.scripts]
 test-setup-mzn = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
+test-setup-maxsat = "mcp_solver.maxsat.test_setup:main"
 test-setup-client = "mcp_solver.client.test_setup:main"
 mcp-solver = "mcp_solver.core.__main__:main"
 mcp-solver-mzn = "mcp_solver.core.__main__:main_mzn"
 mcp-solver-z3 = "mcp_solver.core.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.core.__main__:main_pysat"
+mcp-solver-maxsat = "mcp_solver.core.__main__:main_maxsat"
 test-client = "mcp_solver.client.client:main_cli"
 run-test = "tests.run_test:main"
 
-[tool.black]
+[tool.ruff]
+# Usage:
+# Format code: uv run ruff format .
+# Check code: uv run ruff check .
+# Fix issues: uv run ruff check --fix .
+
+# Python 3.11+
+target-version = "py311"
+
+# Black-compatible
 line-length = 88
+
+# Auto-fix issues
+fix = true
+
+[tool.ruff.format]
+# Black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint]
+# Essential rules that catch real issues
+select = [
+    "E",    # pycodestyle errors
+    "F",    # Pyflakes
+    "I",    # isort (import sorting)
+    "UP",   # pyupgrade (Python 3.11+ syntax)
+    "B",    # flake8-bugbear (likely bugs)
+    "SIM",  # flake8-simplify (code simplification)
+    "RUF",  # Ruff-specific rules
+    "ARG",  # flake8-unused-arguments
+    "LOG",  # flake8-logging (logging best practices)
+]
+
+# Ignore annoying/controversial rules
+ignore = [
+    "E501",   # Line length (formatter handles this)
+    "B008",   # Function calls in defaults
+    "E402",   # Module level import not at top of file (common in test files)
+    "E722",   # Do not use bare 'except' - needed for broad exception handling
+    "F401",   # Imported but unused - template modules have purposeful imports
+    "F403",   # Star imports - used intentionally for re-exports
+    "F821",   # Undefined name - used for type annotations with quotes
+    "F841",   # Local variable assigned but never used - some test setups
+    "RUF001", # String contains ambiguous character - intentional emoji usage
+    "RUF012", # Mutable class attributes - existing singleton pattern
+    "RUF013", # PEP 484 prohibits implicit Optional - backward compatibility
+    "UP007",  # Use X | Y for type annotations - backward compatibility
+    "UP038",  # Use X | Y in isinstance - backward compatibility
+    "B904",   # Raise from err - existing error handling pattern
+    "B007",   # Loop control variable not used - simple iteration patterns
+    "SIM102", # Use single if statement - readability preference
+    "SIM105", # Use contextlib.suppress - explicit exception handling preferred
+    "SIM108", # Use ternary operator - if/else can be clearer
+    "SIM117", # Use single with statement - readability preference
+    "SIM118", # Use key in dict instead of dict.keys() - explicit is better
+    "SIM101", # Multiple isinstance calls - readability for complex checks
+    "RUF022", # __all__ is not sorted - custom ordering for documentation
+    "ARG001", # Unused function argument - protocol requirements
+    "ARG002", # Unused method argument - interface compatibility
+    "ARG005", # Unused lambda argument - fallback lambdas
+    "LOG015", # Root logger usage - simple CLI scripts
+]
+
+[tool.ruff.lint.isort]
+# Clean import grouping
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use assert and have unused imports
+"tests/*" = ["S101", "F401", "F841"]
+"__init__.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"

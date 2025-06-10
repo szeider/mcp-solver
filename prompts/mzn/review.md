@@ -42,7 +42,9 @@ Follow these steps carefully:
 
   Check constraint by constraint using the same structured format.
 
-  Note that "unsatisfiable" is a perfectly fine result. So if all constraints added to the model are valid representations of the problem requirements,  then your verdict should be *correct*.
+  **IMPORTANT**: You do NOT need to explain WHY the instance is unsatisfiable. Trust the solver's determination. Your task is only to verify that each constraint in the model is grounded in the problem description.
+
+  Note that "unsatisfiable" is a perfectly fine result. So if all constraints added to the model are valid representations of the problem requirements, then your verdict should be *correct*.
 
 - **For no solution/timeout/unverifiable cases**: Answer *unknown*.
 

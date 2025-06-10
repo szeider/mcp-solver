@@ -6,11 +6,12 @@ This module provides shared validation functions for Python-based solver compone
 (such as PySAT and Z3) to validate input parameters and code.
 """
 
-import re
-import logging
 import ast
-from typing import List, Tuple, Optional, Any, Dict, Union
+import logging
+import re
 from datetime import timedelta
+from typing import Any
+
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class ValidationError(Exception):
 
 def validate_index(
     index: Any,
-    existing_items: Optional[List[Tuple[int, str]]] = None,
+    existing_items: list[tuple[int, str]] | None = None,
     one_based: bool = True,
 ) -> None:
     """
@@ -283,7 +284,9 @@ def validate_python_code_safety(code: str) -> None:
         col_num = e.offset if hasattr(e, "offset") else "?"
         error_text = e.text.strip() if hasattr(e, "text") and e.text else "unknown"
 
-        error_msg = f"Syntax error at line {line_num}, column {col_num}: {str(e)} - '{error_text}'"
+        error_msg = (
+            f"Syntax error at line {line_num}, column {col_num}: {e!s} - '{error_text}'"
+        )
         logger.error(error_msg)
         raise ValidationError(error_msg) from e
 
@@ -319,8 +322,8 @@ def validate_timeout(
 
 
 def get_standardized_response(
-    success: bool, message: str, error: Optional[str] = None, **kwargs
-) -> Dict[str, Any]:
+    success: bool, message: str, error: str | None = None, **kwargs
+) -> dict[str, Any]:
     """
     Create a standardized response dictionary for validation results.
 
@@ -333,10 +336,25 @@ def get_standardized_response(
     Returns:
         A dictionary with standardized response fields
     """
+    # Ensure consistency between success flag and error presence
+    if error is not None and success:
+        # This is inconsistent - if there's an error, success should be False
+        # Log this with a stack trace to identify the source
+        logger.error(
+            f"CRITICAL INCONSISTENCY DETECTED: success=True with error='{error}'",
+            exc_info=True,
+        )
+
+        # Always override success to be False if there's an error
+        success = False  # This ensures the response is consistent
+
     response = {"message": message, "success": success}
 
+    # Add error if provided
     if error:
         response["error"] = error
+        # Ensure status is also set for errors
+        response["status"] = "error"
 
     # Add any additional keyword arguments to the response
     response.update(kwargs)
@@ -374,20 +392,23 @@ class DictMisuseVisitor(ast.NodeVisitor):
             is_list_access = False
 
             # Check if index is a numeric literal (typical for lists)
-            if isinstance(node.slice, ast.Index) and isinstance(
-                node.slice.value, ast.Num
-            ):
-                is_list_access = True
-            # In Python 3.9+, slice is direct
-            elif isinstance(node.slice, ast.Constant) and isinstance(
-                node.slice.value, int
-            ):
-                is_list_access = True
-            # Check for range access with numeric bounds (list slicing)
-            elif isinstance(node.slice, ast.Slice) and all(
-                isinstance(x, (ast.Num, ast.Constant))
-                for x in [node.slice.lower, node.slice.upper, node.slice.step]
-                if x is not None
+            if (
+                (
+                    isinstance(node.slice, ast.Index)
+                    and isinstance(node.slice.value, ast.Num)
+                )
+                or (
+                    isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, int)
+                )
+                or (
+                    isinstance(node.slice, ast.Slice)
+                    and all(
+                        isinstance(x, (ast.Num, ast.Constant))
+                        for x in [node.slice.lower, node.slice.upper, node.slice.step]
+                        if x is not None
+                    )
+                )
             ):
                 is_list_access = True
 
@@ -473,15 +494,18 @@ class DictMisuseVisitor(ast.NodeVisitor):
                 if not self._is_dict_value(node.value):
                     line_num = getattr(node, "lineno", "?")
 
-                    # Create user-friendly error message
-                    self.dict_misuses.append(
-                        {
-                            "line": line_num,
-                            "var_name": var_name,
-                            "message": f"Error at line {line_num}: The variable '{var_name}' is being overwritten with a non-dictionary value.",
-                            "suggestion": f"Use '{var_name}[key] = value' instead of '{var_name} = value' to add items to the dictionary.",
-                        }
-                    )
+                    # Avoid false positives for variable names like "solution" or "model"
+                    # which are commonly used for solver results and aren't dictionary misuse
+                    if var_name.lower() not in ["solution", "model", "result"]:
+                        # Create user-friendly error message
+                        self.dict_misuses.append(
+                            {
+                                "line": line_num,
+                                "var_name": var_name,
+                                "message": f"Error at line {line_num}: The variable '{var_name}' is being overwritten with a non-dictionary value.",
+                                "suggestion": f"Use '{var_name}[key] = value' instead of '{var_name} = value' to add items to the dictionary.",
+                            }
+                        )
 
         self.generic_visit(node)
 
@@ -537,7 +561,6 @@ class DictMisuseVisitor(ast.NodeVisitor):
                             or "dict" in target_name.lower()
                             or "vars" in target_name.lower()
                         ):
-
                             # Check if value looks like a counter
                             if isinstance(stmt.value, ast.Name):
                                 value_name = stmt.value.id
@@ -711,7 +734,7 @@ class DictionaryMisuseValidator:
         """
         return "\n".join(self.code_fragments)
 
-    def validate(self) -> Dict[str, Any]:
+    def validate(self) -> dict[str, Any]:
         """
         Validate all collected code fragments for dictionary misuse.
 
@@ -788,14 +811,14 @@ class DictionaryMisuseValidator:
             )
 
             logger.error(
-                f"Syntax error in combined code: Line {line_num}, Col {col_num}: {str(e)}"
+                f"Syntax error in combined code: Line {line_num}, Col {col_num}: {e!s}"
             )
 
             return {
                 "has_errors": True,
                 "errors": [
                     {
-                        "message": f"Syntax error in your code: {str(e)}",
+                        "message": f"Syntax error in your code: {e!s}",
                         "line": line_num,
                         "column": col_num,
                         "text": error_text,

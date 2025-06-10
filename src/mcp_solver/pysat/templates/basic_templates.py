@@ -6,21 +6,21 @@ basic SAT solving.
 """
 
 import sys
-import os
-from typing import List, Dict, Any, Optional, Callable, Union
+from typing import Any
+
 
 # Import PySAT but protect against failure
 try:
     from pysat.formula import CNF
-    from pysat.solvers import Solver, Glucose3, Glucose4, Lingeling, Cadical153
+    from pysat.solvers import Cadical153, Glucose3, Glucose4, Lingeling, Solver
 except ImportError:
     print("PySAT solver not found. Install with: pip install python-sat")
     sys.exit(1)
 
 
 def basic_sat_solver(
-    clauses: List[List[int]], solver_type=Cadical153
-) -> Dict[str, Any]:
+    clauses: list[list[int]], solver_type=Cadical153
+) -> dict[str, Any]:
     """
     Basic SAT solving template.
 
@@ -84,8 +84,8 @@ def dimacs_to_cnf(dimacs_str: str) -> CNF:
 
 
 def sat_to_binary_variables(
-    variables: Dict[str, int], model: List[int]
-) -> Dict[str, bool]:
+    variables: dict[str, int], model: list[int]
+) -> dict[str, bool]:
     """
     Convert SAT model to binary variables.
 

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any, List, Tuple
 from datetime import timedelta
+from typing import Any
 
 
 class SolverManager(ABC):
@@ -17,7 +17,7 @@ class SolverManager(ABC):
         self.last_solve_time = None
 
     @abstractmethod
-    async def clear_model(self) -> Dict[str, Any]:
+    async def clear_model(self) -> dict[str, Any]:
         """
         Clear the current model.
 
@@ -27,7 +27,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    async def add_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def add_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Add an item to the model at the specified index.
 
@@ -41,7 +41,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    async def delete_item(self, index: int) -> Dict[str, Any]:
+    async def delete_item(self, index: int) -> dict[str, Any]:
         """
         Delete an item from the model at the specified index.
 
@@ -54,7 +54,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def replace_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Replace an item in the model at the specified index.
 
@@ -68,7 +68,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> dict[str, Any]:
         """
         Solve the current model.
 
@@ -81,7 +81,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    def get_solution(self) -> Dict[str, Any]:
+    def get_solution(self) -> dict[str, Any]:
         """
         Get the current solution.
 
@@ -91,7 +91,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
+    def get_variable_value(self, variable_name: str) -> dict[str, Any]:
         """
         Get the value of a variable from the current solution.
 
@@ -104,7 +104,7 @@ class SolverManager(ABC):
         pass
 
     @abstractmethod
-    def get_solve_time(self) -> Dict[str, Any]:
+    def get_solve_time(self) -> dict[str, Any]:
         """
         Get the time taken for the last solve operation.
 

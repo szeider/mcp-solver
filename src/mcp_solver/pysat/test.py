@@ -5,13 +5,13 @@ This file contains simple examples for using PySAT to validate the integration
 works correctly in the MCP Solver environment.
 """
 
-import sys
 import os
-import time
 import signal
+import sys
+import time
 import traceback
 from contextlib import contextmanager
-from typing import Dict, Any, Optional
+from typing import Any
 
 
 def simple_sat_test():
@@ -68,7 +68,7 @@ def repl_test():
     """
     try:
         from pysat.formula import CNF
-        from pysat.solvers import Glucose3, Cadical153
+        from pysat.solvers import Cadical153, Glucose3
 
         print("PySAT REPL - Enter clauses in DIMACS format (example: 1 2 0 for a OR b)")
         print("Enter 'quit' to exit")
@@ -173,7 +173,7 @@ def time_limit(seconds: float):
 _LAST_SOLUTION = None
 
 
-def export_solution(solver=None, variables=None, objective=None) -> Dict[str, Any]:
+def export_solution(solver=None, variables=None, objective=None) -> dict[str, Any]:
     """
     Extract and format solutions from a PySAT solver.
 
@@ -204,7 +204,7 @@ def export_solution(solver=None, variables=None, objective=None) -> Dict[str, An
     return solution
 
 
-def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]:
+def execute_pysat_code(code_string: str, timeout: float = 4.0) -> dict[str, Any]:
     """
     Execute PySAT Python code in a secure environment with timeout handling.
 
@@ -234,6 +234,8 @@ def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]
 
     # Import PySAT modules
     try:
+        from pysat.card import CardEnc, EncType
+        from pysat.examples.rc2 import RC2
         from pysat.formula import CNF, WCNF
         from pysat.solvers import (
             Cadical103,
@@ -244,17 +246,15 @@ def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]
             Glucose42,
             Lingeling,
             MapleCM,
-            MinisatGH,
-            Minisat22,
-            Minicard,
             Mergesat3,
+            Minicard,
+            Minisat22,
+            MinisatGH,
         )
-        from pysat.examples.rc2 import RC2
-        from pysat.card import CardEnc, EncType
     except ImportError as e:
         return {
             "status": "error",
-            "error": f"Failed to import PySAT: {str(e)}",
+            "error": f"Failed to import PySAT: {e!s}",
             "output": [],
             "solution": None,
             "execution_time": 0,
@@ -385,7 +385,7 @@ def execute_pysat_code(code_string: str, timeout: float = 4.0) -> Dict[str, Any]
         result["error"] = str(e)
     except Exception as e:
         result["status"] = "error"
-        result["error"] = f"{type(e).__name__}: {str(e)}"
+        result["error"] = f"{type(e).__name__}: {e!s}"
         result["traceback"] = traceback.format_exc()
     finally:
         # Restore stdout and record execution time
@@ -408,8 +408,9 @@ def memory_management_test(iterations=50):
     We're focusing on Cadical as the preferred solver.
     """
     try:
-        from pysat.solvers import Cadical153
         import gc
+
+        from pysat.solvers import Cadical153
 
         print(f"Creating and deleting {iterations} solver instances...")
 
@@ -475,7 +476,6 @@ def cardinality_constraints_test():
     different numbers of true variables.
     """
     try:
-        from pysat.formula import CNF
         from pysat.card import CardEnc, EncType
         from pysat.solvers import Cadical153
 
@@ -567,9 +567,9 @@ def maxsat_with_constraints_test():
     with cardinality constraints, which will be important for the templates.
     """
     try:
-        from pysat.formula import WCNF
-        from pysat.examples.rc2 import RC2
         from pysat.card import CardEnc, EncType
+        from pysat.examples.rc2 import RC2
+        from pysat.formula import WCNF
 
         print("Testing MaxSAT with cardinality constraints...")
 
@@ -620,7 +620,7 @@ def maxsat_with_constraints_test():
                 # Calculate the maximum possible value (sum of all weights)
                 max_possible = sum([5, 3, 8, 2, 7])
 
-                print(f"MaxSAT solution found:")
+                print("MaxSAT solution found:")
                 print(f"  Selected tasks: {selected_tasks}")
                 print(f"  Total value: {total_value}")
                 print(f"  Cost (missed value): {cost}")
@@ -722,7 +722,7 @@ export_solution(variables={
 
     # Execute each code sample
     for i, code in enumerate(code_samples):
-        print(f"\n--- Executing code sample {i+1} ---")
+        print(f"\n--- Executing code sample {i + 1} ---")
 
         try:
             # Execute the code

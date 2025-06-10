@@ -1,35 +1,30 @@
 """
-PySAT model manager implementation.
+PySAT model manager implementation using BaseModelManager.
 
 This module implements the SolverManager abstract base class for PySAT,
 providing methods for managing PySAT models.
 """
 
-import asyncio
 import logging
-from typing import Dict, Any, List, Tuple, Optional, Union, cast
-from datetime import timedelta
-import time
 import re
+import time
+from datetime import timedelta
+from typing import Any
 
-from ..core.base_manager import SolverManager
-from ..core.constants import MIN_SOLVE_TIMEOUT, MAX_SOLVE_TIMEOUT
-from .environment import execute_pysat_code
-from .error_handling import PySATError, format_solution_error
+from ..core.base_model_manager import BaseModelManager
+from ..core.constants import MAX_SOLVE_TIMEOUT, MIN_SOLVE_TIMEOUT
 from ..core.validation import (
-    validate_index,
-    validate_content,
-    validate_python_code_safety,
+    DictionaryMisuseValidator,
     ValidationError,
     get_standardized_response,
+    validate_content,
+    validate_python_code_safety,
     validate_timeout,
-    DictionaryMisuseValidator,
 )
+from .environment import execute_pysat_code
 
-# Validation constants are now imported from validation module
 
-
-class PySATModelManager(SolverManager):
+class PySATModelManager(BaseModelManager):
     """
     PySAT model manager implementation.
 
@@ -42,27 +37,19 @@ class PySATModelManager(SolverManager):
         Initialize a new PySAT model manager.
         """
         super().__init__()
-        self.code_items: List[Tuple[int, str]] = []
-        self.last_result: Optional[Dict[str, Any]] = None
-        self.last_solution: Optional[Dict[str, Any]] = None
-        self.last_solve_time: float = 0.0
         self.initialized = True
         self.logger = logging.getLogger(__name__)
-        self.dict_validator = (
-            DictionaryMisuseValidator()
-        )  # Initialize the dictionary misuse validator
+        self.dict_validator = DictionaryMisuseValidator()
         self.logger.info("PySAT model manager initialized")
 
-    async def clear_model(self) -> Dict[str, Any]:
+    async def clear_model(self) -> dict[str, Any]:
         """
         Clear the current model.
 
         Returns:
             A dictionary with a message indicating the model was cleared
         """
-        self.code_items = []
-        self.last_result = None
-        self.last_solution = None
+        result = await super().clear_model()
 
         # Reset the dictionary misuse validator
         self.dict_validator = DictionaryMisuseValidator()
@@ -70,16 +57,7 @@ class PySATModelManager(SolverManager):
         self.logger.info("Model cleared")
         return {"message": "Model cleared successfully"}
 
-    def get_model(self) -> List[Tuple[int, str]]:
-        """
-        Get the current model content with indices.
-
-        Returns:
-            A list of (index, content) tuples
-        """
-        return self.code_items
-
-    async def add_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def add_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Add an item to the model at the specified index.
 
@@ -94,31 +72,21 @@ class PySATModelManager(SolverManager):
             ValidationError: If the input is invalid
         """
         try:
-            # Validate inputs
-            validate_index(index, self.code_items, one_based=True)
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
+
+            # First call parent's add_item to handle list operations
+            result = await super().add_item(index, content)
+
+            if not result.get("success"):
+                return result
 
             # Add the code fragment to the dictionary misuse validator
             self.dict_validator.add_fragment(content, index)
             self.logger.debug(f"Added fragment to dictionary validator: item {index}")
 
-            # Check if an item with the same index already exists
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    # Replace existing item
-                    self.code_items[i] = (index, content)
-                    self.logger.info(f"Replaced item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Replaced item at index {index}"
-                    )
-
-            # Add new item
-            self.code_items.append((index, content))
-            self.logger.info(f"Added item at index {index}")
-            return get_standardized_response(
-                success=True, message=f"Added item at index {index}"
-            )
+            return result
 
         except ValidationError as e:
             error_msg = str(e)
@@ -129,7 +97,7 @@ class PySATModelManager(SolverManager):
                 error=error_msg,
             )
         except Exception as e:
-            error_msg = f"Unexpected error in add_item: {str(e)}"
+            error_msg = f"Unexpected error in add_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -137,53 +105,7 @@ class PySATModelManager(SolverManager):
                 error=error_msg,
             )
 
-    async def delete_item(self, index: int) -> Dict[str, Any]:
-        """
-        Delete an item from the model at the specified index.
-
-        Args:
-            index: The index of the item to delete
-
-        Returns:
-            A dictionary with the result of the operation
-        """
-        try:
-            # Basic index validation - only check if it's a valid integer
-            validate_index(index, one_based=True)
-
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    del self.code_items[i]
-                    self.logger.info(f"Deleted item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Deleted item at index {index}"
-                    )
-
-            self.logger.warning(f"Item at index {index} not found")
-            return get_standardized_response(
-                success=False,
-                message=f"Item at index {index} not found",
-                error="Item not found",
-            )
-
-        except ValidationError as e:
-            error_msg = str(e)
-            self.logger.error(f"Validation error in delete_item: {error_msg}")
-            return get_standardized_response(
-                success=False,
-                message=f"Failed to delete item: {error_msg}",
-                error=error_msg,
-            )
-        except Exception as e:
-            error_msg = f"Unexpected error in delete_item: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
-            return get_standardized_response(
-                success=False,
-                message="Failed to delete item due to an internal error",
-                error=error_msg,
-            )
-
-    async def replace_item(self, index: int, content: str) -> Dict[str, Any]:
+    async def replace_item(self, index: int, content: str) -> dict[str, Any]:
         """
         Replace an item in the model at the specified index.
 
@@ -195,28 +117,21 @@ class PySATModelManager(SolverManager):
             A dictionary with the result of the operation
         """
         try:
-            # Validate inputs
-            validate_index(index, self.code_items, one_based=True)
+            # Validate content and code safety
             validate_content(content)
             validate_python_code_safety(content)
+
+            # First call parent's replace_item
+            result = await super().replace_item(index, content)
+
+            if not result.get("success"):
+                return result
 
             # Add the code fragment to the dictionary misuse validator
             self.dict_validator.add_fragment(content, index)
             self.logger.debug(f"Added fragment to dictionary validator: item {index}")
 
-            # Check if the item exists
-            for i, (idx, _) in enumerate(self.code_items):
-                if idx == index:
-                    # Replace existing item
-                    self.code_items[i] = (index, content)
-                    self.logger.info(f"Replaced item at index {index}")
-                    return get_standardized_response(
-                        success=True, message=f"Replaced item at index {index}"
-                    )
-
-            # Item not found, add as new
-            self.logger.warning(f"Item at index {index} not found, adding as new")
-            return await self.add_item(index, content)
+            return result
 
         except ValidationError as e:
             error_msg = str(e)
@@ -227,7 +142,7 @@ class PySATModelManager(SolverManager):
                 error=error_msg,
             )
         except Exception as e:
-            error_msg = f"Unexpected error in replace_item: {str(e)}"
+            error_msg = f"Unexpected error in replace_item: {e!s}"
             self.logger.error(error_msg, exc_info=True)
             return get_standardized_response(
                 success=False,
@@ -235,7 +150,7 @@ class PySATModelManager(SolverManager):
                 error=error_msg,
             )
 
-    async def solve_model(self, timeout: timedelta) -> Dict[str, Any]:
+    async def solve_model(self, timeout: timedelta) -> dict[str, Any]:
         """
         Solve the current model with a timeout.
 
@@ -287,11 +202,8 @@ class PySATModelManager(SolverManager):
                     },
                 )
 
-            # Sort code items by index
-            sorted_items = sorted(self.code_items, key=lambda x: x[0])
-
-            # Join code items into a single string
-            code_string = "\n".join(content for _, content in sorted_items)
+            # Get full code using parent's method
+            code_string = self._get_full_code()
 
             # Perform static analysis on the code before executing it
             try:
@@ -349,11 +261,11 @@ class PySATModelManager(SolverManager):
                 )
 
                 self.logger.error(
-                    f"Syntax error in code at line {line_num}, column {col_num}: {str(e)}"
+                    f"Syntax error in code at line {line_num}, column {col_num}: {e!s}"
                 )
                 return get_standardized_response(
                     success=False,
-                    message=f"Syntax error at line {line_num}, column {col_num}: {str(e)}",
+                    message=f"Syntax error at line {line_num}, column {col_num}: {e!s}",
                     error="Syntax error",
                     error_details={
                         "line": line_num,
@@ -363,7 +275,7 @@ class PySATModelManager(SolverManager):
                     },
                 )
             except Exception as e:
-                self.logger.error(f"Error analyzing code: {str(e)}")
+                self.logger.error(f"Error analyzing code: {e!s}")
                 # Continue despite analysis error
 
             # Modify the code to enhance debugging
@@ -405,7 +317,6 @@ class PySATModelManager(SolverManager):
             # Extract solver output to check for satisfiability
             output = self.last_result.get("output", "")
             satisfiable = False
-            has_maxsat = False
 
             # Parse output for explicit satisfiability result
             sat_match = re.search(
@@ -421,21 +332,6 @@ class PySATModelManager(SolverManager):
                 if "Is satisfiable: True" in output:
                     satisfiable = True
                     self.logger.debug("Found 'Is satisfiable: True' in output")
-                
-            # Check specifically for MaxSAT solution data in the output
-            maxsat_match = re.search(r"maxsat_result", output)
-            if maxsat_match:
-                has_maxsat = True
-                self.logger.debug("Found MaxSAT solution data in output")
-                
-                # For MaxSAT, if we see model data, it likely found a solution
-                # But we still need to check if all hard constraints were satisfied
-                # Look for specific satisfiability indicator in the MaxSAT output
-                maxsat_sat_match = re.search(r"\"satisfiable\":\s*(true|false)", output, re.IGNORECASE)
-                if maxsat_sat_match:
-                    maxsat_satisfiable = maxsat_sat_match.group(1).lower() == "true"
-                    self.logger.debug(f"Found MaxSAT satisfiability: {maxsat_satisfiable}")
-                    satisfiable = maxsat_satisfiable
 
             # Extract solution if available
             if self.last_result.get("solution"):
@@ -477,44 +373,22 @@ class PySATModelManager(SolverManager):
                         if isinstance(last_solution_data, dict):
                             # Enhanced copy mechanism for all solution data
                             self._merge_solution_data(last_solution_data)
-                            
-                            # Check if this is a MaxSAT problem result
-                            if "maxsat_result" in last_solution_data:
-                                has_maxsat = True
-                                self.logger.debug("Found MaxSAT result in _LAST_SOLUTION debug output")
-                                
-                                # Check if the MaxSAT result indicates satisfiability
-                                if isinstance(last_solution_data["maxsat_result"], dict):
-                                    maxsat_result = last_solution_data["maxsat_result"]
-                                    if "satisfiable" in maxsat_result:
-                                        satisfiable = maxsat_result["satisfiable"]
-                                        self.logger.debug(f"MaxSAT result satisfiability: {satisfiable}")
-                                        
-                                        # Update our solution's satisfiability flag
-                                        self.last_solution["satisfiable"] = satisfiable
-                                        self.last_solution["status"] = "sat" if satisfiable else "unsat"
                     except json.JSONDecodeError as e:
-                        self.logger.error(f"Error parsing solution JSON: {str(e)}")
+                        self.logger.error(f"Error parsing solution JSON: {e!s}")
                         self.logger.debug(
                             f"Problematic JSON string: {last_solution_str[:100]}..."
                         )
 
                         # Attempt alternative parsing using ast.literal_eval which is more forgiving
-                        if self._try_alternative_parsing(last_solution_str):
-                            # If alternative parsing succeeded, check for MaxSAT data
-                            if "maxsat_result" in self.last_solution:
-                                has_maxsat = True
-                                self.logger.debug("Found MaxSAT result after alternative parsing")
-                        
+                        self._try_alternative_parsing(last_solution_str)
+
                         # Even with parsing error, we'll keep the solution data we have
                         self.last_solution["warning"] = (
-                            f"Solution parsing warning: {str(e)}"
+                            f"Solution parsing warning: {e!s}"
                         )
                 except Exception as e:
-                    self.logger.error(f"Error extracting solution: {str(e)}")
-                    self.last_solution["warning"] = (
-                        f"Solution extraction error: {str(e)}"
-                    )
+                    self.logger.error(f"Error extracting solution: {e!s}")
+                    self.last_solution["warning"] = f"Solution extraction error: {e!s}"
 
             # Add solve time to solution
             self.last_solution["solve_time"] = f"{self.last_solve_time:.6f} seconds"
@@ -525,61 +399,11 @@ class PySATModelManager(SolverManager):
                     f"Line {issue['line']}: {issue['issue']}" for issue in line_issues
                 ]
 
-            # Check if this is a MaxSAT problem - use the explicit marker if present
-            is_maxsat_problem = ("_is_maxsat_solution" in self.last_solution) or has_maxsat or "maxsat_result" in self.last_solution or "maxsat_data" in self.last_solution
-            
-            # Log the successful solve
-            self.logger.info(
-                f"Model solved: {bool(self.last_result.get('success'))}, satisfiable: {satisfiable}, MaxSAT problem: {is_maxsat_problem}"
+            # Standard message for SAT problems
+            message = "Model solved successfully" + (
+                " (satisfiable)" if satisfiable else " (unsatisfiable)"
             )
 
-            # Prepare final response
-            # Override satisfiability for MaxSAT solutions based on the solution data, not just the solver output
-            if is_maxsat_problem:
-                # Direct marker takes precedence - if we have an explicit MaxSAT marker
-                if "_is_maxsat_solution" in self.last_solution:
-                    self.logger.debug("Found explicit MaxSAT solution marker")
-                    # Check if the MaxSAT solution itself indicates satisfiability
-                    if self.last_solution.get("satisfiable") is not None:
-                        # Trust the value set in the solution
-                        satisfiable = self.last_solution.get("satisfiable")
-                        self.logger.debug(f"Using explicit satisfiability from marker: {satisfiable}")
-                
-                # Otherwise, check the MaxSAT result data specifically
-                elif "maxsat_result" in self.last_solution and isinstance(self.last_solution["maxsat_result"], dict):
-                    maxsat_data = self.last_solution["maxsat_result"]
-                    if "satisfiable" in maxsat_data:
-                        maxsat_satisfiable = maxsat_data["satisfiable"] 
-                        self.logger.debug(f"Found explicit satisfiability in MaxSAT result: {maxsat_satisfiable}")
-                        # Override the general satisfiability with the MaxSAT-specific one
-                        satisfiable = maxsat_satisfiable
-                
-                # For MaxSAT problems, we want a detailed message about the optimization
-                message = "Model solved successfully"
-                if satisfiable:
-                    message += " (MaxSAT solution found)" 
-                    
-                    # Add optimization details if available
-                    if "maxsat_result" in self.last_solution and isinstance(self.last_solution["maxsat_result"], dict):
-                        # Include cost/objective info in the message if available
-                        maxsat_data = self.last_solution["maxsat_result"]
-                        if "cost" in maxsat_data:
-                            message += f" with cost: {maxsat_data['cost']}"
-                        elif "objective" in maxsat_data:
-                            message += f" with objective: {maxsat_data['objective']}"
-                        
-                        # Add status details if available
-                        if "status" in maxsat_data:
-                            max_status = maxsat_data["status"]
-                            if max_status == "optimal":
-                                message += " (optimal solution)"
-                else:
-                    # For unsatisfiable MaxSAT, be more precise about the reason
-                    message += " (unsatisfiable MaxSAT problem - hard constraints cannot be satisfied)"
-            else:
-                # Standard message for regular SAT problems
-                message = "Model solved successfully" + (" (satisfiable)" if satisfiable else " (unsatisfiable)")
-            
             response = {
                 "message": message,
                 "success": True,
@@ -595,24 +419,11 @@ class PySATModelManager(SolverManager):
             else:
                 response["status"] = "unsat"
                 response["satisfiable"] = False  # Ensure this is explicitly set
-                
+
             # Override with solution-specific status if available
             if self.last_solution.get("status"):
                 response["status"] = self.last_solution["status"]
-                
-            # CRITICAL: For MaxSAT problems, ensure status and satisfiable are consistent
-            if is_maxsat_problem:
-                # For any MaxSAT solution that has values/results, consider it functionally satisfiable
-                if "values" in self.last_solution and self.last_solution["values"]:
-                    self.logger.debug("Found values in MaxSAT solution, marking as functionally satisfiable")
-                    # Override both status and satisfiable to ensure consistency
-                    response["status"] = "sat"
-                    response["satisfiable"] = True
-            
-            # For MaxSAT, include the maxsat_result in the response
-            if is_maxsat_problem and "maxsat_result" in self.last_solution:
-                response["maxsat_result"] = self.last_solution["maxsat_result"]
-                
+
             # Include values dictionary
             if self.last_solution.get("values"):
                 response["values"] = self.last_solution["values"]
@@ -625,12 +436,12 @@ class PySATModelManager(SolverManager):
 
         except Exception as e:
             # Log the error
-            self.logger.error(f"Error in solve_model: {str(e)}", exc_info=True)
+            self.logger.error(f"Error in solve_model: {e!s}", exc_info=True)
 
             # Return a structured error response
             return get_standardized_response(
                 success=False,
-                message=f"Error solving model: {str(e)}",
+                message=f"Error solving model: {e!s}",
                 error="Internal error",
             )
 
@@ -652,10 +463,10 @@ class PySATModelManager(SolverManager):
         # Fix common tuple formatting issues (convert Python tuples to JSON arrays)
         # Handle simple tuples with two numbers
         clean_str = re.sub(r"\((\d+),\s*(\d+)\)", r"[\1, \2]", clean_str)
-        
+
         # Handle tuples with three numbers (e.g., in cut_edges)
         clean_str = re.sub(r"\((\d+),\s*(\d+),\s*(\d+)\)", r"[\1, \2, \3]", clean_str)
-        
+
         # Handle nested tuples in lists
         clean_str = re.sub(r"\[\(", "[[", clean_str)
         clean_str = re.sub(r"\)\]", "]]", clean_str)
@@ -663,25 +474,10 @@ class PySATModelManager(SolverManager):
 
         # Remove trailing commas which are valid in Python but not in JSON
         clean_str = re.sub(r",\s*([}\]])", r"\1", clean_str)
-        
-        # Handle MaxSAT specific patterns
-        # Fix any stray double quotes that might be inside strings
-        # Avoid using look-behind/look-ahead which can cause regex errors
-        clean_str = clean_str.replace('""', '\\"')
-        
+
         # Replace NaN and Infinity with null (which is JSON compatible)
         clean_str = re.sub(r"NaN", "null", clean_str)
         clean_str = re.sub(r"Infinity", "null", clean_str)
-        
-        # Try to normalize any maxsat_data structure that might be causing issues
-        if "maxsat_data" in clean_str:
-            self.logger.debug("Found maxsat_data in solution, cleaning up structure")
-            
-            # Try to handle double quotes in maxsat_data fields
-            # This is tricky but helps with common extraction issues
-            clean_str = re.sub(r'(maxsat_data":\s*{"[^}]*})', 
-                              lambda m: m.group(1).replace('\\"', "'"), 
-                              clean_str)
 
         return clean_str
 
@@ -735,7 +531,7 @@ class PySATModelManager(SolverManager):
 
         Args:
             solution_str: The solution string that failed JSON parsing
-            
+
         Returns:
             Boolean indicating whether parsing succeeded
         """
@@ -752,7 +548,7 @@ class PySATModelManager(SolverManager):
                 self._merge_solution_data(solution_data)
                 return True
         except Exception as e:
-            self.logger.debug(f"Alternative parsing also failed: {str(e)}")
+            self.logger.debug(f"Alternative parsing also failed: {e!s}")
 
             # Even if both parsing methods fail, try to extract any useful data using regex
             if self._extract_data_with_regex(solution_str):
@@ -766,12 +562,12 @@ class PySATModelManager(SolverManager):
 
         Args:
             solution_str: The solution string that failed parsing
-            
+
         Returns:
             Boolean indicating whether any useful data was extracted
         """
         extracted_something = False
-        
+
         # Try to extract satisfiability
         sat_match = re.search(
             r"'satisfiable':\s*(true|false)", solution_str, re.IGNORECASE
@@ -783,37 +579,15 @@ class PySATModelManager(SolverManager):
             extracted_something = True
             self.logger.debug(f"Extracted satisfiability from regex: {is_sat}")
 
-        # Check for MaxSAT specific data
-        maxsat_match = re.search(r"'maxsat_result':", solution_str)
-        if maxsat_match:
-            self.logger.debug("Detected MaxSAT result through regex")
-            extracted_something = True
-            
-            # Try to extract cost or objective if available
-            cost_match = re.search(r"'cost':\s*(\d+)", solution_str)
-            if cost_match:
-                try:
-                    cost = int(cost_match.group(1))
-                    if "maxsat_result" not in self.last_solution:
-                        self.last_solution["maxsat_result"] = {}
-                    self.last_solution["maxsat_result"]["cost"] = cost
-                    self.logger.debug(f"Extracted MaxSAT cost: {cost}")
-                except ValueError:
-                    pass
-                
-            objective_match = re.search(r"'objective':\s*(-?\d+)", solution_str)
-            if objective_match:
-                try:
-                    objective = int(objective_match.group(1))
-                    if "maxsat_result" not in self.last_solution:
-                        self.last_solution["maxsat_result"] = {}
-                    self.last_solution["maxsat_result"]["objective"] = objective
-                    self.logger.debug(f"Extracted MaxSAT objective: {objective}")
-                except ValueError:
-                    pass
-
         # Try to extract lists like 'queens' or 'knights' positions
-        for list_type in ["queens", "knights", "board_representation", "set_s", "set_complement", "cut_edges"]:
+        for list_type in [
+            "queens",
+            "knights",
+            "board_representation",
+            "set_s",
+            "set_complement",
+            "cut_edges",
+        ]:
             list_match = re.search(
                 f"'{list_type}':\\s*(\\[.*?\\])", solution_str, re.DOTALL
             )
@@ -829,7 +603,7 @@ class PySATModelManager(SolverManager):
                     extracted_something = True
                 except Exception:
                     pass  # If this fails, we still continue with other extractions
-                    
+
         return extracted_something
 
     def _enhance_code_for_debugging(self, code_string: str) -> str:
@@ -855,7 +629,7 @@ class PySATModelManager(SolverManager):
         modified_lines = []
         lines = modified_code.split("\n")
 
-        for i, line in enumerate(lines):
+        for _, line in enumerate(lines):
             modified_lines.append(line)
 
             # Add debugging for if solver.solve():
@@ -911,7 +685,7 @@ class PySATModelManager(SolverManager):
 
         return "\n".join(modified_lines)
 
-    def get_solution(self) -> Dict[str, Any]:
+    def get_solution(self) -> dict[str, Any]:
         """
         Get the current solution.
 
@@ -927,7 +701,7 @@ class PySATModelManager(SolverManager):
             "solution": self.last_solution,
         }
 
-    def get_variable_value(self, variable_name: str) -> Dict[str, Any]:
+    def get_variable_value(self, variable_name: str) -> dict[str, Any]:
         """
         Get the value of a variable from the current solution.
 
@@ -969,7 +743,7 @@ class PySATModelManager(SolverManager):
             "value": values[variable_name],
         }
 
-    def get_solve_time(self) -> Dict[str, Any]:
+    def get_solve_time(self) -> dict[str, Any]:
         """
         Get the time taken for the last solve operation.
 
