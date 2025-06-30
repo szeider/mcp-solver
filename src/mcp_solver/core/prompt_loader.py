@@ -25,9 +25,9 @@ def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") 
         ValueError: If invalid mode or prompt type is provided
     """
     # Validate inputs
-    if mode not in ("mzn", "pysat", "z3", "maxsat"):
+    if mode not in ("mzn", "pysat", "z3", "maxsat", "asp"):
         raise ValueError(
-            f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3, maxsat"
+            f"Invalid mode: {mode}. Must be one of: mzn, pysat, z3, maxsat, asp"
         )
 
     if prompt_type not in ("instructions", "review"):
@@ -50,7 +50,7 @@ def load_prompt(mode: PromptMode, prompt_type: PromptType) -> str:
     Load a prompt file based on mode and type.
 
     Args:
-        mode: The solver mode ("mzn", "pysat", "z3", or "maxsat")
+        mode: The solver mode ("mzn", "pysat", "z3", "maxsat" or "asp")
         prompt_type: The type of prompt ("instructions" or "review")
 
     Returns:
