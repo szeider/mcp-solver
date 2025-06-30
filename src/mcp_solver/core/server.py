@@ -24,6 +24,7 @@ from .prompt_loader import load_prompt
 Z3_MODE = False
 PYSAT_MODE = False
 MAXSAT_MODE = False
+ASP_MODE = False
 
 try:
     version_str = version("mcp-solver")
@@ -70,6 +71,11 @@ async def serve() -> None:
 
         model_mgr = MaxSATModelManager()
         logging.getLogger(__name__).info("Using MaxSAT model manager")
+    elif ASP_MODE:
+        from ..asp.model_manager import ASPModelManager
+
+        model_mgr = ASPModelManager()
+        logging.getLogger(__name__).info("Using ASP model manager")
     else:
         from ..mzn.model_manager import MiniZincModelManager
 
@@ -130,6 +136,8 @@ async def serve() -> None:
                 mode_folder = "pysat"
             elif MAXSAT_MODE:
                 mode_folder = "maxsat"
+            elif ASP_MODE:
+                mode_folder = "asp"
             else:
                 mode_folder = "mzn"
 
