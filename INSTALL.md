@@ -129,7 +129,7 @@ python -m venv .venv
 ### Install dependencies
 
 ```bash
-uv pip install -e ."[all]"
+uv pip install -e ".[all]"
 ```
 
 This installs the MCP Solver in editable mode.
