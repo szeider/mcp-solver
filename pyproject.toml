@@ -18,6 +18,7 @@ dependencies = [
     "tomli>=2.2.1",
     "six>=1.17.0",
     "nest_asyncio>=1.6.0",
+    "clingo>=5.8.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +53,7 @@ dev = [
 ]
 
 [project.scripts]
+test-setup-asp = "mcp_solver.asp.test_setup:main"
 test-setup-mzn = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
