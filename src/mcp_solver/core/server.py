@@ -210,6 +210,7 @@ async def serve() -> None:
                         "z3": "Remove all items from the Z3 Python model, effectively resetting it.",
                         "pysat": "Remove all items from the PySAT Python model, effectively resetting it.",
                         "maxsat": "Remove all items from the MaxSAT optimization model, effectively resetting it.",
+                        "asp": "Remove all items from the ASP model, effectively resetting it.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -222,6 +223,7 @@ async def serve() -> None:
                         "z3": "Add new Python code to the Z3 model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                         "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                         "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "asp": "Add new ASP item to the model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -241,6 +243,7 @@ async def serve() -> None:
                         "z3": "Replace an existing item in the Z3 Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "pysat": "Replace an existing item in the PySAT Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "maxsat": "Replace an existing item in the MaxSAT optimization model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                        "asp": "Replace an existing item in the ASP model at a specified index with new content. Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -260,6 +263,7 @@ async def serve() -> None:
                         "z3": "Delete an item from the Z3 Python model at the specified index. Required parameter: 'index'.",
                         "pysat": "Delete an item from the PySAT Python model at the specified index. Required parameter: 'index'.",
                         "maxsat": "Delete an item from the MaxSAT optimization model at the specified index. Required parameter: 'index'.",
+                        "asp": "Delete an item from the ASP model at the specified index. Required parameter: 'index'.",
                     }
                 ),
                 inputSchema={
@@ -276,6 +280,7 @@ async def serve() -> None:
                         "z3": "Fetch the current content of the Z3 Python model, listing each item with its index.",
                         "pysat": "Fetch the current content of the PySAT Python model, listing each item with its index.",
                         "maxsat": "Fetch the current content of the MaxSAT optimization model, listing each item with its index.",
+                        "asp": "Fetch the current content of the ASP model, listing each item with its index.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -288,6 +293,7 @@ async def serve() -> None:
                         "z3": "Solve the current Z3 Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "pysat": "Solve the current PySAT Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "maxsat": "Solve the current MaxSAT optimization model with a timeout parameter. Required parameter: 'timeout'.",
+                        "asp": "Solve the current ASP model with a timeout parameter. Required parameter: 'timeout'.",
                     }
                 ),
                 inputSchema={
