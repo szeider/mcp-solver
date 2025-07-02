@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified Test Runner for MCP Solvers (MiniZinc, PySAT, Z3)
+Unified Test Runner for MCP Solvers (MiniZinc, PySAT, Z3, ASP)
 Runs problems through the appropriate test-client.
 """
 
@@ -37,6 +37,7 @@ from tests.test_config import (
     MZN_PROBLEMS_DIR,
     PYSAT_PROBLEMS_DIR,
     Z3_PROBLEMS_DIR,
+    ASP_PROBLEMS_DIR,
 )
 
 
@@ -257,6 +258,14 @@ SOLVER_CONFIGS = {
         "command_template": 'cd {mcp_client_dir} && uv run test-client --query {query_path} --server "uv run mcp-solver-maxsat"',
         "model_ext": ".py",
         "results_subdir": "maxsat",
+        "needs_server_arg": True,
+    },
+    "asp": {
+        "solver_mode": "asp",
+        "problems_dir": ASP_PROBLEMS_DIR,
+        "command_template": 'cd {mcp_client_dir} && uv run test-client --query {query_path} --server "uv run mcp-solver-asp"',
+        "model_ext": ".lp",
+        "results_subdir": "asp",
         "needs_server_arg": True,
     },
 }

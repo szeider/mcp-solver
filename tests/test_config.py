@@ -19,6 +19,7 @@ MZN_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "mzn")
 PYSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "pysat")
 Z3_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "z3")
 MAXSAT_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "maxsat")
+ASP_PROBLEMS_DIR = os.path.join(PROBLEMS_DIR, "asp")
 RESULTS_DIR = os.path.join(ROOT_DIR, "test_results")
 
 
