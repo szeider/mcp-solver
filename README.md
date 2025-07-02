@@ -166,6 +166,9 @@ uv run run-test maxsat --problem <path/to/problem.md>
 
 # Z3 mode
 uv run run-test z3 --problem <path/to/problem.md>
+
+# ASP mode
+uv run run-test asp --problem <path/to/problem.md>
 ```
 
 ------
