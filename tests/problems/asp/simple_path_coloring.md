@@ -1,7 +1,10 @@
 # ASP Example Problem: Simple Path Coloring
 
 ## Problem Description
-Color the nodes of a path with 3 nodes using 2 colors such that no adjacent nodes have the same color.
+Given three nodes labeled 1, 2, and 3, and two available colors (red and green), color each node so that:
+- Each node is assigned exactly one color (red or green).
+- No two adjacent nodes share the same color.
+- The nodes are connected in a path: node 1 is connected to node 2, and node 2 is connected to node 3.
 
 ## ASP Encoding
 ```
