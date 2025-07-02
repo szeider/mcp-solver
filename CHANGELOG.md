@@ -1,5 +1,10 @@
 # Changelog
 
+### [3.4.0] - 2024-07-02
+
+- **New Feature:** Full integration of Answer Set Programming (ASP) via clingo API
+- **New Feature:** Integration of Groq LLM provider for client tool calling and completions
+
 ### [3.3.0] - 2025-06-10
 
 - **New Feature:** Added MaxSAT as a 4th mode for weighted optimization problems using RC2 solver
@@ -16,7 +21,6 @@
 - **Improvement:** Updated client to use direct model codes (AT:claude-3-7-sonnet-20250219, etc.) for better clarity
 - **Update:** Enhanced documentation for model code formats in README.md and INSTALL.md
 - **Update:** Added support for LM Studio local models
-
 
 ---
 
