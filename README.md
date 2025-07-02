@@ -132,6 +132,23 @@ Z3 mode provides access to Z3 SMT (Satisfiability Modulo Theories) solving capab
 mcp-solver-z3
 ```
 
+### ASP Mode
+
+ASP (Answer Set Programming) mode provides integration with ASP solvers (e.g., Clingo) for declarative problem solving with logic programs. Features include:
+
+- Expressive logic programming for combinatorial and knowledge representation problems
+- Support for constraints, choice rules, aggregates, and optimization statements
+- Integration with the Clingo solver for efficient answer set computation
+- Access to answer sets and model inspection
+
+**Dependencies**: Requires the `clingo` package (`uv pip install -e ".[asp]"` or included in `[all]`)
+
+**Configuration**: To run in ASP mode, use:
+
+```
+mcp-solver-asp
+```
+
 ## MCP Test Client
 
 The MCP Solver includes an MCP client for development, experimentation, and diagnostic purposes, based on the *ReAct* agent framework. This client serves as an intermediary between an LLM and the MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions. 
