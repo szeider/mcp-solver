@@ -88,7 +88,7 @@ async def serve() -> None:
         Get the appropriate description based on the current mode.
 
         Args:
-            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn')
+            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn', 'asp')
                           or a string for a common description across all modes
 
         Returns:
@@ -103,8 +103,14 @@ async def serve() -> None:
             return descriptions["pysat"]
         elif MAXSAT_MODE and "maxsat" in descriptions:
             return descriptions["maxsat"]
+        elif ASP_MODE and "asp" in descriptions:
+            return descriptions["asp"]
         elif (
-            not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions
+            not Z3_MODE
+            and not PYSAT_MODE
+            and not MAXSAT_MODE
+            and not ASP_MODE
+            and "mzn" in descriptions
         ):
             return descriptions["mzn"]
         elif "default" in descriptions:
@@ -641,17 +647,19 @@ def main() -> int:
     parser.add_argument(
         "--maxsat", action="store_true", help="Use MaxSAT optimization solver"
     )
+    parser.add_argument("--asp", action="store_true", help="Use ASP solver")
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
     # Set global flags based on arguments
-    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE
+    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
     MAXSAT_MODE = args.maxsat
+    ASP_MODE = args.asp
 
     # Check for incompatible flags
-    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE]) > 1:
+    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE]) > 1:
         print("Error: Cannot use multiple solver mode flags at the same time")
         return 1
 
@@ -664,6 +672,8 @@ def main() -> int:
         logging.getLogger(__name__).info(
             "Server running with MaxSAT optimization solver"
         )
+    elif ASP_MODE:
+        logging.getLogger(__name__).info("Server running with ASP solver")
     else:
         logging.getLogger(__name__).info("Server running with MiniZinc solver")
 

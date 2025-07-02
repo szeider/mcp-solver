@@ -705,7 +705,7 @@ def main():
     parser.add_argument(
         "solver",
         choices=SOLVER_CONFIGS.keys(),
-        help="Specify the solver type to test (mzn, pysat, z3)",
+        help="Specify the solver type to test (mzn, pysat, z3, asp)",
     )
     parser.add_argument("--problem", help="Path to specific problem file (.md)")
     parser.add_argument(

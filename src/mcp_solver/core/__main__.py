@@ -58,6 +58,14 @@ def main_maxsat():
     sys.argv = [sys.argv[0], "--maxsat"]
     return server_main()
 
+def main_asp():
+    """Entry point for ASP mode"""
+    from .server import main as server_main
+
+    # Set command line arguments for ASP mode
+    sys.argv = [sys.argv[0], "--asp"]
+    return server_main()
+
 
 if __name__ == "__main__":
     try:
