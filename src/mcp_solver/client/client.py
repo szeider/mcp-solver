@@ -368,7 +368,7 @@ def parse_arguments():
         "--mc",
         type=str,
         help="Alternative way to specify model code. Same format as --model. "
-        "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google), LM (LM Studio). "
+        "Supported platforms: OR (OpenRouter), AT (Anthropic), OA (OpenAI), GO (Google), GQ (Groq), LM (LM Studio). "
         "For LM Studio use format 'LM:model@url'. Overrides --model if provided.",
     )
     parser.add_argument(

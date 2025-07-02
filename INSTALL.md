@@ -234,6 +234,7 @@ Where `XY` is a two-letter code representing the platform:
 - `OR`: OpenRouter
 - `GO`: Google (Gemini)
 - `LM`: LM Studio (local models)
+- `GR`: Groq
 
 Examples:
 ```
@@ -248,6 +249,7 @@ For providers other than Anthropic, you'll need to add the corresponding API key
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...
 OPENROUTER_API_KEY=sk-...
+GROQ_API_KEY=gsk_...
 # No API key needed for LM Studio
 ```
 
