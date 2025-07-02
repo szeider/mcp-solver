@@ -4,7 +4,7 @@ from typing import Literal
 
 
 # Type definitions for better type checking
-PromptMode = Literal["mzn", "pysat", "z3", "maxsat"]
+PromptMode = Literal["mzn", "pysat", "z3", "maxsat", "asp"]
 PromptType = Literal["instructions", "review"]
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ def get_prompt_path(mode: PromptMode, prompt_type: PromptType = "instructions") 
     Get the path to a prompt file based on mode and type, without loading its content.
 
     Args:
-        mode: The solver mode ("mzn", "pysat", "z3", or "maxsat")
+        mode: The solver mode ("mzn", "pysat", "z3", "maxsat", or "asp")
         prompt_type: The type of prompt ("instructions" or "review"), defaults to "instructions"
 
     Returns:
