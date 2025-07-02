@@ -165,7 +165,7 @@ uv run test-setup-client
 
 The client requires an **API key** from an LLM provider. For Anthropic (the default LLM is Claude Sonnet 3.7), set the `ANTHROPIC_API_KEY` environment variable. This can be set in your environment or included in a `.env` file in the project root.
 
-The client also supports other LLM providers including OpenAI, Google (Gemini), OpenRouter, and even local models via LM Studio. You can specify which model to use with the `--mc` command line flag. See [INSTALL.md](INSTALL.md) for details on model code formats.
+The client also supports other LLM providers including OpenAI, Google (Gemini), OpenRouter, Groq and even local models via LM Studio. You can specify which model to use with the `--mc` command line flag. See [INSTALL.md](INSTALL.md) for details on model code formats.
 
 ### Usage
 
