@@ -45,6 +45,7 @@ client = [
 ]
 asp = [
     "clingo>=5.8.0",
+    "dumbo-asp>=0.3.16",
 ]
 all = [
     "mcp-solver[mzn,z3,pysat,asp,client,dev]",

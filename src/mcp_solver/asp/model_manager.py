@@ -4,6 +4,8 @@
 from ..core.base_model_manager import BaseModelManager
 from datetime import timedelta
 import clingo
+# --- Integration: Import new error handling and solution modules ---
+from . import error_handling, solution
 
 class ModelError(Exception):
     """Custom exception for model-related errors"""
@@ -20,20 +22,46 @@ class ASPModelManager(BaseModelManager):
         self.last_solution = None
         self._last_raw_result = None
 
-    async def _validate_model(self, items: list[str]):
-        """Validates the full model by trying to ground it."""
+    async def _validate_model(self, items: list[str], validate_grounding: bool = True) -> tuple[str, clingo.Control | None]:
+        """
+        Validates the full model through syntax and optionally grounding checks.
+        
+        Args:
+            items: List of ASP code fragments to validate
+            validate_grounding: If True, also checks for grounding errors
+            
+        Returns:
+            Tuple of (list of error messages, Control object if grounding successful)
+            The Control object is only returned if validate_grounding is True and grounding succeeds
+        """
         asp_code = "\n".join(items)
         if not asp_code.strip():
-            return  # Empty model is valid
+            return "", None  # Empty model is valid
         
-        def logger(_,msg):
-            pass
+        # First check syntax using dumbo_asp
+        syntax_errors = error_handling.validate_asp_code(asp_code)
+        if syntax_errors:
+            return "\n".join(syntax_errors), None
+            
+        if not validate_grounding:
+            return "", None
+            
+        # Now check grounding if requested
+        messages = []
+        def logger(_, message):
+            messages.append(message)
+            
         try:
             ctl = clingo.Control(logger=logger)
             ctl.add("base", [], asp_code)
             ctl.ground([("base", [])])
-        except RuntimeError as e:
-            raise ModelError(f"ASP Model Error: {e}")
+        except Exception as e:
+            # If grounding fails, return the error messages
+            if messages:
+                return f"Grounding error:\n" + "\n".join(messages), None
+        if messages:
+            return f"Grounding error:\n" + "\n".join(messages), None
+        return "", ctl
 
     async def add_item(self, index: int, content: str) -> dict:
         """
@@ -61,10 +89,9 @@ class ASPModelManager(BaseModelManager):
         hypothetical_items = self.code_items[:]
         hypothetical_items.insert(index, content)
 
-        try:
-            await self._validate_model(hypothetical_items)
-        except ModelError as e:
-            return {"success": False, "error": f"Validation failed: {e}"}
+        validation_errors, _ = await self._validate_model(hypothetical_items)
+        if validation_errors:
+            return {"success": False, "error": f"Validation failed: {validation_errors}"}
 
         return await super().add_item(index, content)
 
@@ -93,10 +120,9 @@ class ASPModelManager(BaseModelManager):
         hypothetical_items = self.code_items[:]
         del hypothetical_items[index]
 
-        try:
-            await self._validate_model(hypothetical_items)
-        except ModelError as e:
-            return {"success": False, "error": f"Validation failed after deletion: {e}"}
+        validation_errors, _ = await self._validate_model(hypothetical_items)
+        if validation_errors:
+            return {"success": False, "error": f"Validation failed after deletion: {validation_errors}"}
 
         return await super().delete_item(index)
 
@@ -126,63 +152,54 @@ class ASPModelManager(BaseModelManager):
         hypothetical_items = self.code_items[:]
         hypothetical_items[index] = content
 
-        try:
-            await self._validate_model(hypothetical_items)
-        except ModelError as e:
-            return {"success": False, "error": f"Validation failed: {e}"}
+        validation_errors, _ = await self._validate_model(hypothetical_items)
+        if validation_errors:
+            return {"success": False, "error": f"Validation failed: {validation_errors}"}
             
         return await super().replace_item(index, content)
 
     async def solve_model(self, timeout: timedelta) -> dict:
         """
-        Solve the current ASP model using clingo.
+        Solve the current ASP model using clingo, with enhanced error handling and solution formatting.
         Args:
             timeout: Maximum time to spend on solving
         Returns:
-            A dictionary with the solving result and answer sets
+            A dictionary with the solving result and answer sets, or a structured error solution
         """
         if not self.code_items:
-            return {"success": False, "message": "No model items to solve", "error": "Empty model"}
+            error_sol = solution.export_solution(error_handling.ASPError("No model items to solve", context="Empty model"))
+            self.last_solution = error_sol
+            return error_sol
         
-        messages = []
-        def logger(_, message):
-            messages.append(message)
-
-        ctl = clingo.Control(logger=logger)
-        asp_code = "\n".join(self.code_items)
-        try:
-            ctl.add("base", [], asp_code)
-            ctl.ground([("base", [])])
-        except RuntimeError as e:
-            error_message = "\n".join(messages)
-            return {"success": False, "message": "Error grounding ASP program", "error": error_message or str(e)}
-
+        # Validate and get pre-grounded control object if successful
+        validation_errors, ctl = await self._validate_model(self.code_items)
+        if validation_errors:
+            err = error_handling.ASPError("Model validation failed", context=validation_errors)
+            error_sol = solution.export_solution(err)
+            self.last_solution = error_sol
+            return error_sol
+        
         answer_sets = []
-
-        def on_model(model):
-            # Get all atoms in the model
-            atoms = [str(atom) for atom in model.symbols(shown=True)]
-            answer_sets.append(atoms)
-
         try:
+            def on_model(model):
+                atoms = [str(atom) for atom in model.symbols(shown=True)]
+                answer_sets.append(atoms)
             with ctl.solve(on_model=on_model, async_=True) as handle:
                 handle.wait(timeout.total_seconds())
                 handle.cancel()
                 handle.get()
-
             stats = ctl.statistics
             self.last_solve_time = stats.get("summary", {}).get("times", {}).get("solve", 0.0)
-            self.last_solution = answer_sets
+            # --- Integration: Use solution.export_solution for standardized output ---
+            sol = solution.export_solution(answer_sets)
+            self.last_solution = sol
             self._last_raw_result = ctl
-
-            return {
-                "success": True,
-                "message": f"Solved ASP model. Found {len(answer_sets)} answer set(s).",
-                "solution": self.last_solution,
-                "solve_time": self.last_solve_time,
-            }
-        except RuntimeError as e:
-            return {"success": False, "message": "Error solving ASP program", "error": str(e)}
+            return sol
+        except Exception as e:
+            # --- Integration: Use solution.export_solution for error reporting ---
+            error_sol = solution.export_solution(e)
+            self.last_solution = error_sol
+            return error_sol
 
     def get_solution(self) -> dict:
         """
