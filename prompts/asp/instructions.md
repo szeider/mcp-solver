@@ -126,11 +126,10 @@ domain_color(green).
 domain_color(blue).
 
 % Item 2: Rules
-color(N,C) :- graph_node(N), domain_color(C), not not_color(N,C).
-not_color(N,C) :- edge(N,M), color(M,C), N != M.
+1 { color(N,C) : domain_color(C) } 1 :- graph_node(N).
 
 % Item 3: Integrity Constraints
-:- color(N,C1), color(N,C2), C1 != C2.
+:- edge(N,M), color(N,C), color(M,C).
 
 % Item 4: Optimization (optional)
 #minimize { 1,N,C : color(N,C) }.
@@ -170,11 +169,10 @@ domain_color(green).
 domain_color(blue).
 
 % Item 2: Rules
-color(N,C) :- graph_node(N), domain_color(C), not not_color(N,C).
-not_color(N,C) :- edge(N,M), color(M,C), N != M.
+1 { color(N,C) : domain_color(C) } 1 :- graph_node(N).
 
 % Item 3: Integrity Constraints
-:- color(N,C1), color(N,C2), C1 != C2.
+:- edge(N,M), color(N,C), color(M,C).
 
 % Item 4: Optimization (optional)
 #minimize { 1,N,C : color(N,C) }.
