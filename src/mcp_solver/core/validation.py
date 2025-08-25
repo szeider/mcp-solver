@@ -342,7 +342,6 @@ def get_standardized_response(
         # Log this with a stack trace to identify the source
         logger.error(
             f"CRITICAL INCONSISTENCY DETECTED: success=True with error='{error}'",
-            exc_info=True,
         )
 
         # Always override success to be False if there's an error

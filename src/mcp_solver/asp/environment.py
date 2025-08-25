@@ -1,2 +1,2 @@
 # environment.py
-# Handles ASP environment setup and clingo configuration 
+# Handles ASP environment setup and clingo configuration

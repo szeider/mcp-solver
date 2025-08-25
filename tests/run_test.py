@@ -31,13 +31,13 @@ from src.mcp_solver.core.prompt_loader import get_prompt_path
 
 # Import test configuration constants (excluding prompt files)
 from tests.test_config import (
+    ASP_PROBLEMS_DIR,
     DEFAULT_TIMEOUT,
     MAXSAT_PROBLEMS_DIR,
     MCP_CLIENT_DIR,
     MZN_PROBLEMS_DIR,
     PYSAT_PROBLEMS_DIR,
     Z3_PROBLEMS_DIR,
-    ASP_PROBLEMS_DIR,
 )
 
 

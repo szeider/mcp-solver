@@ -3,9 +3,9 @@ Basic templates for ASP (clingo).
 
 This module provides template functions for common ASP patterns.
 """
-from typing import List
 
-def facts(atoms: List[str]) -> str:
+
+def facts(atoms: list[str]) -> str:
     """
     Generate a string of ASP facts from a list of atoms.
 
@@ -18,7 +18,8 @@ def facts(atoms: List[str]) -> str:
     """
     return "\n".join([f"{atom}." for atom in atoms])
 
-def rule(head: str, body: List[str]) -> str:
+
+def rule(head: str, body: list[str]) -> str:
     """
     Generate a simple ASP rule.
     Args:
@@ -32,4 +33,4 @@ def rule(head: str, body: List[str]) -> str:
     if not body:
         return f"{head}."
     body_str = ", ".join(body)
-    return f"{head} :- {body_str}." 
+    return f"{head} :- {body_str}."

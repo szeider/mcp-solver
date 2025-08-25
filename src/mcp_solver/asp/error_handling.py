@@ -13,9 +13,11 @@ import traceback
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+
 # Try to import dumbo_asp Parser
 try:
     from dumbo_asp.primitives.parsers import Parser
+
     DUMBO_ASP_AVAILABLE = True
 except ImportError:
     DUMBO_ASP_AVAILABLE = False
@@ -35,9 +37,16 @@ EXCEPTION_MESSAGES = {
     },
 }
 
+
 class ASPError(Exception):
     """Custom exception class for enhanced ASP errors."""
-    def __init__(self, message: str, original_error: Exception | None = None, context: str | None = None):
+
+    def __init__(
+        self,
+        message: str,
+        original_error: Exception | None = None,
+        context: str | None = None,
+    ):
         self.original_error = original_error
         self.original_traceback = traceback.format_exc()
         enhanced_message = message
@@ -49,10 +58,12 @@ class ASPError(Exception):
             enhanced_message += f"\n\nOriginal error ({error_type}): {error_msg}"
         super().__init__(enhanced_message)
 
+
 def asp_error_handler(func: Callable[..., T]) -> Callable[..., T]:
     """
     Decorator to handle ASP exceptions with enhanced error messages.
     """
+
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> T:
         try:
@@ -72,9 +83,14 @@ def asp_error_handler(func: Callable[..., T]) -> Callable[..., T]:
             # Gather context information (could include code snippet, etc.)
             context = ""
             # Log the error with full traceback for debugging
-            logger.error(f"ASP error in {func.__name__}: {error_type}: {error_msg}", exc_info=True)
+            logger.error(
+                f"ASP error in {func.__name__}: {error_type}: {error_msg}",
+                exc_info=True,
+            )
             raise ASPError(friendly_message, original_error=e, context=context) from e
+
     return wrapper
+
 
 def validate_asp_code(asp_code: str) -> list[str]:
     """
@@ -90,7 +106,7 @@ def validate_asp_code(asp_code: str) -> list[str]:
             Parser.parse_program(asp_code)
         except Exception as e:
             # Handle different error types appropriately
-            if hasattr(e, 'llm_message'):
+            if hasattr(e, "llm_message"):
                 errors.append(e.llm_message)
             else:
                 errors.append(str(e))  # Use string representation of the error
@@ -99,6 +115,7 @@ def validate_asp_code(asp_code: str) -> list[str]:
         if asp_code.count("(") != asp_code.count(")"):
             errors.append("Unmatched parentheses in ASP code.")
     return errors
+
 
 def format_solution_error(error: Exception) -> dict[str, Any]:
     """

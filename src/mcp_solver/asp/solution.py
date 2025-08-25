@@ -7,7 +7,9 @@ and converting it to a standardized format.
 
 import logging
 from typing import Any
+
 from .error_handling import ASPError, format_solution_error
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,7 @@ RESERVED_KEYS = {
     "error_message",
     "warnings",
 }
+
 
 def export_solution(
     data: Any = None,
@@ -68,6 +71,7 @@ def export_solution(
         logger.error(f"Error in export_solution: {e!s}", exc_info=True)
         return error_solution
 
+
 def _process_input_data(
     data: Any,
     status: str | None = None,
@@ -104,6 +108,7 @@ def _process_input_data(
     solution_data["values"] = solution_data.get("values", {})
     return solution_data
 
+
 def _extract_values_from_answer_sets(solution_data: dict[str, Any]) -> dict[str, Any]:
     """
     Extract values from answer sets into a flat values dictionary.
@@ -116,4 +121,4 @@ def _extract_values_from_answer_sets(solution_data: dict[str, Any]) -> dict[str,
             if atom not in values:
                 values[atom] = True
     solution_data["values"] = values
-    return solution_data 
+    return solution_data
