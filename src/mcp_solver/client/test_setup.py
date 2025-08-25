@@ -144,7 +144,6 @@ class SetupTest:
             "langchain_openai",
             "langchain_anthropic",
             "langchain_google_genai",
-            "langchain_groq",
             "dotenv",
         ]
 

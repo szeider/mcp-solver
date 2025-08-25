@@ -16,7 +16,6 @@ import uuid
 
 from dotenv import load_dotenv
 from langchain.chat_models.base import BaseChatModel
-from langchain_groq import ChatGroq
 
 
 # Load environment variables from .env file
@@ -27,8 +26,8 @@ load_dotenv()
 class ModelInfo:
     """Information about a model parsed from the model code."""
 
-    platform: str  # OR, OA, AT, GO, LM, GQ
-    provider: str  # openai, anthropic, google, lmstudio, ollama, groq
+    platform: str  # OR, OA, AT, GO, LM
+    provider: str  # openai, anthropic, google, lmstudio, ollama
     model_name: str  # The actual model name
     params: dict[str, Any] = field(default_factory=dict)  # Additional parameters
 
@@ -50,7 +49,6 @@ class ModelInfo:
             "AT": "ANTHROPIC_API_KEY",
             "GO": "GOOGLE_API_KEY",
             "LM": "LMSTUDIO_API_KEY",  # Not actually required for LM Studio
-            "GQ": "GROQ_API_KEY",
         }
         return platform_to_key[self.platform]
 
@@ -78,7 +76,7 @@ class LLMFactory:
     def parse_model_code(model_code: str) -> ModelInfo:
         try:
             platform = model_code[:2]
-            if platform not in ["OR", "OA", "AT", "GO", "LM", "GQ"]:
+            if platform not in ["OR", "OA", "AT", "GO", "LM"]:
                 raise ValueError(f"Unsupported platform prefix: {platform}")
             remaining = model_code[3:]
 
@@ -153,8 +151,6 @@ class LLMFactory:
                     else "anthropic"
                     if platform == "AT"
                     else "google"
-                    if platform == "GO"
-                    else "groq"
                 )
                 # Handle reasoning_effort parameter in model code (format: OA:o3-mini:high)
                 if platform == "OA" and ":" in remaining:
@@ -247,12 +243,6 @@ class LLMFactory:
         elif model_info.platform == "GO":
             model = ChatGoogleGenerativeAI(
                 model=model_info.model_string, api_key=api_key, **kwargs
-            )
-        elif model_info.platform == "GQ":
-            model = ChatGroq(
-                model_name=model_info.model_string,
-                groq_api_key=api_key,
-                **kwargs,
             )
         elif model_info.platform == "LM":
             # For local models, use ChatOpenAI with the provided base_url
@@ -430,8 +420,6 @@ class LLMFactory:
             return ChatAnthropic, "Anthropic"
         elif model_info.platform == "GO":
             return ChatGoogleGenerativeAI, "Google Gemini"
-        elif model_info.platform == "GQ":
-            return ChatGroq, "Groq"
         elif model_info.platform == "LM":
             server_type = "LM Studio (local)"
             if hasattr(model_info, "url"):
@@ -503,11 +491,6 @@ class LLMFactory:
             elif model_info.platform == "GO":
                 model = ChatGoogleGenerativeAI(
                     model=model_info.model_string, api_key=os.environ.get(key_name)
-                )
-            elif model_info.platform == "GQ":
-                model = ChatGroq(
-                    model_name=model_info.model_string,
-                    groq_api_key=os.environ.get(key_name),
                 )
             elif model_info.platform == "LM":
                 # For local models, use the URL

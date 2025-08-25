@@ -3,7 +3,6 @@
 ### [3.4.0] - 2024-07-02
 
 - **New Feature:** Full integration of Answer Set Programming (ASP) via clingo API
-- **New Feature:** Integration of Groq LLM provider for client tool calling and completions
 
 ### [3.3.0] - 2025-06-10
 
