@@ -51,7 +51,7 @@ class ASPError(Exception):
         self.original_traceback = traceback.format_exc()
         enhanced_message = message
         if context:
-            enhanced_message += f"\n\Here are more error details:\n{context}"
+            enhanced_message += f"\nHere are more error details:\n{context}"
         if original_error:
             error_type = type(original_error).__name__
             error_msg = str(original_error)
