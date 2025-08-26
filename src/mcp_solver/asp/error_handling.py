@@ -125,6 +125,8 @@ def format_solution_error(error: Exception) -> dict[str, Any]:
     error_msg = str(error)
     return {
         "satisfiable": False,
+        "status": "error",
+        "success": True,  # Keep server connection logic satisfied
         "error_type": error_type,
         "error_message": error_msg,
     }

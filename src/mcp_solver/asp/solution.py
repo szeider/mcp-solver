@@ -62,6 +62,8 @@ def export_solution(
             return error_solution
         solution_data = _process_input_data(data, status, warnings)
         solution_data = _extract_values_from_answer_sets(solution_data)
+        # Ensure success flag for normal results to prevent server from overriding status
+        solution_data["success"] = True
         logger.debug(f"Setting _LAST_SOLUTION: {solution_data}")
         _LAST_SOLUTION = solution_data
         return solution_data
