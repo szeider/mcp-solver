@@ -129,7 +129,7 @@ python -m venv .venv
 ### Install dependencies
 
 ```bash
-uv pip install -e ."[all]"
+uv pip install -e ".[all]"
 ```
 
 This installs the MCP Solver in editable mode.
@@ -182,6 +182,7 @@ uv run test-setup-z3
 uv run test-setup-pysat
 uv run test-setup-maxsat
 uv run test-setup-client
+uv run test-setup-asp
 ```
 
 ## Step 6: Test Client Setup

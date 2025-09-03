@@ -7,7 +7,7 @@ packages = ["src/mcp_solver", "tests"]
 
 [project]
 name = "mcp-solver"
-version = "3.3.0"
+version = "3.4.0"
 description = "MCP server for Constraint, SAT, and SMT solving"
 authors = [
     {name = "Stefan Szeider", email = "stefan@szeider.net"},
@@ -42,8 +42,12 @@ client = [
     "rich>=13.9.4",
     "uuid>=1.30",
 ]
+asp = [
+    "clingo>=5.8.0",
+    "dumbo-asp>=0.3.16",
+]
 all = [
-    "mcp-solver[mzn,z3,pysat,client,dev]",
+    "mcp-solver[mzn,z3,pysat,asp,client,dev]",
 ]
 dev = [
     "coverage>=7.7.1",
@@ -52,6 +56,7 @@ dev = [
 ]
 
 [project.scripts]
+test-setup-asp = "mcp_solver.asp.test_setup:main"
 test-setup-mzn = "mcp_solver.mzn.test_setup:main"
 test-setup-z3 = "mcp_solver.z3.test_setup:main"
 test-setup-pysat = "mcp_solver.pysat.test_setup:main"
@@ -62,6 +67,7 @@ mcp-solver-mzn = "mcp_solver.core.__main__:main_mzn"
 mcp-solver-z3 = "mcp_solver.core.__main__:main_z3"
 mcp-solver-pysat = "mcp_solver.core.__main__:main_pysat"
 mcp-solver-maxsat = "mcp_solver.core.__main__:main_maxsat"
+mcp-solver-asp = "mcp_solver.core.__main__:main_asp"
 test-client = "mcp_solver.client.client:main_cli"
 run-test = "tests.run_test:main"
 

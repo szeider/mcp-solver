@@ -76,6 +76,7 @@ MODE_SERVER_ARGS = {
     "z3": ["run", "mcp-solver-z3"],
     "pysat": ["run", "mcp-solver-pysat"],
     "maxsat": ["run", "mcp-solver-maxsat"],
+    "asp": ["run", "mcp-solver-asp"],
 }
 
 # Global Rich Console instance with color support
@@ -353,7 +354,7 @@ def parse_arguments():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["mzn", "z3", "pysat", "maxsat"],
+        choices=["mzn", "z3", "pysat", "maxsat", "asp"],
         help="Solver mode to use (overrides automatic detection)",
     )
     parser.add_argument(
@@ -1101,6 +1102,8 @@ async def main():
             mode = "maxsat"
         elif "pysat" in server_cmd:
             mode = "pysat"
+        elif "asp" in server_cmd:
+            mode = "asp"
     else:
         # Default to MiniZinc if no mode or server specified
         mode = "mzn"

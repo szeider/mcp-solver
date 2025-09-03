@@ -62,6 +62,8 @@ class SetupTest:
             ("pysat", "review"),
             ("z3", "instructions"),
             ("z3", "review"),
+            ("asp", "instructions"),
+            ("asp", "review"),
         ]
 
         for mode, prompt_type in prompts_to_test:

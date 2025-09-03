@@ -24,6 +24,7 @@ from .prompt_loader import load_prompt
 Z3_MODE = False
 PYSAT_MODE = False
 MAXSAT_MODE = False
+ASP_MODE = False
 
 try:
     version_str = version("mcp-solver")
@@ -70,6 +71,11 @@ async def serve() -> None:
 
         model_mgr = MaxSATModelManager()
         logging.getLogger(__name__).info("Using MaxSAT model manager")
+    elif ASP_MODE:
+        from ..asp.model_manager import ASPModelManager
+
+        model_mgr = ASPModelManager()
+        logging.getLogger(__name__).info("Using ASP model manager")
     else:
         from ..mzn.model_manager import MiniZincModelManager
 
@@ -82,7 +88,7 @@ async def serve() -> None:
         Get the appropriate description based on the current mode.
 
         Args:
-            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn')
+            descriptions: A dictionary of descriptions keyed by mode ('z3', 'pysat', 'maxsat', 'mzn', 'asp')
                           or a string for a common description across all modes
 
         Returns:
@@ -97,8 +103,14 @@ async def serve() -> None:
             return descriptions["pysat"]
         elif MAXSAT_MODE and "maxsat" in descriptions:
             return descriptions["maxsat"]
+        elif ASP_MODE and "asp" in descriptions:
+            return descriptions["asp"]
         elif (
-            not Z3_MODE and not PYSAT_MODE and not MAXSAT_MODE and "mzn" in descriptions
+            not Z3_MODE
+            and not PYSAT_MODE
+            and not MAXSAT_MODE
+            and not ASP_MODE
+            and "mzn" in descriptions
         ):
             return descriptions["mzn"]
         elif "default" in descriptions:
@@ -130,6 +142,8 @@ async def serve() -> None:
                 mode_folder = "pysat"
             elif MAXSAT_MODE:
                 mode_folder = "maxsat"
+            elif ASP_MODE:
+                mode_folder = "asp"
             else:
                 mode_folder = "mzn"
 
@@ -202,6 +216,7 @@ async def serve() -> None:
                         "z3": "Remove all items from the Z3 Python model, effectively resetting it.",
                         "pysat": "Remove all items from the PySAT Python model, effectively resetting it.",
                         "maxsat": "Remove all items from the MaxSAT optimization model, effectively resetting it.",
+                        "asp": "Remove all items from the ASP model, effectively resetting it.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -214,6 +229,7 @@ async def serve() -> None:
                         "z3": "Add new Python code to the Z3 model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                         "pysat": "Add new Python code to the PySAT model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                         "maxsat": "Add new Python code to the MaxSAT optimization model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
+                        "asp": "Add new ASP item to the model at a specific index (indices start at 0). Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -233,6 +249,7 @@ async def serve() -> None:
                         "z3": "Replace an existing item in the Z3 Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "pysat": "Replace an existing item in the PySAT Python model at a specified index with new content. Required parameters: 'index' and 'content'.",
                         "maxsat": "Replace an existing item in the MaxSAT optimization model at a specified index with new content. Required parameters: 'index' and 'content'.",
+                        "asp": "Replace an existing item in the ASP model at a specified index with new content. Required parameters: 'index' and 'content'.",
                     }
                 ),
                 inputSchema={
@@ -252,6 +269,7 @@ async def serve() -> None:
                         "z3": "Delete an item from the Z3 Python model at the specified index. Required parameter: 'index'.",
                         "pysat": "Delete an item from the PySAT Python model at the specified index. Required parameter: 'index'.",
                         "maxsat": "Delete an item from the MaxSAT optimization model at the specified index. Required parameter: 'index'.",
+                        "asp": "Delete an item from the ASP model at the specified index. Required parameter: 'index'.",
                     }
                 ),
                 inputSchema={
@@ -268,6 +286,7 @@ async def serve() -> None:
                         "z3": "Fetch the current content of the Z3 Python model, listing each item with its index.",
                         "pysat": "Fetch the current content of the PySAT Python model, listing each item with its index.",
                         "maxsat": "Fetch the current content of the MaxSAT optimization model, listing each item with its index.",
+                        "asp": "Fetch the current content of the ASP model, listing each item with its index.",
                     }
                 ),
                 inputSchema={"type": "object", "properties": {}},
@@ -280,6 +299,7 @@ async def serve() -> None:
                         "z3": "Solve the current Z3 Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "pysat": "Solve the current PySAT Python model with a timeout parameter. Required parameter: 'timeout'.",
                         "maxsat": "Solve the current MaxSAT optimization model with a timeout parameter. Required parameter: 'timeout'.",
+                        "asp": "Solve the current ASP model with a timeout parameter. Required parameter: 'timeout'.",
                     }
                 ),
                 inputSchema={
@@ -627,17 +647,19 @@ def main() -> int:
     parser.add_argument(
         "--maxsat", action="store_true", help="Use MaxSAT optimization solver"
     )
+    parser.add_argument("--asp", action="store_true", help="Use ASP solver")
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
     # Set global flags based on arguments
-    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE
+    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
     MAXSAT_MODE = args.maxsat
+    ASP_MODE = args.asp
 
     # Check for incompatible flags
-    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE]) > 1:
+    if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE]) > 1:
         print("Error: Cannot use multiple solver mode flags at the same time")
         return 1
 
@@ -650,6 +672,8 @@ def main() -> int:
         logging.getLogger(__name__).info(
             "Server running with MaxSAT optimization solver"
         )
+    elif ASP_MODE:
+        logging.getLogger(__name__).info("Server running with ASP solver")
     else:
         logging.getLogger(__name__).info("Server running with MiniZinc solver")
 
