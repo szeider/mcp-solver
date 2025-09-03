@@ -43,6 +43,11 @@ The model items behave like a standard programming list with these exact semanti
 
 **Important**: All indices are 0-based. The first item is at index 0, the second at index 1, etc.
 
+**Critical: Index stability on errors**
+
+- Indices only change when an operation succeeds. If `add_item`, `replace_item`, or `delete_item` returns an error, the model is unchanged and item indices remain exactly the same.
+- Specifically for `add_item`: do not advance your intended insertion index after a failed call. Try again with the same index once the cause of the error is fixed.
+
 ## Tool Input and Output Details
 
 1. **clear_model**
@@ -54,6 +59,7 @@ The model items behave like a standard programming list with these exact semanti
      - `index` (integer): Position to insert the new ASP statement.
      - `content` (string): The complete ASP statement to add.
    - **Output:** Confirmation and the current (truncated) model.
+   - **Index behavior on error:** If the call fails (e.g., invalid index, malformed content), the model is not modified and no indices shift. Do not increment your next `index` based on a failed attempt.
 
 3. **replace_item**
    - **Input:**
@@ -177,6 +183,66 @@ domain_color(blue).
 % Item 4: Optimization (optional)
 #minimize { 1,N,C : color(N,C) }.
 ```
+
+## Advanced ASP Constructs and Patterns
+
+### Defaults and Exceptions (Negation-as-Failure)
+
+- Encode defaults using `not` and override with explicit exceptions.
+- Pattern:
+```asp
+flies(X) :- bird(X), not abnormal(X).
+abnormal(X) :- penguin(X).
+:- penguin(X), flies(X).
+```
+- Tips:
+  - Place taxonomy rules first (e.g., `bird(X) :- penguin(X).`).
+  - Keep defaults separate from integrity constraints that enforce exceptions.
+
+### Negation-as-Failure for Eligibility Policies
+
+- Derive permissive defaults, then constrain with explicit facts.
+```asp
+eligible(C) :- customer(C), not excluded(C).
+eligible(C) :- vip(C), not blacklisted(C).
+excluded(C) :- blacklisted(C).
+:- eligible(C), excluded(C).
+```
+- Use integrity constraints to prevent contradictory conclusions.
+
+### Recursive Aggregates (#sum)
+
+- Aggregate over a recursively defined relation to compute thresholds.
+```asp
+controls(X,X) :- company(X).
+contrib(A,B,A,P) :- owns(A,B,P).
+contrib(A,B,C,P) :- controls(A,C), owns(C,B,P), A != C.
+sum(A,B,S) :- S = #sum { P,C : contrib(A,B,C,P) }.
+controls(A,B) :- sum(A,B,S), S > 50, A != B.
+```
+- Use helper predicates like `contrib/4` to keep aggregates readable.
+
+### Weak Constraints (Optimization with :~)
+
+- Prefer solutions that minimize penalties using weak constraints.
+```asp
+1 { assign(T,S) : slot(S) } 1 :- task(T).
+:- assign(T,S), conflict(T,S).
+:~ prefer(T,S,W), not assign(T,S). [W@1,T,S]
+```
+- Alternatively, use `#minimize` with weighted literals.
+- Keep all hard constraints as `:- ...` and only preferences in weak constraints.
+
+### Modeling UNSAT for Testing
+
+- To intentionally create UNSAT, introduce contradictory defaults with integrity constraints.
+```asp
+p :- not not_p.
+not_p :- not p.
+:- p.
+:- not p.
+```
+- Useful for verifying solver correctly reports `UNSAT`.
 
 ## Final Notes
 
