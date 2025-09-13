@@ -1,5 +1,13 @@
 # Changelog
 
+### [3.4.0] - 2025-09-13
+
+- **New Feature:** Complete Answer Set Programming (ASP) mode implementation with Clingo solver (contributed by Luis Angel Rodriguez Reiners)
+  - Full ASP syntax support including facts, rules, constraints, and choice rules
+  - Support for optimization statements (#maximize, #minimize) and weak constraints
+  - Enhanced error handling with detailed validation messages
+  - Six comprehensive test problems demonstrating ASP capabilities
+
 ### [3.3.0] - 2025-06-10
 
 - **New Feature:** Added MaxSAT as a 4th mode for weighted optimization problems using RC2 solver
@@ -16,7 +24,6 @@
 - **Improvement:** Updated client to use direct model codes (AT:claude-3-7-sonnet-20250219, etc.) for better clarity
 - **Update:** Enhanced documentation for model code formats in README.md and INSTALL.md
 - **Update:** Added support for LM Studio local models
-
 
 ---
 

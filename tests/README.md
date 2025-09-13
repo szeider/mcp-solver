@@ -18,6 +18,9 @@ uv run run-test maxsat
 
 # Z3 test - Cryptarithmetic puzzle
 uv run run-test z3 
+
+# ASP test
+uv run run-test asp
 ```
 
 ## Test Structure
@@ -39,9 +42,12 @@ uv run run-test z3
 │   │   │   └── sudoku-16x16.md    # 16x16 Sudoku problem
 │   │   ├── maxsat/                # MaxSAT problem definitions
 │   │   │   └── test.md            # Default test problem
-│   │   └── z3/                    # Z3 problem definitions
-│   │       ├── bounded_sum.md     # Bounded sum problem
-│   │       └── cryptarithmetic.md # Cryptarithmetic problem
+│   │   ├── z3/                    # Z3 problem definitions
+│   │   │   ├── bounded_sum.md     # Bounded sum problem
+│   │   │   └── cryptarithmetic.md # Cryptarithmetic problem
+│   │   └── asp/                   # ASP problem definitions
+│   │       ├── test.md            # Default test problem
+│   │       └── birds_fly.md       # Classic birds flying problem
 │   └── results/                   # Directory for test results (optional)
 ```
 
@@ -55,6 +61,7 @@ uv run run-test mzn    # Run MiniZinc test.md by default if present, otherwise a
 uv run run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
 uv run run-test maxsat # Run MaxSAT test.md by default if present, otherwise all MaxSAT tests
 uv run run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
+uv run run-test asp    # Run ASP test.md by default if present, otherwise all ASP tests
 ```
 
 ### Running a Specific Problem
@@ -65,6 +72,7 @@ uv run run-test mzn --problem tests/problems/mzn/nqueens.md
 uv run run-test pysat --problem tests/problems/pysat/graph_coloring.md
 uv run run-test maxsat --problem tests/problems/maxsat/test.md
 uv run run-test z3 --problem tests/problems/z3/cryptarithmetic.md
+uv run run-test asp --problem tests/problems/asp/birds_fly.md
 ```
 
 Note: If no problem is specified, the system will look for a `test.md` file in the respective solver's problems directory and run that as a default test.
@@ -96,6 +104,14 @@ Note: If no problem is specified, the system will look for a `test.md` file in t
 - `cryptarithmetic.md` - Cryptarithmetic puzzle (SEND+MORE=MONEY)
 - `processor_verification.md` - Processor behavior verification
 - `sos_induction.md` - Sum-of-squares induction problem
+- `test.md` - Default test problem
+
+#### ASP Problems:
+- `birds_fly.md` - Classic birds flying problem with default reasoning
+- `company_controls.md` - Transitive company control relationships
+- `package_status_unsat.md` - Unsatisfiable package status paradox
+- `party_invitation.md` - Party invitation logic with choice rules
+- `shift_assignment.md` - Employee shift optimization problem
 - `test.md` - Default test problem
 
 ### Test Options
@@ -131,6 +147,7 @@ If you see a warning about missing prompt files, check that the instruction prom
 - PySAT: `instructions_prompt_pysat.md`
 - MaxSAT: `instructions_prompt_maxsat.md`
 - Z3: `instructions_prompt_z3.md`
+- ASP: `instructions_prompt_asp.md`
 
 ### PySAT and MaxSAT Environments
 
@@ -145,6 +162,15 @@ The MaxSAT environment additionally includes:
 - MaxSAT solver: `pysat.examples.rc2.RC2`
 - Weighted CNF formulas: `pysat.formula.WCNF`
 
+### ASP Environment
+
+The ASP execution environment uses Clingo and supports:
+- Facts, rules, constraints, and choice rules
+- Optimization statements: `#maximize`, `#minimize`
+- Weak constraints for soft optimization
+- Aggregates and conditional literals
+- Default reasoning with negation-as-failure
+
 If you add new helper functions, make sure to include them in:
 - `restricted_globals` dictionary in `environment.py`
 - The processed code template in `execute_pysat_code`
@@ -156,5 +182,7 @@ If you add new helper functions, make sure to include them in:
 1. Create a Markdown file in the appropriate problem directory under `tests/problems/`:
    - MiniZinc: `tests/problems/mzn/`
    - PySAT: `tests/problems/pysat/`
+   - MaxSAT: `tests/problems/maxsat/`
    - Z3: `tests/problems/z3/`
+   - ASP: `tests/problems/asp/`
 2. Run the test with the `uv run run-test` command 

@@ -4,24 +4,25 @@
 
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 
-A Model Context Protocol (MCP) server that exposes SAT, SMT and constraint solving capabilities to Large Language Models.
+A Model Context Protocol (MCP) server that exposes constraint solving, SAT, SMT, and ASP capabilities to Large Language Models.
 
 ------
 
 ## Overview
 
-The *MCP Solver* integrates SAT, SMT and Constraint Solving with LLMs through the Model Context Protocol, enabling AI models to interactively create, edit, and solve:
+The *MCP Solver* integrates constraint solving, SAT, SMT, and ASP with LLMs through the Model Context Protocol, enabling AI models to interactively create, edit, and solve:
 
 - Constraint models in [MiniZinc](https://www.minizinc.org/)
 - SAT models in [PySAT](https://pysathq.github.io/)
 - MaxSAT optimization problems in [PySAT](https://pysathq.github.io/)
 - SMT formulas in [Z3 Python](https://ericpony.github.io/z3py-tutorial/guide-examples.htm)
+- Answer Set Programs in [Clingo](https://potassco.org/clingo/)
 
-For a detailed description of the *MCP Solver's* system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["MCP-Solver: Integrating Language Models with Constraint Programming Systems"](https://arxiv.org/abs/2501.00539), arXiv:2501.00539, 2024.
+For a detailed description of the *MCP Solver's* system architecture and theoretical foundations, see the accompanying research paper: Stefan Szeider, ["Bridging Language Models and Symbolic Solvers via the Model Context Protocol"](https://doi.org/10.4230/LIPIcs.SAT.2025.30), SAT 2025.
 
 ## Available Tools
 
-In the following, *item* refers to some part of the (MinZinc/Pysat/Z3) code, and *model* to the encoding. 
+In the following, *item* refers to some part of the (MiniZinc/PySAT/Z3/ASP) code, and *model* to the encoding. 
 
 | Tool Name      | Description                                   |
 | -------------- | --------------------------------------------- |
@@ -62,7 +63,7 @@ uv pip install -e ".[all]"  # Install all solvers
 
 ## Available Modes / Solving Backends
 
-The MCP Solver provides four distinct operational modes, each integrating with a different constraint solving backend. Each mode requires specific dependencies and offers unique capabilities for addressing different classes of problems.
+The MCP Solver provides five distinct operational modes, each integrating with a different constraint solving backend. Each mode requires specific dependencies and offers unique capabilities for addressing different classes of problems.
 
 ### MiniZinc Mode
 
@@ -132,6 +133,23 @@ Z3 mode provides access to Z3 SMT (Satisfiability Modulo Theories) solving capab
 mcp-solver-z3
 ```
 
+### ASP Mode
+
+ASP (Answer Set Programming) mode provides integration with ASP solvers (e.g., Clingo) for declarative problem solving with logic programs. Features include:
+
+- Expressive logic programming for combinatorial and knowledge representation problems
+- Support for constraints, choice rules, aggregates, and optimization statements
+- Integration with the Clingo solver for efficient answer set computation
+- Access to answer sets and model inspection
+
+**Dependencies**: Requires the `clingo` package (`uv pip install -e ".[asp]"` or included in `[all]`)
+
+**Configuration**: To run in ASP mode, use:
+
+```
+mcp-solver-asp
+```
+
 ## MCP Test Client
 
 The MCP Solver includes an MCP client for development, experimentation, and diagnostic purposes, based on the *ReAct* agent framework. This client serves as an intermediary between an LLM and the MCP server, facilitating the translation of natural language problem statements into formal constraint programming solutions. 
@@ -148,7 +166,7 @@ uv run test-setup-client
 
 The client requires an **API key** from an LLM provider. For Anthropic (the default LLM is Claude Sonnet 3.7), set the `ANTHROPIC_API_KEY` environment variable. This can be set in your environment or included in a `.env` file in the project root.
 
-The client also supports other LLM providers including OpenAI, Google (Gemini), OpenRouter, and even local models via LM Studio. You can specify which model to use with the `--mc` command line flag. See [INSTALL.md](INSTALL.md) for details on model code formats.
+The client also supports other LLM providers including OpenAI, Google (Gemini), OpenRouter and even local models via LM Studio. You can specify which model to use with the `--mc` command line flag. See [INSTALL.md](INSTALL.md) for details on model code formats.
 
 ### Usage
 
@@ -166,6 +184,9 @@ uv run run-test maxsat --problem <path/to/problem.md>
 
 # Z3 mode
 uv run run-test z3 --problem <path/to/problem.md>
+
+# ASP mode
+uv run run-test asp --problem <path/to/problem.md>
 ```
 
 ------

@@ -12,7 +12,7 @@ Other versions may also work, as long as the required tools (Python 3.11+, pipx,
 
 ---
 
-## Step 1: Install Python 3.13+
+## Step 1: Install Python 3.11+
 
 ### macOS (via Homebrew)
 
@@ -106,7 +106,7 @@ Restart your shell if needed and ensure `uv` is in your PATH.
 ```bash
 mkdir -p ~/projects/mcp-solver
 cd ~/projects/mcp-solver
-git clone --branch z3 https://github.com/szeider/mcp-solver.git .
+git clone https://github.com/szeider/mcp-solver.git .
 ```
 
 ### Create and activate virtual environment
@@ -129,7 +129,7 @@ python -m venv .venv
 ### Install dependencies
 
 ```bash
-uv pip install -e ."[all]"
+uv pip install -e ".[all]"
 ```
 
 This installs the MCP Solver in editable mode.
@@ -182,6 +182,7 @@ uv run test-setup-z3
 uv run test-setup-pysat
 uv run test-setup-maxsat
 uv run test-setup-client
+uv run test-setup-asp
 ```
 
 ## Step 6: Test Client Setup
@@ -261,16 +262,19 @@ You can now run a problem description
 
 ```bash
 # MiniZinc mode
-uv run test-client --query <query_file>.md
+uv run run-test mzn --problem <path/to/problem.md>
 
 # PySAT mode
-uv run test-client-pysat --query <query_file>.md
+uv run run-test pysat --problem <path/to/problem.md>
 
 # MaxSAT mode
-uv run test-client-maxsat --query <query_file>.md
+uv run run-test maxsat --problem <path/to/problem.md>
 
 # Z3 mode
-uv run test-client-z3 --query <query_file>.md
+uv run run-test z3 --problem <path/to/problem.md>
+
+# ASP mode
+uv run run-test asp --problem <path/to/problem.md>
 ```
 
 
@@ -311,7 +315,7 @@ xdg-settings set default-web-browser google-chrome.desktop # optionally
 
 ### Configure `claude_desktop_config.json`
 
-In the examples below, replace "mcp-solver-mzn" with "mcp-solver-pysat", "mcp-solver-maxsat", or "mcp-solver-z3" depending on the mode you want to run the MCP Solver in.
+In the examples below, replace "mcp-solver-mzn" with "mcp-solver-pysat", "mcp-solver-maxsat", "mcp-solver-z3", or "mcp-solver-asp" depending on the mode you want to run the MCP Solver in.
 
 #### macOS
 

@@ -1,0 +1,1 @@
+A package has been marked both as lost and delivered. A package is considered lost if it is not delivered. A package is considered delivered if it is not lost. Consider that a package cannot be lost and delivered at the same time.
