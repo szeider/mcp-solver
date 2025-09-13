@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/szeider-mcp-solver-badge.png)](https://mseep.ai/app/szeider-mcp-solver)
+
 ------
 
 # MCP Solver
