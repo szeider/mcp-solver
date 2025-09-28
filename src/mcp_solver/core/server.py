@@ -20,11 +20,13 @@ from .constants import (
 from .prompt_loader import load_prompt
 
 
+
 # Global flags for mode selection
 Z3_MODE = False
 PYSAT_MODE = False
 MAXSAT_MODE = False
 ASP_MODE = False
+SOLVER_NAME = "gecode"
 
 try:
     version_str = version("mcp-solver")
@@ -58,29 +60,25 @@ async def serve() -> None:
     # Initialize the appropriate model manager based on mode
     if Z3_MODE:
         from ..z3.model_manager import Z3ModelManager
-
         model_mgr = Z3ModelManager()
         logging.getLogger(__name__).info("Using Z3 model manager")
     elif PYSAT_MODE:
         from ..pysat.model_manager import PySATModelManager
-
         model_mgr = PySATModelManager()
         logging.getLogger(__name__).info("Using PySAT model manager")
     elif MAXSAT_MODE:
         from ..maxsat.model_manager import MaxSATModelManager
-
         model_mgr = MaxSATModelManager()
         logging.getLogger(__name__).info("Using MaxSAT model manager")
     elif ASP_MODE:
         from ..asp.model_manager import ASPModelManager
-
         model_mgr = ASPModelManager()
         logging.getLogger(__name__).info("Using ASP model manager")
     else:
         from ..mzn.model_manager import MiniZincModelManager
-
-        model_mgr = MiniZincModelManager()
-        logging.getLogger(__name__).info("Using MiniZinc model manager")
+        global SOLVER_NAME
+        model_mgr = MiniZincModelManager(solver_name=SOLVER_NAME)
+        logging.getLogger(__name__).info(f"Using MiniZinc model manager (solver: {SOLVER_NAME})")
 
     # Helper function to get mode-specific descriptions
     def get_description(descriptions: dict) -> str:
@@ -648,15 +646,17 @@ def main() -> int:
         "--maxsat", action="store_true", help="Use MaxSAT optimization solver"
     )
     parser.add_argument("--asp", action="store_true", help="Use ASP solver")
+    parser.add_argument("--solver-name", type=str, default="gecode", help="MiniZinc solver name (default: gecode)")
     parser.add_argument("--port", type=int, help="Port to listen on (debug)")
     args = parser.parse_args()
 
     # Set global flags based on arguments
-    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE
+    global Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE, SOLVER_NAME
     Z3_MODE = args.z3
     PYSAT_MODE = args.pysat
     MAXSAT_MODE = args.maxsat
     ASP_MODE = args.asp
+    SOLVER_NAME = args.solver_name
 
     # Check for incompatible flags
     if sum([Z3_MODE, PYSAT_MODE, MAXSAT_MODE, ASP_MODE]) > 1:
