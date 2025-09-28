@@ -31,7 +31,7 @@ class ModelError(Exception):
 
 
 class MiniZincModelManager(BaseModelManager):
-    def __init__(self, solver_name: str = "chuffed"):
+    def __init__(self, solver_name: str = "gecode"):
         super().__init__()
         self.current_solution: Any | None = None
         self.solver = Solver.lookup(solver_name)
