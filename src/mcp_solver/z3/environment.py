@@ -70,12 +70,31 @@ def time_limit(seconds: float):
     """
     Context manager for limiting execution time of code blocks.
 
+    On Unix: uses SIGALRM for hard interruption — interrupts any Python op.
+    On Windows: SIGALRM is unavailable. Skip the signal-based timeout and
+    rely on the solver's own internal timeout — Z3 accepts
+    solver.set("timeout", ms) or opt.set("timeout", ms) and will halt
+    cleanly inside the solve call. The outer wrapper would only matter
+    for non-solver code that runs longer than expected; on Windows
+    that's an accepted tradeoff for cross-platform usability.
+
+    Patched 2026-05-19 for Windows compatibility. Upstream issue to file:
+    https://github.com/szeider/mcp-solver
+
     Args:
         seconds: Maximum execution time in seconds
 
     Raises:
-        TimeoutException: If execution time exceeds the limit
+        TimeoutException: If execution time exceeds the limit (Unix only)
     """
+
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "ITIMER_REAL"):
+        # Windows path — no-op the outer timeout, trust the solver.
+        try:
+            yield
+        finally:
+            pass
+        return
 
     def signal_handler(signum, frame):
         raise TimeoutException(f"Execution timed out after {seconds} seconds")

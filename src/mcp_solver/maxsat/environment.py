@@ -69,12 +69,25 @@ def time_limit(seconds: float):
     """
     Context manager to limit execution time of a code block.
 
+    On Unix: uses SIGALRM for hard interruption.
+    On Windows: SIGALRM is unavailable. The outer timeout becomes a no-op;
+    RC2 / MaxSAT solvers expose their own internal timeout which should
+    be used in user code.
+
     Args:
         seconds: Maximum execution time in seconds
 
     Raises:
-        TimeoutException: If execution time exceeds the limit
+        TimeoutException: If execution time exceeds the limit (Unix only)
     """
+
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "ITIMER_REAL"):
+        # Windows path — no SIGALRM. Trust the solver's internal timeout.
+        try:
+            yield
+        finally:
+            pass
+        return
 
     def signal_handler(signum, frame):
         raise TimeoutException(f"Execution timed out after {seconds} seconds")
