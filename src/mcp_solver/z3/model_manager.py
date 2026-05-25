@@ -9,9 +9,6 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-# Import z3 for status constant comparison
-import z3
-
 from ..core.base_model_manager import BaseModelManager
 from ..core.constants import MAX_SOLVE_TIMEOUT, MIN_SOLVE_TIMEOUT
 from ..core.validation import (
@@ -215,46 +212,6 @@ class Z3ModelManager(BaseModelManager):
             # Get full code using parent's method
             combined_code = self._get_full_code()
 
-            # Add wrapper for export_solution to capture variables and solver
-            combined_code = (
-                """
-# Import the export_solution function if not already imported
-try:
-    from mcp_solver.z3 import export_solution as original_export_solution
-except ImportError:
-    # Use the existing export_solution if import fails
-    original_export_solution = export_solution
-
-def wrapped_export_solution(solver=None, variables=None, objective=None, satisfiable=None, 
-                           solution_dict=None, is_property_verification=False, property_verified=None):
-    # Store variables and solver in global variables for later access
-    import sys
-    module = sys.modules[__name__]
-    if not hasattr(module, '_z3_registry'):
-        module._z3_registry = {}
-    
-    # Store solver and variables in registry if provided
-    if variables is not None:
-        module._z3_registry["variables"] = variables
-    if solver is not None:
-        module._z3_registry["solver"] = solver
-    
-    # Pass through all parameters to the original function
-    return original_export_solution(
-        solver=solver, 
-        variables=variables, 
-        objective=objective,
-        satisfiable=satisfiable,
-        solution_dict=solution_dict,
-        is_property_verification=is_property_verification,
-        property_verified=property_verified
-    )
-
-export_solution = wrapped_export_solution
-"""
-                + combined_code
-            )
-
             # Set timeout in seconds
             timeout_seconds = timeout.total_seconds()
 
@@ -264,50 +221,6 @@ export_solution = wrapped_export_solution
             # Store the result for later retrieval
             self.last_result = result
             self.last_solve_time = result.get("execution_time")
-
-            # Check for error indicating missing export_solution
-            if result.get("status") == "no_solution" or (
-                result.get("error")
-                and "No solution was exported" in result.get("error")
-            ):
-                # Check if there's a stored solver from previous export_solution calls
-                if "_z3_registry" in globals() and globals()["_z3_registry"].get(
-                    "solver"
-                ):
-                    # Use the stored solver and variables to generate a solution
-                    stored_solver = globals()["_z3_registry"].get("solver")
-                    stored_variables = globals()["_z3_registry"].get("variables", {})
-
-                    # Execute solve with the stored solver
-                    status = stored_solver.check()
-
-                    if status == z3.sat:
-                        model = stored_solver.model()
-                        solution = {}
-
-                        # Extract values for variables
-                        for var_name, var in stored_variables.items():
-                            try:
-                                solution[var_name] = model.eval(var).as_long()
-                            except:
-                                try:
-                                    solution[var_name] = model.eval(var).as_fraction()
-                                except:
-                                    try:
-                                        solution[var_name] = bool(model.eval(var))
-                                    except:
-                                        solution[var_name] = str(model.eval(var))
-
-                        # Update the result
-                        result["status"] = "success"
-                        result["solution"] = {
-                            "satisfiable": True,
-                            "values": solution,
-                            "status": "sat",
-                        }
-
-                        # Store the solution for later retrieval
-                        self.last_solution = result.get("solution")
 
             # For success case, also update our registry from the solution
             if result.get("solution") and result.get("solution").get("values"):
