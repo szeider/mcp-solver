@@ -1,188 +1,60 @@
-# MCP Solver Test Suite
+# MCP Solver Tests
 
-This directory contains tests for the MCP Solver project.
+Two kinds of tests live here: fast **helper unit tests** (pytest) and the
+end-to-end **benchmark harness** (`mcp-solver-bench`).
 
-## Quick Tests
+## Helper unit tests
 
-For a quick end-to-end test after code changes, run any of these commands:
-
-```bash
-# MiniZinc test 
-uv run run-test mzn 
-
-# PySAT test 
-uv run run-test pysat 
-
-# MaxSAT test
-uv run run-test maxsat 
-
-# Z3 test - Cryptarithmetic puzzle
-uv run run-test z3 
-
-# ASP test
-uv run run-test asp
-```
-
-## Test Structure
-
-```
-├── tests/
-│   ├── __init__.py                # Package marker
-│   ├── test_config.py             # Configuration values for tests
-│   ├── run_test.py                # Unified test runner for all solvers
-│   ├── problems/                  # All problem definitions in one place
-│   │   ├── mzn/                   # MiniZinc problem definitions
-│   │   │   ├── nqueens.md         # N-Queens problem
-│   │   │   └── sudoku.md          # Sudoku problem
-│   │   ├── pysat/                 # PySAT problem definitions
-│   │   │   ├── graph_coloring.md  # Graph coloring problem
-│   │   │   ├── scheduling.md      # Scheduling problem
-│   │   │   ├── furniture-arrangement.md  # Furniture arrangement problem
-│   │   │   ├── mine-sweeper-hard.md      # Mine sweeper problem
-│   │   │   └── sudoku-16x16.md    # 16x16 Sudoku problem
-│   │   ├── maxsat/                # MaxSAT problem definitions
-│   │   │   └── test.md            # Default test problem
-│   │   ├── z3/                    # Z3 problem definitions
-│   │   │   ├── bounded_sum.md     # Bounded sum problem
-│   │   │   └── cryptarithmetic.md # Cryptarithmetic problem
-│   │   └── asp/                   # ASP problem definitions
-│   │       ├── test.md            # Default test problem
-│   │       └── birds_fly.md       # Classic birds flying problem
-│   └── results/                   # Directory for test results (optional)
-```
-
-## Running Tests
-
-### Running Tests for a Specific Solver
+The dependency-free helper library (`mcp_solver.helpers.{pysat,maxsat,z3}`) is
+covered by unit tests in `tests/unit/`. They need the solver libraries but not
+the coding-agent engine, so they run in a throwaway uv environment:
 
 ```bash
-cd /path/to/mcp-solver
-uv run run-test mzn    # Run MiniZinc test.md by default if present, otherwise all MiniZinc tests
-uv run run-test pysat  # Run PySAT test.md by default if present, otherwise all PySAT tests
-uv run run-test maxsat # Run MaxSAT test.md by default if present, otherwise all MaxSAT tests
-uv run run-test z3     # Run Z3 test.md by default if present, otherwise all Z3 tests
-uv run run-test asp    # Run ASP test.md by default if present, otherwise all ASP tests
+uv run --no-project --python 3.13 \
+  --with-editable . --with pytest --with python-sat --with z3-solver \
+  python -m pytest tests/unit/ -q
 ```
 
-### Running a Specific Problem
+(Equivalently, install `.[test]` and run `pytest tests/unit/`.)
+
+## Benchmark harness
+
+`mcp-solver-bench` runs the problems under `tests/problems/<solver>/`
+end-to-end: for each one it invokes the `mcp-solver` CLI, then pipes the
+solution JSON on **stdin** into the problem's `*_ground_truth.py` validator,
+which prints a `{"valid": ..., "message": ...}` verdict. One result row per run
+is appended to `results.jsonl` in the output directory.
 
 ```bash
-cd /path/to/mcp-solver
-uv run run-test mzn --problem tests/problems/mzn/nqueens.md
-uv run run-test pysat --problem tests/problems/pysat/graph_coloring.md
-uv run run-test maxsat --problem tests/problems/maxsat/test.md
-uv run run-test z3 --problem tests/problems/z3/cryptarithmetic.md
-uv run run-test asp --problem tests/problems/asp/birds_fly.md
+# Every backend
+mcp-solver-bench
+
+# Specific backends, several runs each, in parallel
+mcp-solver-bench pysat z3 --runs 3 --jobs 4
 ```
 
-Note: If no problem is specified, the system will look for a `test.md` file in the respective solver's problems directory and run that as a default test.
+Each solve is bounded by `--step-limit` (default: 30 agent steps). From an
+editable checkout the harness runs in dev mode (helpers and templates come from
+the checkout); pass `--dev [PATH]` to force a specific checkout, or `--no-dev`
+on the CLI to use the published helpers.
 
-### Available Problems
+## Problem layout
 
-#### MiniZinc Problems:
-- `carpet_cutting.md` - Carpet cutting optimization problem
-- `test.md` - Default test problem
-- `tsp.md` - Traveling Salesperson Problem
-- `university_scheduling.md` - University course scheduling problem
-- `university_scheduling_unsat.md` - Unsatisfiable variant of scheduling problem
-- `zebra.md` - Einstein's Zebra puzzle (Five Houses Puzzle)
+Each backend has its own folder under `tests/problems/<solver>/`
+(`pysat`, `maxsat`, `z3`, `cpmpy`, `clingo`). A problem is a pair of files:
 
-#### PySAT Problems:
-- `equitable_coloring_hajos.md` - Equitable graph coloring problem
-- `furniture_arrangement.md` - Furniture arrangement problem
-- `petersen_12_coloring_unsat.md` - Unsatisfiable Petersen graph coloring
-- `queens_and_knights_6x6.md` - Combined queens and knights placement puzzle
-- `sudoku_16x16.md` - 16x16 Sudoku problem
-- `test.md` - Default test problem
-
-#### MaxSAT Problems:
-- `test.md` - Default test problem
-
-#### Z3 Problems:
-- `array_property_verifier.md` - Array property verification problem
-- `bounded_sum_unsat.md` - Unsatisfiable bounded sum problem
-- `cryptarithmetic.md` - Cryptarithmetic puzzle (SEND+MORE=MONEY)
-- `processor_verification.md` - Processor behavior verification
-- `sos_induction.md` - Sum-of-squares induction problem
-- `test.md` - Default test problem
-
-#### ASP Problems:
-- `birds_fly.md` - Classic birds flying problem with default reasoning
-- `company_controls.md` - Transitive company control relationships
-- `package_status_unsat.md` - Unsatisfiable package status paradox
-- `party_invitation.md` - Party invitation logic with choice rules
-- `shift_assignment.md` - Employee shift optimization problem
-- `test.md` - Default test problem
-
-### Test Options
-
-- `--verbose` or `-v`: Enable verbose output
-- `--timeout` or `-t`: Set timeout in seconds (default: 300)
-- `--save` or `-s`: Save test results to the results directory
-- `--result`: Save detailed JSON results to the specified directory
-- `--mc`: Specify direct model code (e.g., "AT:claude-3-7-sonnet-20250219")
-
-Examples:
-```bash
-# Run with all default options
-uv run run-test mzn --problem tests/problems/mzn/nqueens.md --verbose --timeout 120 --save --result ./json_results
-
-# Run with specific LLM model (using direct model code)
-uv run run-test mzn --problem tests/problems/mzn/nqueens.md --mc "AT:claude-3-7-sonnet-20250219"
+```
+tests/problems/pysat/
+  n_queens.md                 # the task, in natural language
+  n_queens_ground_truth.py    # validator: reads solution JSON on stdin,
+                              #   prints {"valid": bool, "message": str}
 ```
 
-## Troubleshooting Common Issues
+A `test.md` file (if present) is treated as a smoke problem and skipped by the
+harness.
 
-### Error connecting to MCP server
+## Retired v3 material
 
-If you see "Error connecting to MCP server", check that:
-1. The server command is correctly set
-2. The appropriate solver package is installed
-3. Environment variables are properly set if needed
-
-### Missing prompt files
-
-If you see a warning about missing prompt files, check that the instruction prompt files exist:
-- MiniZinc: `instructions_prompt_mzn.md`
-- PySAT: `instructions_prompt_pysat.md`
-- MaxSAT: `instructions_prompt_maxsat.md`
-- Z3: `instructions_prompt_z3.md`
-- ASP: `instructions_prompt_asp.md`
-
-### PySAT and MaxSAT Environments
-
-The PySAT and MaxSAT execution environments include:
-
-1. Standard Python modules: `math`, `random`, `collections`, `itertools`, `re`, `json`
-2. PySAT modules: `pysat.formula`, `pysat.solvers`, `pysat.card`
-3. Constraint helpers: `at_most_one`, `exactly_one`, `implies`, etc.
-4. Cardinality templates: `at_most_k`, `at_least_k`, `exactly_k`
-
-The MaxSAT environment additionally includes:
-- MaxSAT solver: `pysat.examples.rc2.RC2`
-- Weighted CNF formulas: `pysat.formula.WCNF`
-
-### ASP Environment
-
-The ASP execution environment uses Clingo and supports:
-- Facts, rules, constraints, and choice rules
-- Optimization statements: `#maximize`, `#minimize`
-- Weak constraints for soft optimization
-- Aggregates and conditional literals
-- Default reasoning with negation-as-failure
-
-If you add new helper functions, make sure to include them in:
-- `restricted_globals` dictionary in `environment.py`
-- The processed code template in `execute_pysat_code`
-
-## Adding New Tests
-
-### Adding a New Problem
-
-1. Create a Markdown file in the appropriate problem directory under `tests/problems/`:
-   - MiniZinc: `tests/problems/mzn/`
-   - PySAT: `tests/problems/pysat/`
-   - MaxSAT: `tests/problems/maxsat/`
-   - Z3: `tests/problems/z3/`
-   - ASP: `tests/problems/asp/`
-2. Run the test with the `uv run run-test` command 
+`tests/problems/mzn/` and `tests/run_test.py` (plus `test_config.py`) belong to
+the retired v3 ReAct test client and are **not** used by v4. They are kept for
+reference until the release cleanup; ignore them when working with v4.

@@ -15,8 +15,9 @@ You are solving constraint programming problems using CPMpy.
 from cpmpy import *
 import json
 
+model = Model()
 # Variables
-# Constraints  
+# Constraints (model += ...)
 # Solve
 if model.solve():
     # Build result dict as specified

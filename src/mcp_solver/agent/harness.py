@@ -59,8 +59,10 @@ def run_one(
         str(stats_file),
         "-q",
     ]
-    if args.local_package:
-        cmd += ["--local-package", args.local_package]
+    if args.dev is not None:
+        cmd.append("--dev")
+        if args.dev != "auto":
+            cmd.append(args.dev)
     if args.step_limit:
         cmd += ["--step-limit", str(args.step_limit)]
 
@@ -70,6 +72,7 @@ def run_one(
         "model": args.model,
         "timestamp": stamp,
         "workdir": str(workdir),
+        "dev": args.dev,
     }
     start = time.monotonic()
     try:
@@ -179,7 +182,15 @@ def main(argv: list[str] | None = None) -> int:
         default=30,
         help="maximum agent steps per solve (default: %(default)s)",
     )
-    parser.add_argument("--local-package", metavar="PATH", default=None)
+    parser.add_argument(
+        "--dev",
+        nargs="?",
+        const="auto",
+        default=None,
+        metavar="PATH",
+        help="dev mode: pass through to the CLI so helpers and templates come"
+        " from a local checkout (bare --dev auto-detects; default: CLI decides)",
+    )
     parser.add_argument(
         "--out",
         metavar="DIR",

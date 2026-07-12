@@ -4,6 +4,11 @@ MCP Solver v4 drives the [agentic-python-coder](https://github.com/szeider/agent
 engine to write and run real solver programs. This guide covers prerequisites,
 the install variants, verification, and common problems.
 
+> **v4 is not yet on PyPI.** PyPI still serves the old v3 server, so
+> `uv pip install "mcp-solver[agent]"` installs the wrong package. Until v4 is
+> published, the only working install — for both normal use and development — is
+> a clone plus an editable install (see [Install](#install) below).
+
 > Looking for the v3 MCP server (MiniZinc/PySAT/MaxSAT/Z3/ASP)? It lives on the
 > **`heritage`** branch, which keeps its own setup instructions.
 
@@ -59,28 +64,26 @@ location the engine uses; MCP Solver does not require a separate key.
 
 ## Install
 
-### Product layer (normal use)
+### Clone + editable (required today)
 
-Installs the CLI, the backend templates, and the coding-agent engine:
-
-```bash
-uv pip install "mcp-solver[agent]"
-```
-
-The `[agent]` extra is what pulls in `agentic-python-coder`. The bare
-`mcp-solver` package is only the dependency-free helper library and cannot solve
-anything on its own.
-
-### Development / testing
-
-To run the benchmark harness and the helper unit tests, install the `[test]`
-extra (which adds the solver libraries and pytest), or `[all]` for everything:
+Until v4 reaches PyPI, normal use and development share the same path: clone the
+repo and install it editable. The `[agent]` extra pulls in `agentic-python-coder`
+(the CLI, backend templates, and engine); the bare `mcp-solver` package is only
+the dependency-free helper library and cannot solve anything on its own.
 
 ```bash
 git clone https://github.com/szeider/mcp-solver.git
 cd mcp-solver
-uv pip install -e ".[agent,test]"   # or ".[all]"
+uv pip install -e ".[agent]"          # normal use
+uv pip install -e ".[agent,test]"     # + benchmark harness and unit tests
+# uv pip install -e ".[all]"          # everything, including dev tools
 ```
+
+An editable install runs in **dev mode**: the CLI auto-detects the source
+checkout and takes both the helper library and the solver templates straight
+from it (printing one provenance line to stderr), so nothing extra is needed to
+run a solve. Use `--dev PATH` (or `MCP_SOLVER_DEV`) to point at a checkout
+explicitly, or `--no-dev` to force the published (PyPI-pinned) helpers.
 
 The individual extras are:
 
@@ -90,6 +93,11 @@ The individual extras are:
 | `[test]`  | Solver libraries (python-sat, z3-solver, cpmpy, clingo) + pytest |
 | `[dev]`   | ruff                                                            |
 | `[all]`   | `[agent]` + `[test]` + `[dev]`                                  |
+
+### Once v4 is published
+
+When v4 is on PyPI, `uv pip install "mcp-solver[agent]"` will install the product
+layer directly, with no clone required.
 
 ---
 
@@ -123,17 +131,24 @@ mcp-solver-bench pysat --runs 1
 
 **`mcp-solver: the coding-agent engine is not installed.`**
 You installed the bare package without the product layer. Install the `[agent]`
-extra: `uv pip install "mcp-solver[agent]"`.
+extra. Until v4 is on PyPI, that means the clone + editable install:
+`uv pip install -e ".[agent]"` from a checkout (see [Install](#install)).
 
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its
 install directory (usually `~/.local/bin`) is on your `PATH`. uv is mandatory —
 solver libraries are injected through `uv run --with`.
 
-**Authentication / missing-key errors from the engine.**
-The OpenRouter key is not being found. Confirm `~/.config/coder/.env` contains
-`OPENROUTER_API_KEY="..."`, or export `OPENROUTER_API_KEY` in your shell. The
-same key drives both MCP Solver and the underlying engine.
+**`mcp-solver: no OpenRouter API key found.`**
+The key is not being located. Either export `OPENROUTER_API_KEY` in your shell,
+or put it in `~/.config/coder/.env` as `OPENROUTER_API_KEY="..."`. The `.env`
+file is read even when the environment variable is unset, so the file alone is
+enough. The same key drives both MCP Solver and the underlying engine.
+
+**`mcp-solver: problem file not found: <path>`**
+The path passed to `--problem` does not exist. Check the spelling and that you
+are running from the repo root (the shipped problems live under
+`tests/problems/<solver>/`).
 
 **Wrong Python version.**
 v4 needs Python 3.13. Check with `python3.13 --version`; uv can also pin a

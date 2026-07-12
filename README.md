@@ -43,14 +43,23 @@ MCP-Solver paper), and the architecture paper behind the v4 engine,
 
 ## Quick start
 
+> **v4 is not yet on PyPI.** PyPI still serves the old v3 server, so
+> `uv pip install "mcp-solver[agent]"` installs the wrong software. Until v4 is
+> published, the only working install is a clone plus an editable install, shown
+> below.
+
 ```bash
-# Install the product layer (CLI + templates + the coding-agent engine)
-uv pip install "mcp-solver[agent]"
+# Clone and install the product layer (CLI + templates + coding-agent engine)
+git clone https://github.com/szeider/mcp-solver.git
+cd mcp-solver
+uv pip install -e ".[agent]"
 
 # Provide your OpenRouter key (shared with the engine)
 mkdir -p ~/.config/coder
 echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 ```
+
+Once v4 is published, `uv pip install "mcp-solver[agent]"` will install it directly.
 
 Solve a problem from inline text:
 
@@ -63,6 +72,13 @@ Or from a markdown file (canonical example, shipped in the repo):
 ```bash
 mcp-solver pysat --problem tests/problems/pysat/n_queens.md
 ```
+
+From an editable clone like the one above, the CLI runs in **dev mode**: it
+takes both the helper library and the solver templates from the source
+checkout (auto-detected), so no extra flags are needed and a single provenance
+line is printed to stderr. Pass `--dev PATH` (or set `MCP_SOLVER_DEV`) to point
+at a checkout explicitly, or `--no-dev` to force the published (PyPI-pinned)
+helpers instead.
 
 The solution JSON goes to stdout; the saved solver program (e.g.
 `n_queens_code.py`) lands in the working directory.
@@ -99,6 +115,9 @@ mcp-solver <solver> --problem FILE.md [options]
 | `--workdir DIR`  | Working directory for the run (default: current dir)   |
 | `--step-limit N` | Maximum agent steps before stopping                    |
 | `-q`, `--quiet`  | Suppress engine progress output                        |
+| `--dev [PATH]`   | Dev mode: take helpers and templates from a local checkout (bare `--dev` auto-detects; auto-on inside a checkout; also `MCP_SOLVER_DEV`) |
+| `--no-dev`       | Disable dev mode; use the published (PyPI-pinned) helpers |
+| `--stats-json FILE` | Write the engine run statistics to `FILE` as JSON   |
 
 The default model `gpt56terra` (OpenRouter `openai/gpt-5.6-terra`) uses the
 `OPENROUTER_API_KEY` from `~/.config/coder/.env`, the same key the engine reads.
@@ -133,6 +152,11 @@ mcp-solver-bench
 # Specific backends, several runs each, in parallel
 mcp-solver-bench pysat z3 --runs 3 --jobs 4
 ```
+
+Each run is bounded by `--step-limit` (default: 30 agent steps), and results are
+appended to `results.jsonl` in the output directory. Like the main CLI, the
+harness runs in dev mode from an editable checkout; pass `--dev [PATH]` to
+force a specific checkout (otherwise the CLI decides).
 
 Current status: 26/26 test problems solve correctly with `gpt-5.6-terra`.
 
