@@ -10,6 +10,22 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+# Client-side timeouts (seconds).
+INIT_TIMEOUT = 30.0
+DEFAULT_TOOL_TIMEOUT = 300.0
+TIMEOUT_MARGIN = 30.0
+
+
+def _content_text(content: Any) -> str:
+    """Join the text of MCP content items (used for results and errors alike)."""
+    parts = []
+    for item in content:
+        if hasattr(item, "text"):
+            parts.append(item.text)
+        else:
+            parts.append(str(item))
+    return "\n".join(parts)
+
 
 @dataclass
 class MCPToolInfo:
@@ -27,7 +43,7 @@ class MCPManager:
     def __init__(
         self,
         servers_config: dict[str, dict[str, Any]],
-        tool_timeout: float = 300.0,
+        tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
     ) -> None:
         """Initialize with server configurations.
 
@@ -90,25 +106,35 @@ class MCPManager:
         )
 
         # Initialize and discover tools with timeout
-        await asyncio.wait_for(session.initialize(), timeout=30.0)
-        self._sessions[server_name] = session
+        await asyncio.wait_for(session.initialize(), timeout=INIT_TIMEOUT)
+        tools_result = await asyncio.wait_for(
+            session.list_tools(), timeout=INIT_TIMEOUT
+        )
 
-        # Discover tools
-        tools_result = await asyncio.wait_for(session.list_tools(), timeout=30.0)
-
+        # Stage the server's tools first; commit session and tools together
+        # only once every collision check has passed, so a failure leaves no
+        # half-registered server behind.
+        staged: dict[str, MCPToolInfo] = {}
         for tool in tools_result.tools:
-            if tool.name in self._tools:
+            if tool.name in self._tools or tool.name in staged:
+                owner = (
+                    self._tools[tool.name].server_name
+                    if tool.name in self._tools
+                    else server_name
+                )
                 raise ValueError(
                     f"Tool name collision: '{tool.name}' from server '{server_name}' "
-                    f"conflicts with tool from server '{self._tools[tool.name].server_name}'"
+                    f"conflicts with tool from server '{owner}'"
                 )
-
-            self._tools[tool.name] = MCPToolInfo(
+            staged[tool.name] = MCPToolInfo(
                 name=tool.name,
                 description=tool.description or "",
                 parameters=tool.inputSchema or {"type": "object", "properties": {}},
                 server_name=server_name,
             )
+
+        self._sessions[server_name] = session
+        self._tools.update(staged)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Call a tool and return the result as a JSON string.
@@ -137,17 +163,9 @@ class MCPManager:
             )
 
             if result.isError:
-                return json.dumps({"error": str(result.content)})
+                return json.dumps({"error": _content_text(result.content)})
 
-            # Extract text from content items
-            text_parts = []
-            for content in result.content:
-                if hasattr(content, "text"):
-                    text_parts.append(content.text)
-                else:
-                    text_parts.append(str(content))
-
-            return json.dumps({"result": "\n".join(text_parts)})
+            return json.dumps({"result": _content_text(result.content)})
 
         except TimeoutError:
             return json.dumps({"error": f"Tool '{name}' timed out"})
@@ -163,8 +181,8 @@ class MCPManager:
         """
         timeout = self.tool_timeout
         arg_timeout = arguments.get("timeout")
-        if isinstance(arg_timeout, int | float):
-            timeout = max(timeout, float(arg_timeout) + 30.0)
+        if isinstance(arg_timeout, int | float) and not isinstance(arg_timeout, bool):
+            timeout = max(timeout, float(arg_timeout) + TIMEOUT_MARGIN)
         return timeout
 
     def get_tools(self) -> list[MCPToolInfo]:

@@ -76,9 +76,10 @@ def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, s
         # Old flat format (backward compat)
         model = data.pop("modelstring", _DEFAULTS.model)
         max_steps = data.pop("max_steps", _DEFAULTS.max_steps)
-        # Keep shared keys out of api_params.
-        data.pop("files", None)
-        data.pop("packages", None)
+        # Keep shared/structural keys out of api_params — everything left in
+        # `data` goes verbatim into the API request.
+        for key in ("files", "packages", "mcpServers", "model", "agent"):
+            data.pop(key, None)
         config = AgentConfig(model=model, max_steps=max_steps, api_params=data)
         mcp_servers = None
 
@@ -209,7 +210,7 @@ def main() -> None:
         epilog="""\
 Run Folder Structure:
   config.json   Model and agent configuration
-                - model.name: OpenRouter model ID (e.g., "google/gemini-2.5-flash")
+                - model.name: OpenRouter model ID (e.g., "google/gemini-3-flash-preview")
                 - model.temperature, model.max_tokens: API parameters
                 - agent.max_steps: Maximum reasoning steps (default: 10)
                 - mcpServers: Optional MCP server configurations
@@ -220,9 +221,9 @@ Run Folder Structure:
   run_*.json    Log files (created automatically, gitignored)
 
 Environment:
-  OPENROUTER_API_KEY  Required. Loaded from (in order):
-                      1. FOLDER/.env (run folder)
-                      2. ~/.mcp-minion
+  OPENROUTER_API_KEY  Required. An already-set environment variable wins;
+                      otherwise it is loaded from FOLDER/.env (run folder),
+                      then ~/.mcp-minion.
 
 Model Parameters (model.* in config.json):
   temperature    0 for deterministic (recommended for agents)

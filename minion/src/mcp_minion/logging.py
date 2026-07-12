@@ -10,6 +10,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# Keys managed by the agent itself: filtered out of user api_params before an
+# API call, and excluded from the logged request's api_params. Shared with
+# agent.py so the two views cannot drift.
+RESERVED_REQUEST_KEYS = frozenset(
+    ("model", "messages", "tools", "tool_choice", "extra_headers", "extra_body")
+)
+
 
 @dataclass
 class RunLogger:
@@ -86,24 +93,18 @@ class RunLogger:
     def log_api_request(self, request: dict[str, Any]) -> None:
         """Log an API request (for the current step)."""
         if self._log_data["steps"]:
-            # Sanitize request - remove sensitive headers but keep structure
+            # Sanitize request - remove sensitive headers but keep structure.
+            # The full messages list is NOT stored: it grows by one entry per
+            # step, so per-step snapshots would make the log quadratic. The
+            # conversation is reconstructable from prompt + per-step content
+            # and tool calls.
             sanitized = {
                 "model": request.get("model"),
-                "messages": request.get("messages"),
+                "message_count": len(request.get("messages") or []),
                 "tools": request.get("tools"),
                 "tool_choice": request.get("tool_choice"),
                 "api_params": {
-                    k: v
-                    for k, v in request.items()
-                    if k
-                    not in (
-                        "model",
-                        "messages",
-                        "tools",
-                        "tool_choice",
-                        "extra_headers",
-                        "extra_body",
-                    )
+                    k: v for k, v in request.items() if k not in RESERVED_REQUEST_KEYS
                 },
             }
             self._log_data["steps"][-1]["api_request"] = sanitized

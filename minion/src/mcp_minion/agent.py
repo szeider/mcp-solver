@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from openai import OpenAI
 
-from mcp_minion.logging import RunLogger
+from mcp_minion.logging import RESERVED_REQUEST_KEYS, RunLogger
 from mcp_minion.tools import ToolRegistry
 
 if TYPE_CHECKING:
@@ -225,19 +225,12 @@ class Agent:
             "HTTP-Referer": "https://github.com/szeider/mcp-solver",
             "X-Title": "mcp-minion Agent",
         }
-        extra_body: dict[str, Any] = {}
 
         # Filter reserved keys from api_params to prevent accidental overrides
-        reserved_keys = {
-            "model",
-            "messages",
-            "tools",
-            "tool_choice",
-            "extra_headers",
-            "extra_body",
-        }
         safe_api_params = {
-            k: v for k, v in self.config.api_params.items() if k not in reserved_keys
+            k: v
+            for k, v in self.config.api_params.items()
+            if k not in RESERVED_REQUEST_KEYS
         }
 
         try:
@@ -249,7 +242,6 @@ class Agent:
                     "model": self.config.model,
                     "messages": messages,
                     "extra_headers": extra_headers,
-                    "extra_body": extra_body,
                     **safe_api_params,
                 }
 
