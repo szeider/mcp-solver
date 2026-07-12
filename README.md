@@ -6,22 +6,45 @@ LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP). An LLM agent
 writes, runs, verifies, and saves a real solver program for your problem, then
 prints the solution.
 
-> **v4 is a complete re-architecture.** Earlier versions of MCP Solver were an
-> MCP *server* that exposed model-editing tools (`add_item`, `solve_model`, …)
-> to a chat client. v4 instead runs **mcp-minion**, a minimal ReAct agent (a
-> workspace package in this repo, [`minion/`](minion/)), against the IPython
-> kernel MCP server of
-> [agentic-python-coder](https://github.com/szeider/agentic-python-coder): the
-> agent writes an actual Python solver program in a persistent IPython kernel,
-> executes it, checks the result, and submits it via the server's
-> `submit_code` tool. The CLI persists the submission and re-executes it for
-> the final answer. The MCP protocol surface returns as **`mcp-solver-serve`**,
-> a thin server exposing a single `solve` tool that delegates to the same
-> agent (see [MCP server](#mcp-server) below).
->
-> **Using v3?** The previous MCP-server implementation (MiniZinc, PySAT,
-> MaxSAT, Z3, ASP, and the ReAct test client) lives on unchanged on the
-> **`heritage`** branch.
+## From v3 to v4: a new architecture
+
+**v4 is a complete re-architecture, and it departs from the design described
+in the SAT 2025 paper.** That paper — ["Bridging Language Models and Symbolic
+Solvers via the Model Context Protocol"](https://doi.org/10.4230/LIPIcs.SAT.2025.30)
+— documents **v3**: an MCP *server* exposing model-editing tools (`add_item`,
+`replace_item`, `solve_model`, …) through which a chat LLM builds up a solver
+model item by item, with solving happening inside the server. That
+implementation lives on unchanged on the [**`heritage`**
+branch](https://github.com/szeider/mcp-solver/tree/heritage).
+
+**v4 follows the IPython-kernel approach** laid out in the
+[CP-Agent](https://doi.org/10.1145/3786181.3788711) (LLM4Code '26,
+[arXiv:2508.07468](https://arxiv.org/abs/2508.07468)) and
+[ASP-Bench](https://doi.org/10.1145/3786168.3788402) (NSE '26,
+[arXiv:2602.01171](https://arxiv.org/abs/2602.01171)) papers: instead of a
+host LLM editing a model through protocol tools, a dedicated coding agent
+works in a **persistent IPython kernel**, where it iteratively writes an
+actual Python solver program, executes it against the real solver, verifies
+the result independently, and only then submits the program as the answer.
+
+|                    | v3 (SAT 2025 paper)                          | v4 (CP-Agent / ASP-Bench approach)                 |
+| ------------------ | -------------------------------------------- | -------------------------------------------------- |
+| Who does the work  | The host chat LLM, via MCP editing tools     | A dedicated solver-writing agent (**mcp-minion**)  |
+| Unit of work       | Model items (`add_item`, `solve_model`, …)   | A complete, runnable Python solver program         |
+| Execution          | Inside the MCP server                        | In a persistent IPython kernel (`ipython_mcp`)     |
+| Verification       | Manual, by the host LLM                      | Built into the loop: run → check → `submit_code`   |
+| Artifact           | Transient model state                        | A verified, re-executable program you keep         |
+| Host interface     | Many fine-grained MCP tools                  | One CLI command / one MCP `solve` tool             |
+| Backends           | MiniZinc, PySAT, MaxSAT, Z3, ASP             | PySAT, MaxSAT, Z3, CPMpy, Clingo                   |
+
+Concretely, v4 runs **mcp-minion**, a minimal ReAct agent (a workspace package
+in this repo, [`minion/`](minion/)), against the IPython kernel MCP server of
+[agentic-python-coder](https://github.com/szeider/agentic-python-coder). The
+agent must end each solve by submitting its final, verified, self-contained
+program via the server's `submit_code` tool; the client persists the
+submission and re-executes it for the final answer. The MCP protocol surface
+returns as **`mcp-solver-serve`**, a thin server exposing a single `solve`
+tool that delegates to the same agent (see [MCP server](#mcp-server) below).
 
 ## What it is
 
@@ -32,12 +55,6 @@ solver inside an ephemeral `uv` kernel, sanity-checks the output, and submits
 the finished program. The CLI writes it to your working directory (e.g.
 `n_queens_code.py`), re-executes it in a fresh kernel, and prints the solution
 as JSON on stdout.
-
-For background, see Stefan Szeider,
-["Bridging Language Models and Symbolic Solvers via the Model Context
-Protocol"](https://doi.org/10.4230/LIPIcs.SAT.2025.30), SAT 2025 (the original
-MCP-Solver paper), and the architecture paper behind the v4 engine,
-[arXiv:2508.07468](https://arxiv.org/abs/2508.07468) (agentic-python-coder).
 
 ## Requirements
 
@@ -208,10 +225,17 @@ Current status: 26/26 test problems solve correctly with `gpt-5.6-terra`.
 ## Citations
 
 - Stefan Szeider, "Bridging Language Models and Symbolic Solvers via the Model
-  Context Protocol", SAT 2025.
+  Context Protocol", SAT 2025 — **the v3 architecture** (heritage branch).
   [DOI 10.4230/LIPIcs.SAT.2025.30](https://doi.org/10.4230/LIPIcs.SAT.2025.30)
-- Stefan Szeider, [arXiv:2508.07468](https://arxiv.org/abs/2508.07468) — the
-  agentic-python-coder architecture behind the v4 engine.
+- Stefan Szeider, "CP-Agent: Agentic Constraint Programming", LLM4Code '26
+  (ACM) — **the IPython-kernel approach behind v4**.
+  [DOI 10.1145/3786181.3788711](https://doi.org/10.1145/3786181.3788711),
+  preprint [arXiv:2508.07468](https://arxiv.org/abs/2508.07468)
+- Stefan Szeider, "ASP-Bench: From Natural Language to Logic Programs",
+  NSE '26 (IEEE/ACM) — **the verification-gated benchmark methodology used by
+  v4's test problems**.
+  [DOI 10.1145/3786168.3788402](https://doi.org/10.1145/3786168.3788402),
+  preprint [arXiv:2602.01171](https://arxiv.org/abs/2602.01171)
 
 ## License
 
