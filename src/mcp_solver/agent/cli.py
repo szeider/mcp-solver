@@ -25,6 +25,10 @@ from typing import Any
 import mcp_solver
 from mcp_solver.templates import SOLVERS, get_template
 
+# Re-execute the submitted program under the same interpreter version that
+# ran the agent's kernel, so in-kernel verification carries over.
+PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
+
 # Solver libraries injected into the solve-time kernel, per backend.
 SOLVER_PACKAGES: dict[str, list[str]] = {
     "pysat": ["python-sat"],
@@ -307,11 +311,7 @@ def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
 def _progress(step_info: dict) -> None:
     """Print a one-line progress note for a completed agent step."""
     calls = step_info.get("tool_calls") or []
-    if calls:
-        names = ", ".join(c.get("name", "?") for c in calls)
-        detail = names
-    else:
-        detail = "final answer"
+    detail = ", ".join(c.get("name", "?") for c in calls) if calls else "final answer"
     print(f"mcp-solver: step {step_info['step']}: {detail}", file=sys.stderr)
 
 
@@ -369,7 +369,7 @@ def run_program(program: Path, with_packages: list[str]) -> int:
     The program's stdout (the solution JSON) is inherited so it becomes
     this command's stdout.
     """
-    cmd = ["uv", "run", "--no-project", "--python", "3.13"]
+    cmd = ["uv", "run", "--no-project", "--python", PYTHON_VERSION]
     for pkg in with_packages:
         cmd += ["--with", pkg]
     cmd += ["python", str(program)]
@@ -453,7 +453,13 @@ def main(argv: list[str] | None = None) -> int:
     stats = build_stats(result, elapsed, model_id)
     print_stats(stats)
     if args.stats_json:
-        Path(args.stats_json).write_text(json.dumps(stats, default=str))
+        try:
+            Path(args.stats_json).write_text(json.dumps(stats, default=str))
+        except OSError as exc:
+            print(
+                f"mcp-solver: could not write stats to {args.stats_json}: {exc}",
+                file=sys.stderr,
+            )
 
     code = extract_last_submission(result.steps)
     if code is None:

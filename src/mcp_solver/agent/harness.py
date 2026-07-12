@@ -86,7 +86,12 @@ def run_one(
     row["wall_seconds"] = round(time.monotonic() - start, 1)
 
     if stats_file.is_file():
-        stats = json.loads(stats_file.read_text())
+        try:
+            stats = json.loads(stats_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            # A run killed mid-write can leave a truncated stats file; one bad
+            # run must not abort the whole benchmark.
+            stats = {}
         row["total_tokens"] = stats.get("token_consumption", {}).get("total_tokens")
         row["exec_calls"] = stats.get("tool_usage", {}).get("python_exec", 0)
         if stats.get("step_limit_reached"):
@@ -100,13 +105,18 @@ def run_one(
         row["valid"] = False
         row["message"] = "no solution output"
     else:
-        check = subprocess.run(
-            [sys.executable, str(validator)],
-            input=row["solution"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        try:
+            check = subprocess.run(
+                [sys.executable, str(validator)],
+                input=row["solution"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            row["valid"] = False
+            row["message"] = "validator timed out after 120s"
+            return row
         out = check.stdout.strip()
         verdict = None
         for candidate in (out, out.splitlines()[-1] if out else ""):
@@ -133,7 +143,7 @@ def print_summary(rows: list[dict]) -> None:
     for solver, group in sorted(by_solver.items()):
         n = len(group)
         valid = sum(1 for r in group if r.get("valid"))
-        tokens = [r["total_tokens"] for r in group if r.get("total_tokens")]
+        tokens = [r["total_tokens"] for r in group if r.get("total_tokens") is not None]
         execs = [r["exec_calls"] for r in group if "exec_calls" in r]
         walls = [r["wall_seconds"] for r in group]
         avg = lambda xs: sum(xs) / len(xs) if xs else 0  # noqa: E731
@@ -199,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    solvers = args.solvers or list(SOLVERS)
+    solvers = args.solvers
     unknown = set(solvers) - set(SOLVERS)
     if unknown:
         parser.error(f"unknown solver(s): {', '.join(sorted(unknown))}")
@@ -240,7 +250,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print_summary(rows)
     print(str(results_file))
-    return 0 if all(r.get("valid") for r in rows) else 1
+    # valid=None means "no validator", which is not a failure.
+    return 0 if all(r.get("valid") is not False for r in rows) else 1
 
 
 if __name__ == "__main__":

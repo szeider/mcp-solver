@@ -13,6 +13,7 @@ progress is forwarded as MCP progress notifications.
 
 import asyncio
 import re
+import shutil
 import sys
 import tempfile
 import uuid
@@ -85,7 +86,16 @@ mcp = FastMCP(
 )
 
 # run_id -> working directory of a completed solve (serves Tier 2 resources).
+# Bounded: the oldest run directory is deleted once the cap is exceeded.
 _runs: dict[str, Path] = {}
+_MAX_RUNS = 20
+
+
+def _register_run(run_id: str, workdir: Path) -> None:
+    _runs[run_id] = workdir
+    while len(_runs) > _MAX_RUNS:
+        oldest = next(iter(_runs))
+        shutil.rmtree(_runs.pop(oldest), ignore_errors=True)
 
 
 @mcp.resource("mcp-solver://guide", mime_type="text/markdown")
@@ -158,6 +168,7 @@ async def solve(solver: str, problem: str, ctx: Context) -> list:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    stderr_task: asyncio.Task | None = None
     try:
         async with asyncio.timeout(SOLVE_TIMEOUT_SECONDS):
             stderr_task = asyncio.create_task(_forward_progress(proc.stderr, ctx))
@@ -165,15 +176,20 @@ async def solve(solver: str, problem: str, ctx: Context) -> list:
             stderr_text = await stderr_task
             returncode = await proc.wait()
     except TimeoutError:
+        if stderr_task is not None:
+            stderr_task.cancel()
         proc.kill()
+        await proc.wait()
+        shutil.rmtree(workdir, ignore_errors=True)
         raise ToolError(f"solve timed out after {SOLVE_TIMEOUT_SECONDS}s") from None
 
     solution = stdout_bytes.decode(errors="replace").strip()
     if returncode != 0:
         tail = "\n".join(stderr_text.strip().splitlines()[-5:])
+        shutil.rmtree(workdir, ignore_errors=True)
         raise ToolError(f"solve failed (exit {returncode}):\n{tail}")
 
-    _runs[run_id] = workdir
+    _register_run(run_id, workdir)
     content: list = [TextContent(type="text", text=solution)]
     program = workdir / "problem_code.py"
     if program.is_file():
