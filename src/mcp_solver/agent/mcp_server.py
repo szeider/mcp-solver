@@ -1,17 +1,21 @@
 """mcp-solver-serve: the v4.1 MCP server (successive revelation).
 
-Tier 0: one ``solve`` tool whose description (kept well under 1.2KB — some
-hosts truncate at 2KB) is all a host needs to call it correctly.
+Tier 0: one ``solve`` tool whose description (kept under 1.2KB as a
+host-compatibility heuristic; the spec sets no limit, but some hosts truncate
+long descriptions) is all a host needs to call it correctly.
 Tier 1: the resource ``mcp-solver://guide`` — a short backend-selection guide.
 Tier 2: per-solve ``resource_link`` content pointing at the submitted solver
-program and the run log.
+program and the run log, addressed by explicit per-run handles.
 
-Stateless per the 2025-11-25 MCP spec: no sampling, no elicitation. Each solve
-runs the CLI in its own subprocess with a fresh working directory, and per-step
+A stdio FastMCP server on the standard 2025-11-25 initialize/capability
+lifecycle. It uses no sampling and no elicitation, which keeps it compatible
+with hosts that do not implement those optional features. Each solve runs the
+CLI in its own subprocess with a fresh working directory, and per-step
 progress is forwarded as MCP progress notifications.
 """
 
 import asyncio
+import json
 import re
 import shutil
 import sys
@@ -21,7 +25,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from mcp.types import ResourceLink, TextContent
+from mcp.types import CallToolResult, ResourceLink, TextContent
 from pydantic import AnyUrl
 
 from mcp_solver.templates import SOLVERS
@@ -139,13 +143,13 @@ async def _forward_progress(stream: asyncio.StreamReader, ctx: Context) -> str:
 
 
 @mcp.tool(description=SOLVE_DESCRIPTION)
-async def solve(solver: str, problem: str, ctx: Context) -> list:
+async def solve(solver: str, problem: str, ctx: Context) -> CallToolResult:
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
     if not problem.strip():
         raise ToolError("problem must be a non-empty problem statement")
 
-    run_id = uuid.uuid4().hex[:8]
+    run_id = uuid.uuid4().hex
     workdir = Path(tempfile.mkdtemp(prefix=f"mcp-solver-{run_id}-"))
     (workdir / "problem.md").write_text(problem, encoding="utf-8")
 
@@ -198,8 +202,11 @@ async def solve(solver: str, problem: str, ctx: Context) -> list:
                 type="resource_link",
                 uri=AnyUrl(f"mcp-solver://runs/{run_id}/{program.name}"),
                 name=program.name,
-                description="The verified solver program that produced this solution.",
+                description="The verified solver program that produced this"
+                f" solution (artifacts are retained for the {_MAX_RUNS} most"
+                " recent runs of this server).",
                 mimeType="text/x-python",
+                size=program.stat().st_size,
             )
         )
     for log in sorted(workdir.glob("run_*.json")):
@@ -210,9 +217,18 @@ async def solve(solver: str, problem: str, ctx: Context) -> list:
                 name=log.name,
                 description="Complete agent run log (steps, tool calls, tokens).",
                 mimeType="application/json",
+                size=log.stat().st_size,
             )
         )
-    return content
+
+    # structuredContent carries the machine-readable solution alongside the
+    # human/back-compat text block.
+    try:
+        parsed = json.loads(solution)
+    except json.JSONDecodeError:
+        parsed = None
+    structured = parsed if isinstance(parsed, dict) else None
+    return CallToolResult(content=content, structuredContent=structured)
 
 
 def main() -> None:

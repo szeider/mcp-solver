@@ -108,6 +108,8 @@ async def test_solve_round_trip(monkeypatch):
         assert not result.isError
         text = result.content[0]
         assert json.loads(text.text) == {"satisfiable": True, "x": 2}
+        # The machine-readable solution rides along as structuredContent.
+        assert result.structuredContent == {"satisfiable": True, "x": 2}
 
         # Tier 2: resource links to the program and the run log...
         links = [c for c in result.content if c.type == "resource_link"]
