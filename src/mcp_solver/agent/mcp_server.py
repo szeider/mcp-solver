@@ -1,47 +1,65 @@
-"""mcp-solver-serve: the v4.1 MCP server (successive revelation).
+"""mcp-solver-serve: the v4.1 MCP server — a solver toolkit for host LLMs.
 
-Tier 0: one ``solve`` tool whose description (kept under 1.2KB as a
-host-compatibility heuristic; the spec sets no limit, but some hosts truncate
-long descriptions) is all a host needs to call it correctly.
-Tier 1: the resource ``mcp-solver://guide`` — a short backend-selection guide.
-Tier 2: per-solve ``resource_link`` content pointing at the submitted solver
-program and the run log, addressed by explicit per-run handles.
+The HOST does the solving. Claude Desktop, Claude Code, or mcp-minion (the
+batchable open-source host substitute) connects here and writes, runs, and
+verifies solver programs itself against a persistent IPython kernel. The
+server contributes the solver value: backend selection, solver packages and
+helpers injected into the kernel, the modeling instructions (templates), and
+the compile-gated ``submit_code`` finish line. It calls no LLM and needs no
+API key.
 
-A stdio FastMCP server on the standard 2025-11-25 initialize/capability
-lifecycle. It uses no sampling and no elicitation, which keeps it compatible
-with hosts that do not implement those optional features. Each solve runs the
-CLI in its own subprocess with a fresh working directory, and per-step
-progress is forwarded as MCP progress notifications.
+Kernel model: ``select_backend`` sets up ONE solving kernel and recycles it
+(state cleared, packages swapped) on every later call, so solving problem
+after problem never accumulates kernel processes. Bare ``python_exec``/
+``python_interrupt`` calls are routed to that kernel automatically; an
+explicit ``kernel_id`` overrides the routing. A manual ``python_reset``
+without ``kernel_id`` creates an additional, independent kernel (which then
+becomes the routing target) — those live until the server exits.
+
+Successive revelation to the host:
+- Tier 0: tool descriptions — enough to start (call ``select_backend`` first).
+- Tier 1: ``mcp-solver://guide`` and, on backend selection, the full modeling
+  instructions for that backend (also browsable as
+  ``mcp-solver://template/{solver}``).
+- Tier 2: successful submissions become resources
+  (``mcp-solver://submissions/{id}``), linked from the submit_code result.
+
+The kernel tools are proxied over stdio to the engine's ``ipython_mcp``
+server (agentic-python-coder), using only its public MCP contract; one
+long-lived engine connection per server process, so kernel state persists
+across the host's tool calls.
 """
 
 import asyncio
 import json
-import re
-import shutil
+import os
 import sys
-import tempfile
 import uuid
-from pathlib import Path
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
 from pydantic import AnyUrl
 
-from mcp_solver.templates import SOLVERS
+import mcp_solver
+from mcp_solver.agent.cli import (
+    _is_unpublishable,
+    _local_checkout,
+    build_with_packages,
+)
+from mcp_solver.templates import SOLVERS, get_template
 
-# One solve is bounded by the agent step limit; this is only a safety backstop.
-SOLVE_TIMEOUT_SECONDS = 900
-STEP_LIMIT = 30
+SELECT_BACKEND_DESCRIPTION = """\
+Start solving a constraint problem: call this FIRST, once per problem.
 
-# Kept under 1.2KB; hosts reveal deeper detail via mcp-solver://guide (Tier 1).
-SOLVE_DESCRIPTION = """\
-Solve a constraint, optimization, or verification problem stated in natural
-language. A solver-writing agent encodes the problem for a real solver, runs
-and verifies it, and returns the solution as JSON plus a link to the generated
-solver program.
+Sets up a persistent IPython kernel preloaded with the backend's solver
+library and helper functions, and returns the modeling instructions for that
+backend. Calling it again recycles the kernel for a new problem (previous
+session state is cleared).
 
-Backends (pick one):
+Backends:
 - pysat: Boolean satisfiability — feasibility, combinatorial search
 - maxsat: weighted optimization over Boolean constraints
 - z3: SMT — integers/reals/bitvectors, proofs, program verification
@@ -50,20 +68,25 @@ Backends (pick one):
 
 Unsure which backend fits? Read the resource mcp-solver://guide first.
 
-State the problem completely: all numbers, all constraints, and the exact
-output JSON format you want back. A solve typically takes 30-120 seconds;
-progress is reported. UNSAT / "no solution exists" / "property proved" are
-valid answers and reported as such, not errors.
+Then iterate with python_exec (write, run, verify against the problem
+statement), and finish by calling submit_code with the final, verified,
+self-contained program. UNSAT / "no solution exists" is a valid outcome.
 """
 
 GUIDE = """\
-# Choosing an mcp-solver backend
+# mcp-solver: how to solve a problem
 
+Workflow: (1) `select_backend(solver)` — sets up the solving kernel with the
+right solver library and returns modeling instructions; (2) iterate
+`python_exec` (it runs in that kernel automatically): encode, run the real
+solver, verify the result independently against the problem statement;
+(3) finish with `submit_code` (the final, verified, self-contained program).
+
+Choosing a backend:
 - **pysat** — pure Boolean structure: placements, colorings, covers,
   pigeonhole-style feasibility. Fastest when everything is yes/no variables.
 - **maxsat** — like pysat but with costs or preferences: maximize satisfied
-  soft constraints under hard ones (task assignment, selection, scheduling
-  with penalties). Finds the true optimum, not a heuristic.
+  soft constraints under hard ones. Finds the true optimum, not a heuristic.
 - **z3** — arithmetic and verification: integer/real/bitvector constraints,
   cryptarithmetic, proving a property holds (UNSAT of the negation),
   finding counterexamples, induction obligations.
@@ -72,163 +95,281 @@ GUIDE = """\
 - **clingo** — rule-based knowledge: transitive closure/reachability,
   defaults with exceptions, choice under logical rules, #minimize/#maximize.
 
-Tips for good results:
-- Include every number and constraint explicitly; the agent solves exactly
-  what is written.
-- Specify the desired output JSON schema (field names, nesting) — the answer
-  will follow it exactly.
-- Impossible instances are legitimate: expect {"satisfiable": false} or an
-  explicit UNSAT/proved report rather than an error.
+Tips: encode exactly the stated problem (every number matters); UNSAT is a
+legitimate answer, re-check the encoding before reporting it; keep the final
+program self-contained (all imports, no session state) and print only the
+solution JSON.
 """
+
+# Engine connection (one per server process; kernels persist across calls).
+_engine = None
+
+# The solving kernel: created by the first select_backend, recycled by later
+# ones. Bare python_exec/python_interrupt calls are routed here; a manual
+# python_reset that creates or resets a kernel retargets the routing.
+# FastMCP dispatches tool calls concurrently, so every read-await-write of
+# _kernel_id happens under this lock.
+_kernel_id: str | None = None
+_kernel_lock = asyncio.Lock()
+
+# Server-side execution cap of the engine's python_exec (seconds); clamp
+# here too so an oversized host value cannot stretch the client-side wait.
+_MAX_EXEC_TIMEOUT = 300
+
+# Bounded store of successful submissions (Tier 2 resources).
+_submissions: dict[str, str] = {}
+_MAX_SUBMISSIONS = 50
+
+
+def _dev_path() -> str | None:
+    """Dev-mode source checkout for helpers/templates (env or auto-detect)."""
+    env = os.environ.get("MCP_SOLVER_DEV")
+    if env:
+        if env.lower() in ("1", "true", "auto"):
+            return _local_checkout()
+        return env
+    return _local_checkout()
+
+
+@asynccontextmanager
+async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
+    """Hold one engine (ipython_mcp) connection for the server's lifetime."""
+    global _engine, _kernel_id
+    from mcp_minion import MCPManager
+
+    manager = MCPManager(
+        {
+            "ipython": {
+                "command": sys.executable,
+                "args": ["-m", "agentic_python_coder.mcp_server"],
+            }
+        }
+    )
+    await manager.__aenter__()
+    if not manager.has_tool("submit_code"):
+        await manager.__aexit__(None, None, None)
+        raise RuntimeError(
+            "the ipython_mcp engine is unavailable or lacks submit_code;"
+            " install agentic-python-coder >=3.4.1 in this environment"
+        )
+    _engine = manager
+    try:
+        yield
+    finally:
+        _engine = None
+        _kernel_id = None
+        await manager.__aexit__(None, None, None)
+
 
 mcp = FastMCP(
     "mcp-solver",
     instructions=(
-        "Constraint solving via one tool: solve(solver, problem). Read the"
-        " resource mcp-solver://guide for backend selection."
+        "Constraint-solving toolkit: call select_backend(solver) first, then"
+        " write and verify a solver program via python_exec, and finish with"
+        " submit_code. Backend choice: see resource mcp-solver://guide."
     ),
+    lifespan=_lifespan,
 )
 
-# run_id -> working directory of a completed solve (serves Tier 2 resources).
-# Bounded: the oldest run directory is deleted once the cap is exceeded.
-_runs: dict[str, Path] = {}
-_MAX_RUNS = 20
+
+async def _engine_call(name: str, arguments: dict) -> str:
+    """Proxy one tool call to the engine; unwrap the client's JSON envelope.
+
+    The envelope's ``error`` key covers client-level failures (engine down,
+    timeout). Engine-level outcomes — including failed executions — arrive
+    inside ``result`` as the engine tool's own JSON text and pass through to
+    the host untouched.
+    """
+    if _engine is None:
+        raise ToolError("engine not connected (server starting or shut down)")
+    raw = await _engine.call_tool(name, arguments)
+    payload = json.loads(raw)
+    if "error" in payload:
+        raise ToolError(str(payload["error"]))
+    return str(payload.get("result", ""))
 
 
-def _register_run(run_id: str, workdir: Path) -> None:
-    _runs[run_id] = workdir
-    while len(_runs) > _MAX_RUNS:
-        oldest = next(iter(_runs))
-        shutil.rmtree(_runs.pop(oldest), ignore_errors=True)
+def _parse_engine_json(text: str) -> dict:
+    """Parse an engine tool's JSON text; {} when it isn't a JSON object."""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 @mcp.resource("mcp-solver://guide", mime_type="text/markdown")
 def guide() -> str:
-    """Backend-selection guide for the solve tool."""
+    """Backend selection and solving workflow guide."""
     return GUIDE
 
 
-@mcp.resource("mcp-solver://runs/{run_id}/{filename}")
-def run_file(run_id: str, filename: str) -> str:
-    """Serve an artifact (program, log, stats) from a completed solve."""
-    workdir = _runs.get(run_id)
-    if workdir is None:
-        raise ValueError(f"unknown run {run_id!r}")
-    path = workdir / filename
-    # The artifact must be a direct child of the run directory (no traversal).
-    if path.parent != workdir or not path.is_file():
-        raise ValueError(f"unknown artifact {filename!r} for run {run_id}")
-    return path.read_text(encoding="utf-8")
+@mcp.resource("mcp-solver://template/{solver}", mime_type="text/markdown")
+def template_resource(solver: str) -> str:
+    """The full modeling instructions for a backend."""
+    if solver not in SOLVERS:
+        raise ValueError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
+    return get_template(solver, root=_dev_path())
 
 
-_STEP_LINE = re.compile(r"^mcp-solver: step (\d+): (.*)$")
+@mcp.resource("mcp-solver://submissions/{submission_id}", mime_type="text/x-python")
+def submission_resource(submission_id: str) -> str:
+    """A previously submitted (compile-checked) solver program."""
+    code = _submissions.get(submission_id)
+    if code is None:
+        raise ValueError(f"unknown submission {submission_id!r}")
+    return code
 
 
-async def _forward_progress(stream: asyncio.StreamReader, ctx: Context) -> str:
-    """Relay CLI stderr: step lines become progress notifications.
-
-    Returns the full stderr text (for error reporting).
-    """
-    collected: list[str] = []
-    while True:
-        raw = await stream.readline()
-        if not raw:
-            return "".join(collected)
-        line = raw.decode(errors="replace")
-        collected.append(line)
-        match = _STEP_LINE.match(line.strip())
-        if match:
-            step, detail = int(match.group(1)), match.group(2)
-            await ctx.report_progress(step, STEP_LIMIT, detail)
-
-
-@mcp.tool(description=SOLVE_DESCRIPTION)
-async def solve(solver: str, problem: str, ctx: Context) -> CallToolResult:
+@mcp.tool(description=SELECT_BACKEND_DESCRIPTION)
+async def select_backend(solver: str) -> CallToolResult:
+    global _kernel_id
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
-    if not problem.strip():
-        raise ToolError("problem must be a non-empty problem statement")
 
-    run_id = uuid.uuid4().hex
-    workdir = Path(tempfile.mkdtemp(prefix=f"mcp-solver-{run_id}-"))
-    (workdir / "problem.md").write_text(problem, encoding="utf-8")
+    dev = _dev_path()
+    if dev is None and _is_unpublishable(mcp_solver.__version__):
+        raise ToolError(
+            f"mcp-solver {mcp_solver.__version__} is not a published release"
+            " and no source checkout was found; set MCP_SOLVER_DEV to a"
+            " checkout path"
+        )
+    packages = build_with_packages(solver, dev)
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "mcp_solver.agent.cli",
-        solver,
-        "--problem",
-        str(workdir / "problem.md"),
-        "--workdir",
-        str(workdir),
-        "--step-limit",
-        str(STEP_LIMIT),
-        "--stats-json",
-        str(workdir / "stats.json"),
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    # Recycle the existing solving kernel; fresh kernel on first call or
+    # when the stored one is gone (engine reports success=false for it).
+    recycled = False
+    parsed: dict = {}
+    async with _kernel_lock:
+        if _kernel_id is not None:
+            parsed = _parse_engine_json(
+                await _engine_call(
+                    "python_reset", {"packages": packages, "kernel_id": _kernel_id}
+                )
+            )
+            recycled = bool(parsed.get("success"))
+        if not recycled:
+            parsed = _parse_engine_json(
+                await _engine_call("python_reset", {"packages": packages})
+            )
+            if not parsed.get("success"):
+                raise ToolError(
+                    f"kernel setup for {solver!r} failed:"
+                    f" {parsed.get('error') or 'unknown engine error'}"
+                )
+        _kernel_id = parsed.get("kernel_id") or _kernel_id
+
+    state_note = (
+        "The solving kernel was recycled: previous session state is cleared."
+        if recycled
+        else "A fresh solving kernel is ready."
     )
-    stderr_task: asyncio.Task | None = None
-    try:
-        async with asyncio.timeout(SOLVE_TIMEOUT_SECONDS):
-            stderr_task = asyncio.create_task(_forward_progress(proc.stderr, ctx))
-            stdout_bytes = await proc.stdout.read()
-            stderr_text = await stderr_task
-            returncode = await proc.wait()
-    except TimeoutError:
-        if stderr_task is not None:
-            stderr_task.cancel()
-        proc.kill()
-        await proc.wait()
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise ToolError(f"solve timed out after {SOLVE_TIMEOUT_SECONDS}s") from None
+    kernel_note = (
+        f"{state_note} Packages: {', '.join(packages)}. python_exec runs in"
+        " this kernel automatically."
+        " Finish with submit_code(final verified self-contained program)."
+    )
+    template = get_template(solver, root=dev)
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{template}\n\n---\n\n{kernel_note}")],
+        structuredContent={
+            "solver": solver,
+            "kernel_id": _kernel_id,
+            "packages": packages,
+            "recycled": recycled,
+        },
+    )
 
-    solution = stdout_bytes.decode(errors="replace").strip()
-    if returncode != 0:
-        tail = "\n".join(stderr_text.strip().splitlines()[-5:])
-        shutil.rmtree(workdir, ignore_errors=True)
-        raise ToolError(f"solve failed (exit {returncode}):\n{tail}")
 
-    _register_run(run_id, workdir)
-    content: list = [TextContent(type="text", text=solution)]
-    program = workdir / "problem_code.py"
-    if program.is_file():
+@mcp.tool()
+async def python_exec(
+    code: str, timeout: float = 30, kernel_id: str | None = None
+) -> str:
+    """Execute Python code in the persistent solving kernel.
+
+    Runs in the kernel set up by select_backend unless kernel_id overrides
+    it. State persists across calls (variables, imports). Raise timeout
+    (seconds, max 300) for long solver runs.
+    """
+    args: dict = {"code": code, "timeout": min(timeout, _MAX_EXEC_TIMEOUT)}
+    target = kernel_id or _kernel_id
+    if target:
+        args["kernel_id"] = target
+    return await _engine_call("python_exec", args)
+
+
+@mcp.tool()
+async def python_reset(
+    packages: list[str] | None = None, kernel_id: str | None = None
+) -> str:
+    """Create a new kernel (no kernel_id) or reset one (with kernel_id).
+
+    Prefer select_backend, which installs the right solver packages for you.
+    The kernel created or reset here becomes the target of bare python_exec
+    calls.
+    """
+    global _kernel_id
+    args = {"packages": packages or []}
+    if kernel_id:
+        args["kernel_id"] = kernel_id
+    async with _kernel_lock:
+        text = await _engine_call("python_reset", args)
+        parsed = _parse_engine_json(text)
+        if parsed.get("success") and parsed.get("kernel_id"):
+            _kernel_id = str(parsed["kernel_id"])
+    return text
+
+
+@mcp.tool()
+async def python_status(kernel_id: str | None = None) -> str:
+    """Check kernel state: active kernels, defined variables, packages."""
+    args: dict = {}
+    if kernel_id:
+        args["kernel_id"] = kernel_id
+    return await _engine_call("python_status", args)
+
+
+@mcp.tool()
+async def python_interrupt(kernel_id: str | None = None) -> str:
+    """Interrupt running code in the solving kernel (state is preserved)."""
+    args: dict = {}
+    target = kernel_id or _kernel_id
+    if target:
+        args["kernel_id"] = target
+    return await _engine_call("python_interrupt", args)
+
+
+@mcp.tool()
+async def submit_code(code: str) -> CallToolResult:
+    """Submit the final, verified, self-contained solver program.
+
+    Call ONCE at the end, only after executing the program via python_exec
+    and passing your verification. The code is syntax-checked; on success it
+    is stored and linked as a resource (the server keeps the last 50).
+    """
+    result_text = await _engine_call("submit_code", {"code": code})
+    verdict = _parse_engine_json(result_text)
+
+    content: list = [TextContent(type="text", text=result_text)]
+    if verdict.get("ok"):
+        submission_id = uuid.uuid4().hex
+        _submissions[submission_id] = code
+        while len(_submissions) > _MAX_SUBMISSIONS:
+            _submissions.pop(next(iter(_submissions)))
         content.append(
             ResourceLink(
                 type="resource_link",
-                uri=AnyUrl(f"mcp-solver://runs/{run_id}/{program.name}"),
-                name=program.name,
-                description="The verified solver program that produced this"
-                f" solution (artifacts are retained for the {_MAX_RUNS} most"
-                " recent runs of this server).",
+                uri=AnyUrl(f"mcp-solver://submissions/{submission_id}"),
+                name=f"submission_{submission_id[:8]}.py",
+                description="The accepted solver program (compile-checked).",
                 mimeType="text/x-python",
-                size=program.stat().st_size,
+                size=len(code.encode()),
             )
         )
-    for log in sorted(workdir.glob("run_*.json")):
-        content.append(
-            ResourceLink(
-                type="resource_link",
-                uri=AnyUrl(f"mcp-solver://runs/{run_id}/{log.name}"),
-                name=log.name,
-                description="Complete agent run log (steps, tool calls, tokens).",
-                mimeType="application/json",
-                size=log.stat().st_size,
-            )
-        )
-
-    # structuredContent carries the machine-readable solution alongside the
-    # human/back-compat text block.
-    try:
-        parsed = json.loads(solution)
-    except json.JSONDecodeError:
-        parsed = None
-    structured = parsed if isinstance(parsed, dict) else None
-    return CallToolResult(content=content, structuredContent=structured)
+    return CallToolResult(
+        content=content,
+        structuredContent=verdict or None,
+    )
 
 
 def main() -> None:

@@ -1,9 +1,12 @@
 # MCP Solver Installation
 
-MCP Solver v4 runs an [mcp-minion](minion/) agent against the IPython kernel
-server of [agentic-python-coder](https://github.com/szeider/agentic-python-coder)
-to write and run real solver programs. This guide covers prerequisites, the
-install variants, verification, and common problems.
+MCP Solver v4 lets an LLM write and run real solver programs in a
+persistent IPython kernel (the kernel server of
+[agentic-python-coder](https://github.com/szeider/agentic-python-coder)).
+The solving LLM is either your MCP host (Claude Desktop/Code, Cursor —
+via `mcp-solver-serve`) or the bundled [mcp-minion](minion/) agent (via the
+`mcp-solver` CLI). This guide covers prerequisites, the install variants,
+verification, and common problems.
 
 > **v4 is not yet on PyPI.** PyPI still serves the old v3 server, so
 > `uv pip install "mcp-solver[agent]"` installs the wrong package. Until v4 is
@@ -48,10 +51,13 @@ Verify:
 uv --version
 ```
 
-### OpenRouter API key
+### OpenRouter API key (CLI path only)
 
-The agent calls models through [OpenRouter](https://openrouter.ai). Store your
-key in one of the places the CLI looks:
+The MCP server needs no API key — the host brings its own model. A key is
+required only for the `mcp-solver` CLI and the benchmark harness, whose
+bundled mcp-minion agent calls models through
+[OpenRouter](https://openrouter.ai). Store the key in one of the places the
+CLI looks:
 
 ```bash
 mkdir -p ~/.config/coder
@@ -171,10 +177,11 @@ You installed the bare package without the product layer. Install the `[agent]`
 extra. Until v4 is on PyPI, that means the clone + editable install:
 `uv pip install -e ".[agent]"` from a checkout (see [Install](#install)).
 
-**`the ipython_mcp server does not provide submit_code`**
-Your installed `agentic-python-coder` is older than 3.4.0. Upgrade it (from a
-checkout: `uv pip install -e /path/to/agentic-python-coder`, or from PyPI once
-3.4.0 is published).
+**`the ipython_mcp server does not provide submit_code`** (CLI) or
+**`the ipython_mcp engine is unavailable or lacks submit_code`** (server)
+Your installed `agentic-python-coder` is older than 3.4.1, or missing from
+the environment the server runs in. Upgrade it:
+`uv pip install "agentic-python-coder>=3.4.1"` (or `-e` from a checkout).
 
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its

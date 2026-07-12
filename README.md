@@ -2,10 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
 
-An MCP server for constraint solving (SAT, MaxSAT, SMT, CP, ASP). An LLM
-application hands over a problem in natural language; a solver-writing agent
-encodes it for a real solver, runs and verifies it, and returns the solution
-as JSON, together with the verified solver program that produced it.
+An MCP server for constraint solving (SAT, MaxSAT, SMT, CP, ASP). It turns
+the connected LLM host into a solver-writing agent: the host gets a Python
+kernel preloaded with a real solver library, modeling instructions for the
+chosen backend, and a submission gate. The host encodes the problem, runs
+and verifies it against the real solver, and submits the final program —
+the outcome is the solution plus the verified solver program that produced
+it.
 
 > **Version 4 is a complete re-architecture.** Both the MCP interface and the
 > solving engine changed; the design from the SAT 2025 paper (v3) lives on
@@ -16,16 +19,25 @@ as JSON, together with the verified solver program that produced it.
 ## The MCP server
 
 `mcp-solver-serve` runs over stdio and works with any MCP host: Claude
-Desktop, Claude Code, Cursor, or your own client. It exposes a deliberately
-small surface:
+Desktop, Claude Code, Cursor, or your own client. The host LLM does the
+solving itself — the server is a solver toolkit; it runs no LLM and needs
+no API key:
 
-- **One tool:** `solve(solver, problem)` returns the solution JSON (also as
-  structured content) plus `resource_link`s to the generated solver program
-  and the full run log.
-- **One resource:** `mcp-solver://guide` is a short backend-selection guide
-  the host model can consult before calling.
-- **Progress notifications** during the 30–120 seconds a solve typically
-  takes.
+- **`select_backend(solver)`** sets up a persistent IPython kernel with the
+  backend's solver library and helper functions, and returns the modeling
+  instructions for that backend. Calling it again recycles the kernel for
+  the next problem.
+- **Kernel tools** (`python_exec`, `python_reset`, `python_status`,
+  `python_interrupt`) let the host write, run, and verify a real solver
+  program; bare `python_exec` calls are routed to the solving kernel
+  automatically.
+- **`submit_code(code)`** is the finish line: the final self-contained
+  program is syntax-checked and, on success, stored and linked back as an
+  MCP resource (`mcp-solver://submissions/{id}`), with the verdict as
+  structured content.
+- **Resources:** `mcp-solver://guide` (backend selection and workflow) and
+  `mcp-solver://template/{solver}` (the full modeling instructions,
+  browsable without selecting).
 
 Claude Desktop configuration (once v4 is on PyPI):
 
@@ -53,15 +65,17 @@ From a checkout (the standard setup today, and the development path always):
 }
 ```
 
-The server reads `OPENROUTER_API_KEY` from the environment,
-`~/.config/coder/.env`, or `~/.mcp-minion`.
+The server needs no API key — the model doing the solving belongs to the
+host. An [OpenRouter](https://openrouter.ai) key is required only for the
+[command-line path](#command-line-use) below, which brings its own agent.
 
 ## Requirements
 
 - Python 3.13
 - [uv](https://docs.astral.sh/uv/) (a hard runtime requirement: solver
   libraries are supplied at solve time via `uv run --with`)
-- An [OpenRouter](https://openrouter.ai) API key
+- An [OpenRouter](https://openrouter.ai) API key — for the CLI and benchmark
+  harness only; the MCP server itself runs without one
 
 ## Installation
 
@@ -111,19 +125,19 @@ stderr.
 
 ### mcp-minion
 
-Both the MCP server and the CLI run **mcp-minion** underneath: a minimal
-ReAct agent over MCP, developed in this repo as the workspace package
-[`minion/`](minion/). It is a lightweight substitute for a full MCP host
-such as Claude Code, and it ships its own standalone CLI for running
-arbitrary agent tasks against MCP servers (see
+The CLI runs **mcp-minion** underneath: a minimal ReAct agent over MCP,
+developed in this repo as the workspace package [`minion/`](minion/). It is
+a lightweight, batchable substitute for a full MCP host such as Claude
+Desktop — point its standalone CLI at `mcp-solver-serve` (or any MCP server)
+to script what a chat host would do interactively (see
 [minion/README.md](minion/README.md)). The default agent model is
 `gpt56terra`, the bundled alias for OpenRouter's `openai/gpt-5.6-terra`.
 
 ## Backends
 
-Each backend is selected as the first CLI argument (or the `solver` tool
-argument). The right solver library is injected into the solve-time kernel
-automatically.
+Each backend is selected as the first CLI argument (or via the
+`select_backend` tool). The right solver library is injected into the
+solve-time kernel automatically.
 
 | Backend  | Domain                          | Solver library      |
 | -------- | ------------------------------- | ------------------- |
@@ -146,17 +160,18 @@ environment; instead it is injected into each solve-time kernel via
 This keeps the host environment clean and each solve reproducible.
 
 Each backend ships a **project template**: a markdown prompt (package data)
-that tells the agent the encoding conventions, output format, and helper API
-for that solver. When a solve starts, that template becomes the system prompt
-of an mcp-minion agent connected over stdio to the `ipython_mcp` kernel
-server from
-[agentic-python-coder](https://github.com/szeider/agentic-python-coder). The
-agent drives the write → execute → verify loop in a persistent IPython kernel
-and must end the solve by calling the server's `submit_code` tool with the
-final self-contained program (syntax-checked server-side, never written to
-disk by the kernel). The client extracts the last successful submission,
-writes it to `<basename>_code.py`, and re-executes it in a fresh `uv` kernel
-to produce the answer.
+with the encoding conventions, output format, and helper API for that
+solver. The template goes to whoever solves: an MCP host receives it from
+`select_backend`; the CLI hands it to its mcp-minion agent as the system
+prompt. Either way, the solving LLM drives the write → execute → verify
+loop in a persistent IPython kernel — the `ipython_mcp` server from
+[agentic-python-coder](https://github.com/szeider/agentic-python-coder) —
+and must end the solve by calling `submit_code` with the final
+self-contained program (syntax-checked server-side, never written to disk
+by the kernel). On the MCP path the accepted submission is linked back to
+the host as a resource; on the CLI path the client extracts the last
+successful submission, writes it to `<basename>_code.py`, and re-executes
+it in a fresh `uv` kernel to produce the answer.
 
 ## Benchmark harness
 
@@ -199,12 +214,12 @@ result independently, and only then submits the program as the answer.
 
 |                    | v3 (SAT 2025 paper)                          | v4 (CP-Agent / ASP-Bench approach)                 |
 | ------------------ | -------------------------------------------- | -------------------------------------------------- |
-| Who does the work  | The host chat LLM, via MCP editing tools     | A dedicated solver-writing agent (**mcp-minion**)  |
+| Who does the work  | The host chat LLM, via MCP editing tools     | The host LLM (or **mcp-minion** for batch runs), as a solver programmer |
 | Unit of work       | Model items (`add_item`, `solve_model`, …)   | A complete, runnable Python solver program         |
 | Execution          | Inside the MCP server                        | In a persistent IPython kernel (`ipython_mcp`)     |
 | Verification       | Manual, by the host LLM                      | Built into the loop: run → check → `submit_code`   |
 | Artifact           | Transient model state                        | A verified, re-executable program you keep         |
-| Host interface     | Many fine-grained MCP tools                  | One MCP `solve` tool / one CLI command             |
+| Host interface     | Many fine-grained model-editing tools        | A solving kernel: `select_backend`, `python_exec`, `submit_code` |
 | Backends           | MiniZinc, PySAT, MaxSAT, Z3, ASP             | PySAT, MaxSAT, Z3, CPMpy, Clingo                   |
 
 ## Citations

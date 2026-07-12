@@ -1,164 +1,275 @@
-"""Unit tests for the v4.1 MCP server (no LLM, no network).
+"""Unit tests for the v4.1 toolkit MCP server (no LLM, no network).
 
-The full-round-trip tests drive the real FastMCP server over an in-memory
-client session, with the CLI subprocess replaced by a fake that mimics its
-observable contract (stderr step lines, stdout solution JSON, artifact file).
+The round-trip tests drive the real FastMCP server over an in-memory client
+session; the engine (ipython_mcp) is replaced by a fake MCPManager that
+mimics its public contract: flat-JSON tool results (``success``/``kernel_id``
+for kernel tools, ``ok`` for submit_code) inside the client's
+``{"result"|"error"}`` envelope.
 """
 
-import asyncio
 import json
 
 import pytest
 
 from mcp_solver.agent import mcp_server
 
+BACKENDS = ("pysat", "maxsat", "z3", "cpmpy", "clingo")
+
+ENGINE_TOOLS = {
+    "python_exec",
+    "python_reset",
+    "python_status",
+    "python_interrupt",
+    "submit_code",
+}
+
+
+class FakeEngine:
+    """Mimics mcp_minion.MCPManager connected to the ipython_mcp engine."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+        self.kernels: set[str] = set()
+        self.next_id = 0
+        self.break_reset = False  # make python_reset return malformed JSON
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    def has_tool(self, name):
+        return name in ENGINE_TOOLS
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, dict(arguments)))
+        return json.dumps({"result": json.dumps(self._respond(name, arguments))})
+
+    def _respond(self, name, args):
+        if name == "python_reset":
+            if self.break_reset:
+                return {}
+            kid = args.get("kernel_id")
+            if kid:
+                if kid not in self.kernels:
+                    return {"success": False, "error": f"Kernel '{kid}' not found"}
+                return {"success": True, "kernel_id": kid, "message": "reset"}
+            self.next_id += 1
+            kid = f"k{self.next_id}"
+            self.kernels.add(kid)
+            return {"success": True, "kernel_id": kid, "message": "started"}
+        if name == "python_exec":
+            return {
+                "success": True,
+                "kernel_id": args.get("kernel_id", "_default"),
+                "stdout": "ran\n",
+                "stderr": "",
+                "result": None,
+                "error": None,
+            }
+        if name == "submit_code":
+            code = args.get("code", "")
+            try:
+                compile(code, "<submission>", "exec")
+            except SyntaxError as e:
+                return {
+                    "ok": False,
+                    "error": f"Syntax error at line {e.lineno}: {e.msg}",
+                }
+            return {"ok": True}
+        return {"success": True, "kernel_id": args.get("kernel_id")}
+
+
+@pytest.fixture()
+def engine(monkeypatch):
+    """Fresh fake engine wired into the server's lifespan + clean state."""
+    import mcp_minion
+
+    fake = FakeEngine()
+    monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: fake)
+    monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
+    monkeypatch.setattr(mcp_server, "_kernel_id", None)
+    mcp_server._submissions.clear()
+    return fake
+
+
+def _session():
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    return create_connected_server_and_client_session(mcp_server.mcp._mcp_server)
+
+
+def _engine_payload(result) -> dict:
+    """Decode the engine's flat JSON from a proxied tool result."""
+    return json.loads(result.content[0].text)
+
+
 # --- Tier 0 budget ----------------------------------------------------------
 
 
-def test_tool_description_within_budget():
+def test_select_backend_description_within_budget():
     # Claude Code truncates tool descriptions at 2KB; spec budget is 1.2KB.
-    assert len(mcp_server.SOLVE_DESCRIPTION.encode()) <= 1200
+    assert len(mcp_server.SELECT_BACKEND_DESCRIPTION.encode()) <= 1200
 
 
-def test_guide_mentions_every_backend():
-    for solver in ("pysat", "maxsat", "z3", "cpmpy", "clingo"):
+def test_guide_and_description_mention_every_backend():
+    for solver in BACKENDS:
         assert solver in mcp_server.GUIDE
-        assert solver in mcp_server.SOLVE_DESCRIPTION
+        assert solver in mcp_server.SELECT_BACKEND_DESCRIPTION
 
 
-# --- run artifact resource guards ------------------------------------------
+# --- resource functions -----------------------------------------------------
 
 
-def test_run_file_unknown_run():
-    with pytest.raises(ValueError, match="unknown run"):
-        mcp_server.run_file("nope", "problem_code.py")
+def test_template_resource_returns_backend_instructions():
+    assert "z3" in mcp_server.template_resource("z3").lower()
 
 
-def test_run_file_no_traversal(tmp_path, monkeypatch):
-    (tmp_path / "problem_code.py").write_text("print(1)", encoding="utf-8")
-    secret = tmp_path.parent / "secret.txt"
-    secret.write_text("s", encoding="utf-8")
-    monkeypatch.setitem(mcp_server._runs, "r1", tmp_path)
-    assert mcp_server.run_file("r1", "problem_code.py") == "print(1)"
-    with pytest.raises(ValueError, match="unknown artifact"):
-        mcp_server.run_file("r1", "../secret.txt")
-    with pytest.raises(ValueError, match="unknown artifact"):
-        mcp_server.run_file("r1", "absent.py")
+def test_template_resource_rejects_unknown_solver():
+    with pytest.raises(ValueError, match="unknown solver"):
+        mcp_server.template_resource("gurobi")
 
 
-# --- full in-memory round trip ---------------------------------------------
+def test_submission_resource_rejects_unknown_id():
+    with pytest.raises(ValueError, match="unknown submission"):
+        mcp_server.submission_resource("nope")
 
 
-def _reader(data: bytes) -> asyncio.StreamReader:
-    reader = asyncio.StreamReader()
-    reader.feed_data(data)
-    reader.feed_eof()
-    return reader
+# --- engine envelope helpers ------------------------------------------------
 
 
-class FakeProc:
-    """Mimics the CLI subprocess: step lines, solution JSON, artifact file."""
-
-    def __init__(self, cmd: list[str]):
-        from pathlib import Path
-
-        workdir = Path(cmd[cmd.index("--workdir") + 1])
-        (workdir / "problem_code.py").write_text(
-            "print('{\"satisfiable\": true}')", encoding="utf-8"
-        )
-        (workdir / "run_20260712_000000.json").write_text("{}", encoding="utf-8")
-        self.stdout = _reader(b'{"satisfiable": true, "x": 2}\n')
-        self.stderr = _reader(
-            b"mcp-solver: step 1: python_exec\n"
-            b"mcp-solver: step 2: submit_code\n"
-            b"mcp-solver: step 3: final answer\n"
-        )
-
-    async def wait(self) -> int:
-        return 0
-
-    def kill(self) -> None:  # pragma: no cover - not hit on success
-        pass
+def test_parse_engine_json():
+    assert mcp_server._parse_engine_json('{"ok": true}') == {"ok": True}
+    assert mcp_server._parse_engine_json("not json") == {}
+    assert mcp_server._parse_engine_json("[1, 2]") == {}
 
 
-async def _fake_subprocess(*cmd, **kwargs):
-    return FakeProc(list(cmd))
+async def test_engine_call_without_engine(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_engine", None)
+    with pytest.raises(Exception, match="engine not connected"):
+        await mcp_server._engine_call("python_exec", {"code": "1"})
 
 
-async def test_solve_round_trip(monkeypatch):
-    from mcp.shared.memory import create_connected_server_and_client_session
+async def test_engine_call_surfaces_client_error(monkeypatch):
+    class Broken:
+        async def call_tool(self, name, arguments):
+            return json.dumps({"error": "Tool 'python_exec' timed out"})
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_subprocess)
+    monkeypatch.setattr(mcp_server, "_engine", Broken())
+    with pytest.raises(Exception, match="timed out"):
+        await mcp_server._engine_call("python_exec", {"code": "1"})
 
-    async with create_connected_server_and_client_session(
-        mcp_server.mcp._mcp_server
-    ) as session:
-        # Tier 0: the tool is listed with its full description.
+
+# --- full in-memory round trip ----------------------------------------------
+
+
+async def test_toolkit_round_trip(engine):
+    async with _session() as session:
+        # Tier 0: all six tools are listed, budgets hold at protocol level.
         tools = await session.list_tools()
-        assert [t.name for t in tools.tools] == ["solve"]
+        names = {t.name for t in tools.tools}
+        assert names == ENGINE_TOOLS | {"select_backend"}
+        for t in tools.tools:
+            assert len((t.description or "").encode()) <= 1200
 
         # Tier 1: the guide resource is readable.
         guide = await session.read_resource("mcp-solver://guide")
         assert "cpmpy" in guide.contents[0].text
 
-        # The solve itself.
-        result = await session.call_tool(
-            "solve", {"solver": "z3", "problem": "toy problem"}
-        )
+        # select_backend: fresh kernel, template + note, structuredContent.
+        result = await session.call_tool("select_backend", {"solver": "z3"})
         assert not result.isError
-        text = result.content[0]
-        assert json.loads(text.text) == {"satisfiable": True, "x": 2}
-        # The machine-readable solution rides along as structuredContent.
-        assert result.structuredContent == {"satisfiable": True, "x": 2}
+        text = result.content[0].text
+        assert "fresh solving kernel" in text
+        assert "submit_code" in text
+        sc = result.structuredContent
+        assert sc["solver"] == "z3" and sc["kernel_id"] == "k1"
+        assert sc["recycled"] is False
+        assert sc["packages"][0] == "z3-solver"
+        name, args = engine.calls[0]
+        assert name == "python_reset" and "kernel_id" not in args
+        assert args["packages"][0] == "z3-solver"
 
-        # Tier 2: resource links to the program and the run log...
-        links = [c for c in result.content if c.type == "resource_link"]
-        assert [link.name for link in links] == [
-            "problem_code.py",
-            "run_20260712_000000.json",
-        ]
-        # ...and the linked program is fetchable through the resource.
-        program = await session.read_resource(links[0].uri)
-        assert "satisfiable" in program.contents[0].text
+        # Bare python_exec is routed to the solving kernel...
+        result = await session.call_tool("python_exec", {"code": "print(1)"})
+        assert _engine_payload(result)["kernel_id"] == "k1"
+        assert engine.calls[-1][1]["kernel_id"] == "k1"
+        # ...and an explicit kernel_id overrides the routing.
+        await session.call_tool(
+            "python_exec", {"code": "print(1)", "kernel_id": "other"}
+        )
+        assert engine.calls[-1][1]["kernel_id"] == "other"
+
+        # Re-selecting recycles the same kernel (state cleared).
+        result = await session.call_tool("select_backend", {"solver": "pysat"})
+        text = result.content[0].text
+        assert "recycled" in text
+        sc = result.structuredContent
+        assert sc["kernel_id"] == "k1" and sc["recycled"] is True
+        assert sc["packages"][0] == "python-sat"
+        name, args = engine.calls[-1]
+        assert name == "python_reset" and args["kernel_id"] == "k1"
+
+        # A stale kernel falls back to a fresh one.
+        engine.kernels.clear()
+        result = await session.call_tool("select_backend", {"solver": "cpmpy"})
+        sc = result.structuredContent
+        assert sc["kernel_id"] == "k2" and sc["recycled"] is False
 
 
-async def test_solve_rejects_bad_input():
-    from mcp.shared.memory import create_connected_server_and_client_session
-
-    async with create_connected_server_and_client_session(
-        mcp_server.mcp._mcp_server
-    ) as session:
-        result = await session.call_tool("solve", {"solver": "gurobi", "problem": "x"})
+async def test_select_backend_rejects_unknown_solver(engine):
+    async with _session() as session:
+        result = await session.call_tool("select_backend", {"solver": "gurobi"})
         assert result.isError
         assert "unknown solver" in result.content[0].text
 
-        result = await session.call_tool("solve", {"solver": "z3", "problem": " "})
+
+async def test_select_backend_fails_closed_on_malformed_reset(engine):
+    # An engine reply without a "success" field must surface as an error,
+    # not as a phantom "fresh kernel ready" with kernel_id None.
+    engine.break_reset = True
+    async with _session() as session:
+        result = await session.call_tool("select_backend", {"solver": "z3"})
         assert result.isError
+        assert "kernel setup" in result.content[0].text
+    assert mcp_server._kernel_id is None
 
 
-class FailingProc:
-    def __init__(self):
-        self.stdout = _reader(b"")
-        self.stderr = _reader(b"mcp-solver: something broke\n")
+async def test_submit_code_round_trip(engine):
+    async with _session() as session:
+        # Syntax errors are rejected: no resource_link, ok=false rides along.
+        result = await session.call_tool("submit_code", {"code": "def f(:"})
+        assert not result.isError
+        assert result.structuredContent["ok"] is False
+        assert all(c.type != "resource_link" for c in result.content)
 
-    async def wait(self) -> int:
-        return 3
+        # A valid program is stored and linked as a fetchable resource.
+        program = "print('{\"answer\": 42}')"
+        result = await session.call_tool("submit_code", {"code": program})
+        assert result.structuredContent == {"ok": True}
+        links = [c for c in result.content if c.type == "resource_link"]
+        assert len(links) == 1
+        assert links[0].size == len(program.encode())
+        fetched = await session.read_resource(links[0].uri)
+        assert fetched.contents[0].text == program
 
-    def kill(self) -> None:  # pragma: no cover
-        pass
+
+async def test_submission_store_is_bounded(engine, monkeypatch):
+    monkeypatch.setattr(mcp_server, "_MAX_SUBMISSIONS", 2)
+    async with _session() as session:
+        for i in range(3):
+            result = await session.call_tool("submit_code", {"code": f"print({i})"})
+            assert result.structuredContent == {"ok": True}
+    assert len(mcp_server._submissions) == 2
+    assert list(mcp_server._submissions.values()) == ["print(1)", "print(2)"]
 
 
-async def test_solve_surfaces_cli_failure(monkeypatch):
-    from mcp.shared.memory import create_connected_server_and_client_session
-
-    async def fake(*cmd, **kwargs):
-        return FailingProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake)
-
-    async with create_connected_server_and_client_session(
-        mcp_server.mcp._mcp_server
-    ) as session:
-        result = await session.call_tool("solve", {"solver": "z3", "problem": "toy"})
-        assert result.isError
-        assert "exit 3" in result.content[0].text
+async def test_manual_reset_retargets_routing(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        # A manual python_reset creates a second kernel and takes over routing.
+        result = await session.call_tool("python_reset", {})
+        assert _engine_payload(result)["kernel_id"] == "k2"
+        await session.call_tool("python_exec", {"code": "print(1)"})
+        assert engine.calls[-1][1]["kernel_id"] == "k2"
