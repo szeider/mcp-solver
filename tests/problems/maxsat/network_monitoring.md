@@ -41,3 +41,20 @@ Find the optimal set of servers to monitor that:
 - Total cost
 - Total monitoring value
 - Verification that all edges are covered
+
+## Output Format
+
+Return a single JSON object. On success, `satisfiable` is `true`,
+`selected_servers` is the list of monitored server names (from "Core1",
+"Core2", "Web1", "Web2", "DB1", "Edge1"), `total_cost` and
+`total_monitoring_value` sum the cost and value of the selected servers,
+`all_edges_covered` is a boolean, and `soft_penalty` is the combined objective
+`sum(cost of selected) + sum(20 - value over unselected)`. The selection must
+cover every edge, include at least one Core server, and minimize
+`soft_penalty`.
+
+```json
+{"satisfiable": true, "selected_servers": ["Core1", "Core2", "Web1", "Web2", "DB1", "Edge1"], "total_cost": 14, "total_monitoring_value": 45, "all_edges_covered": true, "soft_penalty": 14}
+```
+
+If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

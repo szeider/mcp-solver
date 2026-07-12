@@ -26,3 +26,17 @@ Find the optimal assignment that satisfies all constraints and minimizes the tot
 - Assignment of each task to an employee
 - Total penalty incurred
 - Verification that constraints are satisfied
+
+## Output Format
+
+Return a single JSON object. On success, `satisfiable` is `true`,
+`assignment` maps `"Task A"` and `"Task B"` each to `"Alice"` or `"Bob"`,
+`total_penalty` is the incurred penalty, and `constraints_satisfied` is a
+boolean. The assignment must satisfy the hard constraints and achieve the
+minimum possible total penalty.
+
+```json
+{"satisfiable": true, "assignment": {"Task A": "Alice", "Task B": "Bob"}, "total_penalty": 0, "constraints_satisfied": true}
+```
+
+If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

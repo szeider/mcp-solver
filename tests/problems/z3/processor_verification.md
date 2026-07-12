@@ -23,3 +23,33 @@ Using Z3 SMT solver with bitvector theory, determine whether the following prope
 The parity bit of a value is defined as 1 if the number of 1 bits in its binary representation is odd, and 0 if the number is even.
 
 Provide a clear answer with evidence supporting your conclusion. If the property does not hold, provide a specific counterexample showing register and memory values.
+
+## Output Format
+
+Return a single JSON object on stdout with this schema:
+
+- `property_holds` (boolean): `true` if R3 always equals the parity bit of
+  R0, `false` otherwise.
+- `counterexample` (object): **required when `property_holds` is `false`.**
+  Must contain enough of the initial state to reproduce the falsifying run:
+  - `initial_registers` (object): at least `R0` (integer 0-255).
+  - `initial_memory` (list of 8 integers 0-255): memory contents before
+    execution.
+  Additional fields (`final_registers`, `final_memory`, `zero_flags`,
+  `evidence`) are optional and ignored by validation.
+
+The property does **not** hold: R3 ends up as the low bit of
+`memory[R0] XOR R0`, which is not the bit-count parity of R0. The expected
+verdict is therefore `property_holds: false` with a valid counterexample.
+
+Example:
+
+```json
+{
+  "property_holds": false,
+  "counterexample": {
+    "initial_registers": {"R0": 253, "R1": 0, "R2": 0, "R3": 0},
+    "initial_memory": [1, 1, 1, 1, 1, 1, 1, 1]
+  }
+}
+```

@@ -46,3 +46,15 @@ Some examples of lines that must be avoided:
 - **Slope 2:** [(0,0), (1,2), (2,4)]
 
 **Question:** Can you find such a configuration of 10 points and prove that no three of them are collinear?
+
+## Output Format
+
+Return a single JSON object. On success, `satisfiable` is `true` and `points`
+is a list of exactly 10 distinct `[x, y]` pairs with `x, y ∈ {0, 1, 2, 3, 4}`
+such that no three of the points are collinear.
+
+```json
+{"satisfiable": true, "points": [[0, 0], [0, 1], [1, 0], [1, 3], [2, 3], [2, 4], [3, 1], [3, 2], [4, 2], [4, 4]]}
+```
+
+If no such configuration exists: `{"satisfiable": false}`.

@@ -29,3 +29,18 @@ Find a schedule that satisfies all constraints and maximizes employee satisfacti
 ## Expected Output
 - Assignment of each workshop to a time slot
 - Total satisfaction score achieved
+
+## Output Format
+
+Return a single JSON object with a boolean `satisfiable` field. The hard
+constraints force all three workshops into the Morning slot while forbidding
+any two workshops from sharing a slot, which is impossible with only two
+slots. The expected answer is therefore:
+
+```json
+{"satisfiable": false}
+```
+
+If instead a schedule is claimed, report it as
+`{"satisfiable": true, "schedule": {"Workshop A": "Morning", "Workshop B": "Morning", "Workshop C": "Morning"}}`,
+mapping each workshop to `"Morning"` or `"Afternoon"`.

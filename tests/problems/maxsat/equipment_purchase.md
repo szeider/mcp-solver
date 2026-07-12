@@ -22,3 +22,18 @@ Find the optimal set of equipment that maximizes total capability value while sa
 - Equipment selected
 - Total cost
 - Total value (including any synergy bonus)
+
+## Output Format
+
+Return a single JSON object. On success, `satisfiable` is `true`,
+`equipment_selected` is the list of chosen equipment names (from "Analyzer",
+"Bench", "Computer", "Desk"), `total_cost` is their combined cost, and
+`total_value` is the combined capability value including the +2 synergy bonus
+when both Bench and Desk are chosen. The selection must respect the budget and
+the Analyzer→Computer dependency, and maximize total value.
+
+```json
+{"satisfiable": true, "equipment_selected": ["Analyzer", "Computer", "Desk"], "total_cost": 7000, "total_value": 18}
+```
+
+If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

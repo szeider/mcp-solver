@@ -28,7 +28,7 @@ A university needs to schedule 10 courses across 5 time slots and 4 rooms. Each 
 4. PS101 cannot be scheduled in Room 1 or Room 2
 5. PS101 and AR101 must be in the same room, with AR101 in the time slot immediately after PS101
 6. HI101 must be in the same room as PS101 and AR101, and must be scheduled in the time slot immediately after AR101
-7. EN101 must be in the same room as HI101, PS101, and AR101, and must be scheduled in the time slot immediately after EN101
+7. EN101 must be in the same room as HI101, PS101, and AR101, and must be scheduled in the time slot immediately after HI101
 
 A valid schedule assigns each course to exactly one time slot and one room while satisfying all of the above constraints.
 
