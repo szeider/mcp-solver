@@ -21,7 +21,7 @@ dependencies = []
 [project.optional-dependencies]
 # The product layer: CLI, templates, (later) MCP server.
 agent = [
-    "agentic-python-coder>=3.3.0",
+    "agentic-python-coder>=3.4.0",
     "mcp-minion>=0.1.0",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
