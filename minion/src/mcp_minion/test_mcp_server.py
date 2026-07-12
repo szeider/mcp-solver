@@ -1,12 +1,37 @@
-"""Minimal MCP server for testing - provides echo and add tools."""
+"""Minimal MCP server for testing - provides echo/add tools and a resource."""
 
 import asyncio
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import Resource, TextContent, Tool
+from pydantic import AnyUrl
 
 server = Server("test-server")
+
+GREETING_URI = "test://greeting"
+GREETING_TEXT = "Hello from the test resource."
+
+
+@server.list_resources()
+async def list_resources() -> list[Resource]:
+    """Return available resources."""
+    return [
+        Resource(
+            uri=AnyUrl(GREETING_URI),
+            name="greeting",
+            description="A test greeting resource",
+            mimeType="text/plain",
+        )
+    ]
+
+
+@server.read_resource()
+async def read_resource(uri: AnyUrl) -> str:
+    """Serve a resource by URI."""
+    if str(uri) == GREETING_URI:
+        return GREETING_TEXT
+    raise ValueError(f"Unknown resource: {uri}")
 
 
 @server.list_tools()

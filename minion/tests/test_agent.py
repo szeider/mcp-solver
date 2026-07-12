@@ -154,3 +154,62 @@ async def test_max_steps_reached_flag() -> None:
     assert result.max_steps_reached is True
     assert "maximum steps" in result.answer
     assert result.input_tokens == 7
+
+
+# --- read_resource built-in tool --------------------------------------------
+
+
+class FakeResourceManager:
+    """MCP manager stub exposing resources but no read_resource tool."""
+
+    def __init__(self):
+        self.read_uris: list[str] = []
+
+    def has_tool(self, name: str) -> bool:
+        return False
+
+    def get_tools(self):
+        return []
+
+    def get_resources(self):
+        from mcp_minion.mcp_client import MCPResourceInfo
+
+        return [
+            MCPResourceInfo(
+                uri="app://guide",
+                name="guide",
+                description="How to choose.\nMore detail.",
+                mime_type="text/markdown",
+                server_name="app",
+            )
+        ]
+
+    async def read_resource(self, uri: str) -> str:
+        self.read_uris.append(uri)
+        return "guide text"
+
+
+async def test_read_resource_tool_routes_to_manager() -> None:
+    import json
+
+    mcp = FakeResourceManager()
+    agent = Agent(api_key="k", tools=None, mcp_manager=mcp)
+    result = await agent._execute_tool("read_resource", {"uri": "app://guide"})
+    assert json.loads(result) == {"result": "guide text"}
+    assert mcp.read_uris == ["app://guide"]
+
+
+async def test_read_resource_missing_uri_is_error() -> None:
+    import json
+
+    agent = Agent(api_key="k", tools=None, mcp_manager=FakeResourceManager())
+    result = await agent._execute_tool("read_resource", {})
+    assert "error" in json.loads(result)
+
+
+def test_tool_sections_list_resources() -> None:
+    agent = Agent(api_key="k", tools=None, mcp_manager=FakeResourceManager())
+    sections = agent._build_tool_sections()
+    assert "## Resources" in sections
+    assert "`app://guide` (guide): How to choose." in sections
+    assert "read_resource" in sections

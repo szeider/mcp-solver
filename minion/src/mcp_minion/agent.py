@@ -60,6 +60,30 @@ def build_system_prompt(
     return custom_template
 
 
+# Built-in tool for following MCP resources (announced ones and resource_links
+# received in tool results). Only offered when an MCP manager is attached and
+# no server defines a tool of the same name.
+READ_RESOURCE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_resource",
+        "description": "Read an MCP resource by its URI — one listed in the"
+        " Resources section of your instructions, or received as a"
+        " [resource_link] in a tool result.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uri": {
+                    "type": "string",
+                    "description": "The resource URI to read.",
+                }
+            },
+            "required": ["uri"],
+        },
+    },
+}
+
+
 def _extract_kernel_id(result: str) -> str | None:
     """Pull a ``kernel_id`` out of a python_reset tool result, if present.
 
@@ -155,7 +179,8 @@ class Agent:
             return ""
 
         tools = self.mcp_manager.get_tools()
-        if not tools:
+        resources = self.mcp_manager.get_resources()
+        if not tools and not resources:
             return ""
 
         # Group tools by server
@@ -174,6 +199,20 @@ class Agent:
                     else "No description"
                 )
                 sections.append(f"- `{tool.name}`: {desc}")
+            sections.append("")
+
+        # Announced resources: list them cheaply; content is fetched on
+        # demand via read_resource (successive revelation).
+        if resources:
+            sections.append("## Resources")
+            sections.append(
+                "Fetch any of these — or any [resource_link] URI you receive"
+                " in a tool result — with the `read_resource` tool:"
+            )
+            for res in resources:
+                desc = res.description.split("\n")[0] if res.description else ""
+                suffix = f": {desc}" if desc else ""
+                sections.append(f"- `{res.uri}` ({res.name}){suffix}")
             sections.append("")
 
         return "\n".join(sections) + "\n"
@@ -214,6 +253,10 @@ class Agent:
             mcp_tools = self.mcp_manager.get_openai_tools()
             openai_tools.extend(mcp_tools)
             mcp_tool_names = {t["function"]["name"] for t in mcp_tools}
+            # Resource access, unless a server claims the name itself.
+            if "read_resource" not in mcp_tool_names:
+                openai_tools.append(READ_RESOURCE_TOOL)
+                mcp_tool_names.add("read_resource")
 
         if self.tools:
             # Skip built-in tools that conflict with MCP tools
@@ -460,6 +503,18 @@ class Agent:
             and "kernel_id" not in tool_args
         ):
             tool_args["kernel_id"] = self._kernel_id
+
+        # Built-in resource access (only when no server claims the name).
+        if (
+            tool_name == "read_resource"
+            and self.mcp_manager
+            and not self.mcp_manager.has_tool("read_resource")
+        ):
+            try:
+                text = await self.mcp_manager.read_resource(tool_args["uri"])
+            except Exception as e:
+                return json.dumps({"error": f"read_resource failed: {e}"})
+            return json.dumps({"result": text})
 
         # Check MCP tools first
         if self.mcp_manager and self.mcp_manager.has_tool(tool_name):

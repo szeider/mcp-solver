@@ -9,6 +9,7 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from pydantic import AnyUrl
 
 # Client-side timeouts (seconds).
 INIT_TIMEOUT = 30.0
@@ -17,10 +18,19 @@ TIMEOUT_MARGIN = 30.0
 
 
 def _content_text(content: Any) -> str:
-    """Join the text of MCP content items (used for results and errors alike)."""
+    """Join the text of MCP content items (used for results and errors alike).
+
+    ``resource_link`` items are rendered as a fetchable reference so the model
+    can follow them with the read_resource tool (Tier 2 of a
+    successive-revelation server).
+    """
     parts = []
     for item in content:
-        if hasattr(item, "text"):
+        if getattr(item, "type", None) == "resource_link":
+            desc = getattr(item, "description", None)
+            suffix = f" — {desc}" if desc else ""
+            parts.append(f"[resource_link] {item.uri} ({item.name}){suffix}")
+        elif hasattr(item, "text"):
             parts.append(item.text)
         else:
             parts.append(str(item))
@@ -34,6 +44,17 @@ class MCPToolInfo:
     name: str
     description: str
     parameters: dict[str, Any]
+    server_name: str
+
+
+@dataclass
+class MCPResourceInfo:
+    """Information about an MCP resource."""
+
+    uri: str
+    name: str
+    description: str
+    mime_type: str | None
     server_name: str
 
 
@@ -59,6 +80,9 @@ class MCPManager:
         self.tool_timeout = tool_timeout
         self._sessions: dict[str, ClientSession] = {}
         self._tools: dict[str, MCPToolInfo] = {}  # tool_name -> MCPToolInfo
+        self._resources: list[MCPResourceInfo] = []
+        # uri -> server that produced it as a resource_link in a tool result.
+        self._link_origins: dict[str, str] = {}
         self._exit_stack: AsyncExitStack | None = None
 
     async def __aenter__(self) -> "MCPManager":
@@ -105,36 +129,100 @@ class MCPManager:
             ClientSession(read_stream, write_stream)
         )
 
-        # Initialize and discover tools with timeout
-        await asyncio.wait_for(session.initialize(), timeout=INIT_TIMEOUT)
-        tools_result = await asyncio.wait_for(
-            session.list_tools(), timeout=INIT_TIMEOUT
-        )
+        # Initialize; per the MCP lifecycle, only negotiated capabilities may
+        # be used afterwards, so tool/resource discovery is capability-gated.
+        init_result = await asyncio.wait_for(session.initialize(), timeout=INIT_TIMEOUT)
+        capabilities = init_result.capabilities
 
-        # Stage the server's tools first; commit session and tools together
-        # only once every collision check has passed, so a failure leaves no
-        # half-registered server behind.
+        # Stage the server's tools first (consuming cursor pagination); commit
+        # session and tools together only once every collision check has
+        # passed, so a failure leaves no half-registered server behind.
         staged: dict[str, MCPToolInfo] = {}
-        for tool in tools_result.tools:
-            if tool.name in self._tools or tool.name in staged:
-                owner = (
-                    self._tools[tool.name].server_name
-                    if tool.name in self._tools
-                    else server_name
-                )
-                raise ValueError(
-                    f"Tool name collision: '{tool.name}' from server '{server_name}' "
-                    f"conflicts with tool from server '{owner}'"
-                )
-            staged[tool.name] = MCPToolInfo(
-                name=tool.name,
-                description=tool.description or "",
-                parameters=tool.inputSchema or {"type": "object", "properties": {}},
-                server_name=server_name,
+        cursor: str | None = None
+        while capabilities.tools is not None:
+            tools_result = await asyncio.wait_for(
+                session.list_tools(cursor=cursor), timeout=INIT_TIMEOUT
             )
+            for tool in tools_result.tools:
+                if tool.name in self._tools or tool.name in staged:
+                    owner = (
+                        self._tools[tool.name].server_name
+                        if tool.name in self._tools
+                        else server_name
+                    )
+                    raise ValueError(
+                        f"Tool name collision: '{tool.name}' from server "
+                        f"'{server_name}' conflicts with tool from server '{owner}'"
+                    )
+                staged[tool.name] = MCPToolInfo(
+                    name=tool.name,
+                    description=tool.description or "",
+                    parameters=tool.inputSchema or {"type": "object", "properties": {}},
+                    server_name=server_name,
+                )
+            cursor = tools_result.nextCursor
+            if not cursor:
+                break
 
         self._sessions[server_name] = session
         self._tools.update(staged)
+
+        # Discover announced resources (optional capability, paginated).
+        if capabilities.resources is None:
+            return
+        cursor = None
+        while True:
+            res_result = await asyncio.wait_for(
+                session.list_resources(cursor=cursor), timeout=INIT_TIMEOUT
+            )
+            for res in res_result.resources:
+                self._resources.append(
+                    MCPResourceInfo(
+                        uri=str(res.uri),
+                        name=res.name or str(res.uri),
+                        description=res.description or "",
+                        mime_type=res.mimeType,
+                        server_name=server_name,
+                    )
+                )
+            cursor = res_result.nextCursor
+            if not cursor:
+                break
+
+    def get_resources(self) -> list[MCPResourceInfo]:
+        """Get all announced MCP resources."""
+        return list(self._resources)
+
+    async def read_resource(self, uri: str) -> str:
+        """Read a resource by URI and return its text content.
+
+        Constrained fetch, per the MCP host guidance: only URIs a server has
+        announced via resources/list, or produced itself as a resource_link
+        in one of its tool results, can be read — and each read is routed to
+        that origin server only (no probing of other servers).
+        """
+        owner = next((r.server_name for r in self._resources if r.uri == uri), None)
+        if owner is None:
+            owner = self._link_origins.get(uri)
+        if owner is None:
+            raise ValueError(
+                f"unknown resource URI {uri!r}: only announced resources and"
+                " resource_links received in tool results can be read"
+            )
+        session = self._sessions.get(owner)
+        if session is None:
+            raise ValueError(f"MCP server '{owner}' not connected")
+
+        result = await asyncio.wait_for(
+            session.read_resource(AnyUrl(uri)), timeout=INIT_TIMEOUT
+        )
+        parts = []
+        for item in result.contents:
+            if hasattr(item, "text"):
+                parts.append(item.text)
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Call a tool and return the result as a JSON string.
@@ -161,6 +249,12 @@ class MCPManager:
                 session.call_tool(name, arguments),
                 timeout=self._effective_timeout(arguments),
             )
+
+            # Remember which server produced each resource_link so later
+            # read_resource calls route to the origin server only.
+            for item in result.content:
+                if getattr(item, "type", None) == "resource_link":
+                    self._link_origins[str(item.uri)] = tool_info.server_name
 
             if result.isError:
                 return json.dumps({"error": _content_text(result.content)})

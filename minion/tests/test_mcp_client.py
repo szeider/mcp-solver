@@ -70,3 +70,63 @@ def test_effective_timeout_custom_and_bad_arg() -> None:
     assert manager._effective_timeout({}) == 60.0
     assert manager._effective_timeout({"timeout": "soon"}) == 60.0
     assert manager._effective_timeout({"timeout": 90}) == 120.0
+
+
+# --- resource discovery and reading ----------------------------------------
+
+
+async def test_discovers_and_reads_bundled_resource() -> None:
+    async with MCPManager(BUNDLED_SERVER) as manager:
+        resources = manager.get_resources()
+        assert [r.uri for r in resources] == ["test://greeting"]
+        assert resources[0].name == "greeting"
+        assert resources[0].server_name == "test"
+        text = await manager.read_resource("test://greeting")
+        assert text == "Hello from the test resource."
+
+
+async def test_read_unknown_uri_is_rejected() -> None:
+    # Constrained fetch: neither announced nor received as a resource_link.
+    async with MCPManager(BUNDLED_SERVER) as manager:
+        import pytest
+
+        with pytest.raises(ValueError, match="unknown resource URI"):
+            await manager.read_resource("test://absent")
+
+
+async def test_read_resource_without_servers_raises() -> None:
+    import pytest
+
+    manager = MCPManager({})
+    with pytest.raises(ValueError, match="unknown resource URI"):
+        await manager.read_resource("test://greeting")
+
+
+async def test_resource_link_origin_allows_read() -> None:
+    # A URI learned from a resource_link (not announced) is readable and
+    # routed to its origin server.
+    async with MCPManager(BUNDLED_SERVER) as manager:
+        manager._resources.clear()
+        manager._link_origins["test://greeting"] = "test"
+        text = await manager.read_resource("test://greeting")
+        assert text == "Hello from the test resource."
+
+
+def test_content_text_renders_resource_links() -> None:
+    from mcp.types import ResourceLink, TextContent
+    from pydantic import AnyUrl
+
+    from mcp_minion.mcp_client import _content_text
+
+    content = [
+        TextContent(type="text", text="solution"),
+        ResourceLink(
+            type="resource_link",
+            uri=AnyUrl("app://runs/1/code.py"),
+            name="code.py",
+            description="the program",
+        ),
+    ]
+    text = _content_text(content)
+    assert "solution" in text
+    assert "[resource_link] app://runs/1/code.py (code.py) — the program" in text
