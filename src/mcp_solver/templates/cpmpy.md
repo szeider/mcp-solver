@@ -96,6 +96,9 @@ CPMpy models can easily contain subtle logic bugs. Before saving, you MUST:
    assert not model2.solve(), "Solution is not optimal"
    ```
 
-Do NOT call save_code until verification passes. If it fails, fix the model and re-verify.
+Finish by calling `submit_code` with the final, verified program as one
+self-contained script (all imports included, no reliance on session state).
+Do NOT call submit_code until verification passes. If it fails, fix the model
+and re-verify.
 
 That's it. Read the problem carefully, model it declaratively, verify independently, and let CPMpy find the optimal solution.

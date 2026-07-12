@@ -127,7 +127,7 @@ weights to the underlying variables again.
 - Helper functions return clause lists — append EVERY clause, don't append
   the list itself.
 - Building the WCNF without instantiating RC2 solves nothing.
-- Do NOT print anything except the final JSON in the saved program.
+- Do NOT print anything except the final JSON in the submitted program.
 
 ## Output Format Rules
 
@@ -159,7 +159,9 @@ independent of the encoding:
    statement; if any clause lacks justification, remove it and re-solve
    before reporting UNSAT.
 
-Do NOT call save_code until verification passes.
+Finish by calling `submit_code` with the final, verified program as one
+self-contained script (all imports included, no reliance on session state).
+Do NOT call submit_code until verification passes.
 
 That's it. Separate hard from soft, penalize what you don't want, verify the
 objective independently, and let RC2 find the optimum.

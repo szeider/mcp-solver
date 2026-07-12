@@ -33,7 +33,8 @@ Before completing your solution, verify:
 ☐ 5. **Output format correct** - JSON output with appropriate structure
 ☐ 6. **Predicates meaningful** - Clear names that reflect the problem domain
 ☐ 7. **Constraints verified independently** - All problem constraints are encoded AND re-checked by a plain-Python verify() whose expectations are re-derived from the problem text, not from your encoding's own interpretation
-☐ 8. **File written** - Create `solution.py` with complete working code
+☐ 8. **Program submitted** - Call `submit_code` with the complete, verified,
+self-contained program (all imports included, no reliance on session state)
 
 ## Section 2: Critical Rules of Engagement
 

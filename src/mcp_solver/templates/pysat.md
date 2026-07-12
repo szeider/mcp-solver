@@ -117,7 +117,7 @@ encoding, but the helpers above are the tested path.
   ranges is the #1 encoding error.
 - Do NOT hand-roll global counters with `nonlocal` at module level; use
   `VariableMap` (or `global` if you must).
-- Do NOT print anything except the final JSON in the saved program.
+- Do NOT print anything except the final JSON in the submitted program.
 - Solvers: `Glucose3` is the default; `Cadical153` is a good alternative for
   harder instances (`from pysat.solvers import Cadical153`).
 
@@ -156,8 +156,10 @@ swapped indices). Before saving, you MUST:
    problem statement that justifies it. If any clause lacks a justification,
    remove it and re-solve before reporting UNSAT.
 
-Do NOT call save_code until verification passes. If it fails, fix the encoding
-and re-verify.
+Finish by calling `submit_code` with the final, verified program as one
+self-contained script (all imports included, no reliance on session state).
+Do NOT call submit_code until verification passes. If it fails, fix the
+encoding and re-verify.
 
 That's it. Read the problem carefully, map entities to 1-based variables, encode
 exactly what is stated, verify independently, and let the SAT solver do the search.
