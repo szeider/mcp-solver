@@ -154,9 +154,12 @@ Claude Desktop configuration (once v4 is on PyPI):
 }
 ```
 
-From a checkout today, use `"command": "uv"`, `"args": ["run", "--project",
-"/path/to/mcp-solver", "mcp-solver-serve"]` instead. The server reads the same
-`OPENROUTER_API_KEY` locations as the CLI.
+From a checkout (the standard setup today, and the development path always),
+use `"command": "uv"`, `"args": ["run", "--project", "/path/to/mcp-solver",
+"mcp-solver-serve"]` instead — the server then runs entirely from the local
+version, no PyPI involved (see
+[INSTALL.md](INSTALL.md#using-the-local-version-no-pypi-involved)). The server
+reads the same `OPENROUTER_API_KEY` locations as the CLI.
 
 ## How it works
 

@@ -97,10 +97,44 @@ The individual extras are:
 | `[dev]`   | ruff                                                            |
 | `[all]`   | `[agent]` + `[test]` + `[dev]`                                  |
 
+### Using the local version (no PyPI involved)
+
+The checkout is fully self-sufficient — development and testing never wait on
+a PyPI release. Everything resolves locally: `mcp-minion` comes from the
+`minion/` workspace member, and dev mode injects the helper library and
+templates straight from the checkout (auto-detected; also available
+explicitly as `--dev PATH` or `MCP_SOLVER_DEV=/path`).
+
+Run the CLI or the benchmark harness from anywhere by pointing `uv` at the
+checkout:
+
+```bash
+uv run --project /path/to/mcp-solver mcp-solver z3 "task ..."
+uv run --project /path/to/mcp-solver mcp-solver-bench pysat
+```
+
+Use the local MCP server in an MCP host (Claude Desktop, Claude Code, Cursor)
+with this configuration:
+
+```json
+{
+  "mcpServers": {
+    "mcp-solver": {
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/mcp-solver", "mcp-solver-serve"]
+    }
+  }
+}
+```
+
+This stays the supported development path after v4 is published, too: `--dev`
+always wins over the PyPI pin.
+
 ### Once v4 is published
 
 When v4 is on PyPI, `uv pip install "mcp-solver[agent]"` will install the product
-layer directly, with no clone required.
+layer directly, with no clone required, and the MCP server can be configured as
+`uvx --from "mcp-solver[agent]" mcp-solver-serve`.
 
 ---
 
