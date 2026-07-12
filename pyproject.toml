@@ -22,6 +22,7 @@ dependencies = []
 # The product layer: CLI, templates, (later) MCP server.
 agent = [
     "agentic-python-coder>=3.3.0",
+    "mcp-minion>=0.1.0",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
 test = [
@@ -99,3 +100,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 "__init__.py" = ["F401"]
+
+# uv workspace: mcp-solver (root) plus the mcp-minion agent runner.
+[tool.uv.workspace]
+members = ["minion"]
+
+# Resolve the mcp-minion dependency (in the [agent] extra) to the workspace
+# member rather than PyPI for dev installs.
+[tool.uv.sources]
+mcp-minion = { workspace = true }

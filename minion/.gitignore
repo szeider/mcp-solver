@@ -1,0 +1,9 @@
+# Run logs written inside run folders by the agent
+run_*.json
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+
+# Local env / secrets
+.env
