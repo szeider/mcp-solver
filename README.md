@@ -8,13 +8,15 @@ prints the solution.
 
 > **v4 is a complete re-architecture.** Earlier versions of MCP Solver were an
 > MCP *server* that exposed model-editing tools (`add_item`, `solve_model`, …)
-> to a chat client. v4 is instead a thin "solver product" built on the
-> general-purpose coding agent
+> to a chat client. v4 instead runs **mcp-minion**, a minimal ReAct agent (a
+> workspace package in this repo, [`minion/`](minion/)), against the IPython
+> kernel MCP server of
 > [agentic-python-coder](https://github.com/szeider/agentic-python-coder): the
 > agent writes an actual Python solver program in a persistent IPython kernel,
-> executes it, checks the result, and saves it. The MCP protocol surface is
-> planned to return in **v4.1** as a thin server that delegates solving to the
-> agent.
+> executes it, checks the result, and submits it via the server's
+> `submit_code` tool. The CLI persists the submission and re-executes it for
+> the final answer. The MCP protocol surface is planned to return in **v4.1**
+> as a thin server that delegates solving to the agent.
 >
 > **Using v3?** The previous MCP-server implementation (MiniZinc, PySAT,
 > MaxSAT, Z3, ASP, and the ReAct test client) lives on unchanged on the
@@ -23,10 +25,12 @@ prints the solution.
 ## What it is
 
 You give MCP Solver a problem in natural language and pick a backend. It hands
-the problem, together with a backend-specific *project template*, to the coding
-agent. The agent encodes the problem, runs it through the real solver inside an
-ephemeral `uv` kernel, sanity-checks the output, and saves the finished program
-to your working directory. The solution is printed as JSON on stdout.
+the problem, together with a backend-specific *project template*, to the
+mcp-minion agent. The agent encodes the problem, runs it through the real
+solver inside an ephemeral `uv` kernel, sanity-checks the output, and submits
+the finished program. The CLI writes it to your working directory (e.g.
+`n_queens_code.py`), re-executes it in a fresh kernel, and prints the solution
+as JSON on stdout.
 
 For background, see Stefan Szeider,
 ["Bridging Language Models and Symbolic Solvers via the Model Context
@@ -49,12 +53,12 @@ MCP-Solver paper), and the architecture paper behind the v4 engine,
 > below.
 
 ```bash
-# Clone and install the product layer (CLI + templates + coding-agent engine)
+# Clone and install the product layer (CLI + templates + agent + kernel server)
 git clone https://github.com/szeider/mcp-solver.git
 cd mcp-solver
 uv pip install -e ".[agent]"
 
-# Provide your OpenRouter key (shared with the engine)
+# Provide your OpenRouter key
 mkdir -p ~/.config/coder
 echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 ```
@@ -80,8 +84,9 @@ line is printed to stderr. Pass `--dev PATH` (or set `MCP_SOLVER_DEV`) to point
 at a checkout explicitly, or `--no-dev` to force the published (PyPI-pinned)
 helpers instead.
 
-The solution JSON goes to stdout; the saved solver program (e.g.
-`n_queens_code.py`) lands in the working directory.
+The solution JSON goes to stdout; the submitted solver program (e.g.
+`n_queens_code.py`) and a complete run log (`run_*.json`) land in the working
+directory.
 
 See [INSTALL.md](INSTALL.md) for full installation and troubleshooting.
 
@@ -111,16 +116,17 @@ mcp-solver <solver> --problem FILE.md [options]
 | Option           | Description                                            |
 | ---------------- | ------------------------------------------------------ |
 | `--problem FILE` | Read the task from a markdown file instead of text     |
-| `--model NAME`   | Agent model (default: `gpt56terra`)                    |
+| `--model NAME`   | Agent model: an alias like `gpt56terra` or a full OpenRouter ID like `openai/gpt-5.6-terra` (default: `gpt56terra`) |
 | `--workdir DIR`  | Working directory for the run (default: current dir)   |
-| `--step-limit N` | Maximum agent steps before stopping                    |
-| `-q`, `--quiet`  | Suppress engine progress output                        |
+| `--step-limit N` | Maximum agent steps before stopping (default: 30)      |
+| `-q`, `--quiet`  | Suppress per-step progress output                      |
 | `--dev [PATH]`   | Dev mode: take helpers and templates from a local checkout (bare `--dev` auto-detects; auto-on inside a checkout; also `MCP_SOLVER_DEV`) |
 | `--no-dev`       | Disable dev mode; use the published (PyPI-pinned) helpers |
-| `--stats-json FILE` | Write the engine run statistics to `FILE` as JSON   |
+| `--stats-json FILE` | Write the run statistics to `FILE` as JSON          |
 
-The default model `gpt56terra` (OpenRouter `openai/gpt-5.6-terra`) uses the
-`OPENROUTER_API_KEY` from `~/.config/coder/.env`, the same key the engine reads.
+Model aliases resolve via the model files bundled with agentic-python-coder.
+The `OPENROUTER_API_KEY` is read from the environment, `~/.config/coder/.env`,
+or `~/.mcp-minion`.
 
 ## How it works
 
@@ -132,11 +138,17 @@ This keeps the host environment clean and each solve reproducible.
 
 Each backend ships a **project template** — a markdown prompt (package data)
 that tells the agent the encoding conventions, output format, and helper API for
-that solver. When you run `mcp-solver <solver>`, the CLI loads that template and
-passes it to the [agentic-python-coder](https://github.com/szeider/agentic-python-coder)
-engine as the project prompt. The engine then drives the write → execute →
-verify → save loop in a persistent IPython kernel. The engine documents its own
-model list, library API, and options in its README.
+that solver. When you run `mcp-solver <solver>`, the CLI loads that template as
+the system prompt of an **mcp-minion** agent (a minimal ReAct loop over MCP,
+developed in this repo under [`minion/`](minion/)) and connects it over stdio
+to the `ipython_mcp` kernel server from
+[agentic-python-coder](https://github.com/szeider/agentic-python-coder). The
+agent drives the write → execute → verify loop in a persistent IPython kernel
+and must end the solve by calling the server's `submit_code` tool with the
+final self-contained program (syntax-checked server-side, never written to
+disk by the kernel). The CLI extracts the last successful submission from the
+run, writes it to `<basename>_code.py`, and re-executes it in a fresh `uv`
+kernel to produce the answer.
 
 ## Benchmark harness
 

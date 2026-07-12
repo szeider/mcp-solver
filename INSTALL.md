@@ -1,8 +1,9 @@
 # MCP Solver Installation
 
-MCP Solver v4 drives the [agentic-python-coder](https://github.com/szeider/agentic-python-coder)
-engine to write and run real solver programs. This guide covers prerequisites,
-the install variants, verification, and common problems.
+MCP Solver v4 runs an [mcp-minion](minion/) agent against the IPython kernel
+server of [agentic-python-coder](https://github.com/szeider/agentic-python-coder)
+to write and run real solver programs. This guide covers prerequisites, the
+install variants, verification, and common problems.
 
 > **v4 is not yet on PyPI.** PyPI still serves the old v3 server, so
 > `uv pip install "mcp-solver[agent]"` installs the wrong package. Until v4 is
@@ -49,16 +50,16 @@ uv --version
 
 ### OpenRouter API key
 
-The coding agent calls models through [OpenRouter](https://openrouter.ai). Store
-your key where the engine looks for it:
+The agent calls models through [OpenRouter](https://openrouter.ai). Store your
+key in one of the places the CLI looks:
 
 ```bash
 mkdir -p ~/.config/coder
 echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 ```
 
-`OPENROUTER_API_KEY` in the environment works too. This is the same key and
-location the engine uses; MCP Solver does not require a separate key.
+`OPENROUTER_API_KEY` in the environment works too, as does `~/.mcp-minion`
+(the standalone mcp-minion CLI's location). One key serves everything.
 
 ---
 
@@ -67,9 +68,11 @@ location the engine uses; MCP Solver does not require a separate key.
 ### Clone + editable (required today)
 
 Until v4 reaches PyPI, normal use and development share the same path: clone the
-repo and install it editable. The `[agent]` extra pulls in `agentic-python-coder`
-(the CLI, backend templates, and engine); the bare `mcp-solver` package is only
-the dependency-free helper library and cannot solve anything on its own.
+repo and install it editable. The `[agent]` extra pulls in `mcp-minion` (the
+agent loop, a workspace package under `minion/`) and `agentic-python-coder`
+(the IPython kernel MCP server and model aliases); the bare `mcp-solver`
+package is only the dependency-free helper library and cannot solve anything
+on its own.
 
 ```bash
 git clone https://github.com/szeider/mcp-solver.git
@@ -89,7 +92,7 @@ The individual extras are:
 
 | Extra     | Contents                                                        |
 | --------- | -------------------------------------------------------------- |
-| `[agent]` | Product layer: CLI, templates, agentic-python-coder engine      |
+| `[agent]` | Product layer: CLI, templates, mcp-minion agent, kernel server  |
 | `[test]`  | Solver libraries (python-sat, z3-solver, cpmpy, clingo) + pytest |
 | `[dev]`   | ruff                                                            |
 | `[all]`   | `[agent]` + `[test]` + `[dev]`                                  |
@@ -115,9 +118,9 @@ Run your first solve (canonical example shipped in the repo):
 mcp-solver pysat --problem tests/problems/pysat/n_queens.md
 ```
 
-You should see engine progress on stderr, a compact stats line, and the
-solution JSON on stdout. The saved solver program (`n_queens_code.py`) appears
-in the working directory.
+You should see per-step progress on stderr, a compact stats line, and the
+solution JSON on stdout. The submitted solver program (`n_queens_code.py`) and
+a run log (`run_*.json`) appear in the working directory.
 
 For a full end-to-end check across all backends, run the benchmark harness:
 
@@ -129,10 +132,15 @@ mcp-solver-bench pysat --runs 1
 
 ## Troubleshooting
 
-**`mcp-solver: the coding-agent engine is not installed.`**
+**`mcp-solver: the agent layer is not installed`**
 You installed the bare package without the product layer. Install the `[agent]`
 extra. Until v4 is on PyPI, that means the clone + editable install:
 `uv pip install -e ".[agent]"` from a checkout (see [Install](#install)).
+
+**`the ipython_mcp server does not provide submit_code`**
+Your installed `agentic-python-coder` is older than 3.4.0. Upgrade it (from a
+checkout: `uv pip install -e /path/to/agentic-python-coder`, or from PyPI once
+3.4.0 is published).
 
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its
@@ -154,5 +162,6 @@ are running from the repo root (the shipped problems live under
 v4 needs Python 3.13. Check with `python3.13 --version`; uv can also pin a
 version with `uv python install 3.13`.
 
-For engine-specific options (model list, library API, project templates), see
-the [agentic-python-coder README](https://github.com/szeider/agentic-python-coder).
+For kernel-server details and the bundled model aliases, see the
+[agentic-python-coder README](https://github.com/szeider/agentic-python-coder);
+for the agent loop itself, see [minion/README.md](minion/README.md).
