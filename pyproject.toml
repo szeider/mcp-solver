@@ -23,10 +23,12 @@ dependencies = []
 agent = [
     "agentic-python-coder>=3.4.0",
     "mcp-minion>=0.1.0",
+    "mcp>=1.10",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
 test = [
     "pytest>=8.3.5",
+    "pytest-asyncio>=0.26",
     "python-sat>=1.8.dev16",
     "z3-solver>=4.14.1.0",
     "cpmpy>=0.9.24",
@@ -42,6 +44,7 @@ all = [
 [project.scripts]
 mcp-solver = "mcp_solver.agent.cli:main"
 mcp-solver-bench = "mcp_solver.agent.harness:main"
+mcp-solver-serve = "mcp_solver.agent.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_solver"]
@@ -100,6 +103,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 "__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 # uv workspace: mcp-solver (root) plus the mcp-minion agent runner.
 [tool.uv.workspace]

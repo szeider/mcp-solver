@@ -15,8 +15,9 @@ prints the solution.
 > agent writes an actual Python solver program in a persistent IPython kernel,
 > executes it, checks the result, and submits it via the server's
 > `submit_code` tool. The CLI persists the submission and re-executes it for
-> the final answer. The MCP protocol surface is planned to return in **v4.1**
-> as a thin server that delegates solving to the agent.
+> the final answer. The MCP protocol surface returns as **`mcp-solver-serve`**,
+> a thin server exposing a single `solve` tool that delegates to the same
+> agent (see [MCP server](#mcp-server) below).
 >
 > **Using v3?** The previous MCP-server implementation (MiniZinc, PySAT,
 > MaxSAT, Z3, ASP, and the ReAct test client) lives on unchanged on the
@@ -127,6 +128,35 @@ mcp-solver <solver> --problem FILE.md [options]
 Model aliases resolve via the model files bundled with agentic-python-coder.
 The `OPENROUTER_API_KEY` is read from the environment, `~/.config/coder/.env`,
 or `~/.mcp-minion`.
+
+## MCP server
+
+`mcp-solver-serve` exposes the same solving pipeline over the Model Context
+Protocol (stdio), so MCP hosts like Claude Desktop, Claude Code, or Cursor can
+delegate constraint problems to it:
+
+- **One tool:** `solve(solver, problem)` — returns the solution JSON plus
+  `resource_link`s to the generated solver program and the full run log.
+- **One resource:** `mcp-solver://guide` — a short backend-selection guide the
+  host model can consult before calling.
+- Per-step progress notifications during the 30–120 s a solve typically takes.
+
+Claude Desktop configuration (once v4 is on PyPI):
+
+```json
+{
+  "mcpServers": {
+    "mcp-solver": {
+      "command": "uvx",
+      "args": ["--from", "mcp-solver[agent]", "mcp-solver-serve"]
+    }
+  }
+}
+```
+
+From a checkout today, use `"command": "uv"`, `"args": ["run", "--project",
+"/path/to/mcp-solver", "mcp-solver-serve"]` instead. The server reads the same
+`OPENROUTER_API_KEY` locations as the CLI.
 
 ## How it works
 
