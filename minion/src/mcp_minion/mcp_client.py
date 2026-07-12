@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,7 @@ from pydantic import AnyUrl
 
 # Client-side timeouts (seconds).
 INIT_TIMEOUT = 30.0
+RESOURCE_TIMEOUT = 30.0
 DEFAULT_TOOL_TIMEOUT = 300.0
 TIMEOUT_MARGIN = 30.0
 
@@ -94,8 +96,13 @@ class MCPManager:
             try:
                 await self._start_server(server_name, cfg)
             except Exception as e:
-                # Log error but continue with other servers
-                print(f"Warning: Failed to start MCP server '{server_name}': {e}")
+                # Log error but continue with other servers. Stderr, never
+                # stdout: when the manager runs inside a stdio MCP server,
+                # stdout is the protocol channel.
+                print(
+                    f"Warning: Failed to start MCP server '{server_name}': {e}",
+                    file=sys.stderr,
+                )
 
         return self
 
@@ -214,7 +221,7 @@ class MCPManager:
             raise ValueError(f"MCP server '{owner}' not connected")
 
         result = await asyncio.wait_for(
-            session.read_resource(AnyUrl(uri)), timeout=INIT_TIMEOUT
+            session.read_resource(AnyUrl(uri)), timeout=RESOURCE_TIMEOUT
         )
         parts = []
         for item in result.contents:
@@ -250,14 +257,16 @@ class MCPManager:
                 timeout=self._effective_timeout(arguments),
             )
 
+            if result.isError:
+                return json.dumps({"error": _content_text(result.content)})
+
             # Remember which server produced each resource_link so later
-            # read_resource calls route to the origin server only.
+            # read_resource calls route to the origin server only. Error
+            # results are excluded: a link echoed inside an error payload
+            # must not widen the readable set.
             for item in result.content:
                 if getattr(item, "type", None) == "resource_link":
                     self._link_origins[str(item.uri)] = tool_info.server_name
-
-            if result.isError:
-                return json.dumps({"error": _content_text(result.content)})
 
             return json.dumps({"result": _content_text(result.content)})
 
