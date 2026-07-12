@@ -3,19 +3,24 @@
 Usage:
     mcp-solver <solver> [task ...] [options]
 
-Drives the agentic-python-coder engine to write a solver program for a
-constraint problem, then runs that program and prints its solution (JSON)
-to stdout. The engine and the produced program run in ephemeral ``uv``
-kernels, so solver libraries are supplied at solve time via ``--with``.
+Runs an mcp-minion agent that writes a solver program for a constraint
+problem, working against the agentic-python-coder ``ipython_mcp`` kernel
+server over stdio. The agent must submit its final program via the server's
+``submit_code`` tool; the CLI persists that submission to
+``<basename>_code.py``, re-executes it in a fresh ``uv`` kernel, and prints
+its solution (JSON) to stdout.
 """
 
 import argparse
+import asyncio
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 import mcp_solver
 from mcp_solver.templates import SOLVERS, get_template
@@ -109,6 +114,79 @@ def build_with_packages(solver: str, dev_path: str | None = None) -> list[str]:
     return [*SOLVER_PACKAGES[solver], helpers_package(dev_path)]
 
 
+def _model_params(config: dict[str, Any]) -> dict[str, Any]:
+    """Translate a model-alias config dict into OpenRouter API parameters.
+
+    Mirrors the engine's rules: models flagged ``no_sampling_params`` accept
+    only ``max_tokens``; otherwise the standard sampling knobs pass through.
+    (``top_k``/``provider``/``reasoning`` need ``extra_body``, which the
+    minion agent reserves, so they are not forwarded.)
+    """
+    params: dict[str, Any] = {}
+    if config.get("no_sampling_params"):
+        if "max_tokens" in config:
+            params["max_tokens"] = config["max_tokens"]
+        return params
+    for key in (
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+    ):
+        if key in config:
+            params[key] = config[key]
+    return params
+
+
+def resolve_model(name: str) -> tuple[str, dict[str, Any]]:
+    """Resolve a model name to ``(openrouter_id, api_params)``.
+
+    A name containing ``/`` is already an OpenRouter model ID and passes
+    through unchanged. Anything else is an alias looked up in the engine's
+    bundled ``models/<name>.json`` (e.g. ``gpt56terra``).
+
+    Raises ValueError for an unknown alias.
+    """
+    if "/" in name:
+        return name, {}
+    from importlib.resources import files
+
+    try:
+        text = (files("agentic_python_coder") / "models" / f"{name}.json").read_text(
+            encoding="utf-8"
+        )
+    except (ModuleNotFoundError, FileNotFoundError) as exc:
+        raise ValueError(
+            f"unknown model alias {name!r}; pass a full OpenRouter ID"
+            " (e.g. openai/gpt-5.6-terra) or install the engine for aliases"
+        ) from exc
+    config = json.loads(text)
+    return config["path"], _model_params(config)
+
+
+def find_api_key() -> str | None:
+    """Return the OpenRouter API key, or None.
+
+    Checked in order: the environment, then the dotenv files used by the
+    engine (``~/.config/coder/.env``) and by mcp-minion (``~/.mcp-minion``).
+    """
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key
+    from dotenv import dotenv_values
+
+    for dotfile in (
+        Path.home() / ".config" / "coder" / ".env",
+        Path.home() / ".mcp-minion",
+    ):
+        if dotfile.is_file():
+            key = dotenv_values(dotfile).get("OPENROUTER_API_KEY")
+            if key:
+                return key
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
     parser = argparse.ArgumentParser(
@@ -144,9 +222,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--step-limit",
         type=int,
-        default=None,
+        default=30,
         metavar="N",
-        help="maximum agent steps before stopping",
+        help="maximum agent steps before stopping (default: %(default)s)",
     )
     parser.add_argument(
         "-q",
@@ -199,12 +277,79 @@ def resolve_task(
     return task_text, "task"
 
 
-def find_program(workdir: Path, task_basename: str) -> Path | None:
-    """Return the saved solver program in *workdir*, or None if absent."""
-    for candidate in (workdir / f"{task_basename}_code.py", workdir / "solution.py"):
-        if candidate.is_file():
-            return candidate
-    return None
+def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
+    """Summarise an AgentResult as the stats dict consumed by the harness.
+
+    Keeps the key shape of the old engine stats (``token_consumption``,
+    ``tool_usage``, ``execution_time_seconds``, ``step_limit_reached``) so
+    downstream consumers need no changes.
+    """
+    tool_usage: dict[str, int] = {}
+    for step in result.steps:
+        for call in step.get("tool_calls") or []:
+            name = call.get("name", "?")
+            tool_usage[name] = tool_usage.get(name, 0) + 1
+    return {
+        "token_consumption": {
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "total_tokens": result.input_tokens + result.output_tokens,
+        },
+        "tool_usage": tool_usage,
+        "execution_time_seconds": elapsed,
+        "steps": len(result.steps),
+        "tool_calls_made": result.tool_calls_made,
+        "step_limit_reached": result.max_steps_reached,
+        "model": model_id,
+    }
+
+
+def _progress(step_info: dict) -> None:
+    """Print a one-line progress note for a completed agent step."""
+    calls = step_info.get("tool_calls") or []
+    if calls:
+        names = ", ".join(c.get("name", "?") for c in calls)
+        detail = names
+    else:
+        detail = "final answer"
+    print(f"mcp-solver: step {step_info['step']}: {detail}", file=sys.stderr)
+
+
+async def solve(
+    task: str,
+    api_key: str,
+    config: Any,
+    logger: Any,
+    quiet: bool,
+) -> Any:
+    """Run one solve: minion agent over the engine's ipython_mcp server."""
+    from mcp_minion import Agent, MCPManager
+
+    servers = {
+        "ipython": {
+            "command": sys.executable,
+            "args": ["-m", "agentic_python_coder.mcp_server"],
+        }
+    }
+    manager = MCPManager(servers)
+    await manager.__aenter__()
+    try:
+        if not manager.has_tool("submit_code"):
+            raise RuntimeError(
+                "the ipython_mcp server does not provide submit_code;"
+                " upgrade agentic-python-coder to >=3.4.0"
+            )
+        agent = Agent(
+            api_key=api_key,
+            tools=None,
+            config=config,
+            logger=logger,
+            mcp_manager=manager,
+            on_step=None if quiet else _progress,
+        )
+        return await agent.run_async(task)
+    finally:
+        await manager.__aexit__(None, None, None)
 
 
 def print_stats(stats: dict) -> None:
@@ -255,35 +400,26 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        import agentic_python_coder
+        import agentic_python_coder  # noqa: F401  (kernel server + model aliases)
+        import mcp_minion  # noqa: F401
     except ImportError:
         print(
-            "mcp-solver: the coding-agent engine is not installed.\n"
-            "Install the product layer with: uv pip install 'mcp-solver[agent]'\n"
+            "mcp-solver: the agent layer is not installed"
+            " (needs agentic-python-coder and mcp-minion).\n"
+            "Install it with: uv pip install 'mcp-solver[agent]'\n"
             "(until v4 is on PyPI: clone the repo and run"
             " uv pip install -e '.[agent]')",
             file=sys.stderr,
         )
         return 1
 
-    workdir = Path(args.workdir or os.getcwd()).resolve()
-    project_prompt = get_template(args.solver, root=dev_path)
-
     try:
-        _messages, stats, _log_path = agentic_python_coder.solve_task(
-            task=task,
-            working_directory=str(workdir),
-            model=args.model,
-            project_prompt=project_prompt,
-            with_packages=with_packages,
-            quiet=args.quiet,
-            save_log=True,
-            task_basename=task_basename,
-            step_limit=args.step_limit,
-        )
+        model_id, api_params = resolve_model(args.model)
     except ValueError as exc:
-        if "OPENROUTER_API_KEY" not in str(exc):
-            raise
+        parser.error(str(exc))
+
+    api_key = find_api_key()
+    if api_key is None:
         print(
             "mcp-solver: no OpenRouter API key found.\n"
             "Set OPENROUTER_API_KEY or put it in ~/.config/coder/.env"
@@ -292,14 +428,43 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    workdir = Path(args.workdir or os.getcwd()).resolve()
+    project_prompt = get_template(args.solver, root=dev_path)
+
+    from mcp_minion import AgentConfig, RunLogger, extract_last_submission
+
+    config = AgentConfig(
+        model=model_id,
+        max_steps=args.step_limit,
+        api_params=api_params,
+        system_prompt=project_prompt,
+        packages=with_packages,
+    )
+    logger = RunLogger(log_dir=workdir)
+
+    start = time.monotonic()
+    try:
+        result = asyncio.run(solve(task, api_key, config, logger, args.quiet))
+    except RuntimeError as exc:
+        print(f"mcp-solver: {exc}", file=sys.stderr)
+        return 1
+    elapsed = time.monotonic() - start
+
+    stats = build_stats(result, elapsed, model_id)
     print_stats(stats)
     if args.stats_json:
         Path(args.stats_json).write_text(json.dumps(stats, default=str))
 
-    program = find_program(workdir, task_basename)
-    if program is None:
-        print("mcp-solver: the run produced no saved program.", file=sys.stderr)
+    code = extract_last_submission(result.steps)
+    if code is None:
+        print(
+            "mcp-solver: the run submitted no final program"
+            " (submit_code was never called successfully).",
+            file=sys.stderr,
+        )
         return 3
+    program = workdir / f"{task_basename}_code.py"
+    program.write_text(code, encoding="utf-8")
 
     print(f"mcp-solver: running {program}", file=sys.stderr)
     return run_program(program, with_packages)

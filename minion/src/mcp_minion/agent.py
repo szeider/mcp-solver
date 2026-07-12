@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import traceback
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -112,6 +113,9 @@ class AgentResult:
     answer: str
     steps: list[dict[str, Any]] = field(default_factory=list)
     tool_calls_made: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    max_steps_reached: bool = False
 
 
 class Agent:
@@ -124,15 +128,19 @@ class Agent:
     def __init__(
         self,
         api_key: str,
-        tools: ToolRegistry,
+        tools: ToolRegistry | None,
         config: AgentConfig | None = None,
         logger: RunLogger | None = None,
         mcp_manager: MCPManager | None = None,
+        on_step: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.config = config or AgentConfig()
         self.tools = tools
         self.logger = logger
         self.mcp_manager = mcp_manager
+        # Optional progress hook, called with each step's step_info dict as
+        # soon as the step completes (tool results included).
+        self.on_step = on_step
         self.client = OpenAI(
             api_key=api_key,
             base_url=self.config.base_url,
@@ -195,6 +203,8 @@ class Agent:
 
         steps: list[dict[str, Any]] = []
         tool_calls_made = 0
+        input_tokens = 0
+        output_tokens = 0
 
         # Combine tools from registry and MCP (MCP takes precedence)
         openai_tools = []
@@ -258,6 +268,11 @@ class Agent:
                     raise RuntimeError("API returned no choices")
 
                 assistant_message = response.choices[0].message
+
+                # Accumulate token usage (independent of logging).
+                if response.usage:
+                    input_tokens += response.usage.prompt_tokens
+                    output_tokens += response.usage.completion_tokens
 
                 # Log API response
                 if self.logger:
@@ -369,15 +384,21 @@ class Agent:
                         )
 
                     steps.append(step_info)
+                    if self.on_step:
+                        self.on_step(step_info)
 
                 else:
                     # No tool calls - this is the final answer
                     steps.append(step_info)
+                    if self.on_step:
+                        self.on_step(step_info)
 
                     result = AgentResult(
                         answer=assistant_message.content or "",
                         steps=steps,
                         tool_calls_made=tool_calls_made,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                     )
 
                     if self.logger:
@@ -396,6 +417,9 @@ class Agent:
                 answer="[Agent reached maximum steps without providing a final answer]",
                 steps=steps,
                 tool_calls_made=tool_calls_made,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                max_steps_reached=True,
             )
 
             if self.logger:

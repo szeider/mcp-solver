@@ -1,8 +1,9 @@
 """Unit tests for agent module."""
 
 from dataclasses import asdict
+from types import SimpleNamespace
 
-from mcp_minion.agent import AgentConfig, AgentResult
+from mcp_minion.agent import Agent, AgentConfig, AgentResult
 
 
 class TestAgentConfig:
@@ -56,3 +57,100 @@ class TestAgentResult:
     def test_empty_answer(self) -> None:
         result = AgentResult(answer="")
         assert result.answer == ""
+
+    def test_new_field_defaults(self) -> None:
+        result = AgentResult(answer="x")
+        assert result.input_tokens == 0
+        assert result.output_tokens == 0
+        assert result.max_steps_reached is False
+
+
+# --- run_async behavior with a fake OpenAI client --------------------------
+
+
+def _response(content=None, tool_calls=None, prompt=7, completion=3):
+    """Build a minimal chat-completions response object."""
+    return SimpleNamespace(
+        id="resp-1",
+        model="fake-model",
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content, tool_calls=tool_calls),
+                finish_reason="stop",
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=prompt + completion,
+        ),
+    )
+
+
+def _tool_call(name="add", arguments='{"a": 1, "b": 2}'):
+    return SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+class FakeClient:
+    """Stands in for the OpenAI client; returns canned responses in order."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        return self._responses.pop(0)
+
+
+def _make_agent(responses, config=None, on_step=None):
+    agent = Agent(
+        api_key="test-key",
+        tools=None,
+        config=config or AgentConfig(),
+        on_step=on_step,
+    )
+    agent.client = FakeClient(responses)
+    return agent
+
+
+async def test_token_accumulation_without_logger() -> None:
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], prompt=10, completion=2),
+            _response(content="done", prompt=20, completion=4),
+        ]
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.input_tokens == 30
+    assert result.output_tokens == 6
+    assert result.max_steps_reached is False
+
+
+async def test_on_step_called_per_step() -> None:
+    seen: list[dict] = []
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()]),
+            _response(content="done"),
+        ],
+        on_step=seen.append,
+    )
+    await agent.run_async("hi")
+    assert [s["step"] for s in seen] == [1, 2]
+    assert seen[0]["tool_calls"] is not None
+    assert seen[1]["tool_calls"] is None
+
+
+async def test_max_steps_reached_flag() -> None:
+    agent = _make_agent(
+        [_response(tool_calls=[_tool_call()])],
+        config=AgentConfig(max_steps=1),
+    )
+    result = await agent.run_async("hi")
+    assert result.max_steps_reached is True
+    assert "maximum steps" in result.answer
+    assert result.input_tokens == 7

@@ -31,7 +31,7 @@ def test_defaults():
     args = cli.build_parser().parse_args(["z3", "hi"])
     assert args.model == "gpt56terra"
     assert args.workdir is None
-    assert args.step_limit is None
+    assert args.step_limit == 30
     assert args.quiet is False
     assert args.dev is None
     assert args.no_dev is False
@@ -203,6 +203,132 @@ def test_no_dev_beats_env(monkeypatch):
 def test_dev_and_no_dev_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["z3", "--dev", "--no-dev", "hi"])
+
+
+# --- model resolution ------------------------------------------------------
+
+
+def test_raw_openrouter_id_passes_through():
+    model_id, params = cli.resolve_model("openai/gpt-5.6-terra")
+    assert model_id == "openai/gpt-5.6-terra"
+    assert params == {}
+
+
+def test_alias_resolved_from_engine():
+    # The default alias must resolve via the engine's bundled models/.
+    model_id, params = cli.resolve_model("gpt56terra")
+    assert model_id == "openai/gpt-5.6-terra"
+    # gpt56terra is a no-sampling-params model: only max_tokens forwarded.
+    assert set(params) <= {"max_tokens"}
+
+
+def test_unknown_alias_raises():
+    with pytest.raises(ValueError, match="unknown model alias"):
+        cli.resolve_model("no-such-alias")
+
+
+def test_model_params_no_sampling():
+    params = cli._model_params(
+        {"no_sampling_params": True, "max_tokens": 128, "temperature": 0}
+    )
+    assert params == {"max_tokens": 128}
+
+
+def test_model_params_standard():
+    params = cli._model_params({"temperature": 0, "max_tokens": 64, "top_k": 5})
+    assert params == {"temperature": 0, "max_tokens": 64}
+
+
+# --- stats construction ----------------------------------------------------
+
+
+def _fake_result(steps, **kwargs):
+    from mcp_minion import AgentResult
+
+    return AgentResult(answer="done", steps=steps, **kwargs)
+
+
+def test_build_stats_shape():
+    steps = [
+        {"step": 1, "tool_calls": [{"name": "python_exec"}, {"name": "python_exec"}]},
+        {"step": 2, "tool_calls": [{"name": "submit_code"}]},
+        {"step": 3, "tool_calls": None},
+    ]
+    result = _fake_result(steps, input_tokens=100, output_tokens=20, tool_calls_made=3)
+    stats = cli.build_stats(result, elapsed=1.5, model_id="m")
+    assert stats["token_consumption"]["total_tokens"] == 120
+    assert stats["tool_usage"] == {"python_exec": 2, "submit_code": 1}
+    assert stats["execution_time_seconds"] == 1.5
+    assert stats["step_limit_reached"] is False
+    assert stats["steps"] == 3
+
+
+# --- end-to-end main() with a mocked solve --------------------------------
+
+
+def _fake_solve_result(code="print('{}')"):
+    steps = [
+        {
+            "step": 1,
+            "content": None,
+            "tool_calls": [
+                {
+                    "name": "submit_code",
+                    "arguments": {"code": code},
+                    "result": '{"result": "{\\"ok\\": true}"}',
+                }
+            ],
+        },
+        {"step": 2, "content": "done", "tool_calls": None},
+    ]
+    return _fake_result(steps, input_tokens=10, output_tokens=5, tool_calls_made=1)
+
+
+def test_main_persists_submission_and_runs_it(monkeypatch, tmp_path, capsys):
+    problem = tmp_path / "queens.md"
+    problem.write_text("Place 8 queens.", encoding="utf-8")
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        return _fake_solve_result("print('SOLUTION')")
+
+    ran = {}
+
+    def fake_run_program(program, with_packages):
+        ran["program"] = program
+        ran["with_packages"] = with_packages
+        return 0
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", fake_run_program)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(["z3", "--problem", str(problem), "--workdir", str(tmp_path), "-q"])
+    assert rc == 0
+    artifact = tmp_path / "queens_code.py"
+    assert artifact.read_text(encoding="utf-8") == "print('SOLUTION')"
+    assert ran["program"] == artifact
+
+
+def test_main_no_submission_returns_3(monkeypatch, tmp_path, capsys):
+    problem = tmp_path / "p.md"
+    problem.write_text("x", encoding="utf-8")
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        return _fake_result([{"step": 1, "content": "gave up", "tool_calls": None}])
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(["z3", "--problem", str(problem), "--workdir", str(tmp_path), "-q"])
+    assert rc == 3
+    assert "submit_code" in capsys.readouterr().err
+
+
+def test_main_no_api_key_returns_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "find_api_key", lambda: None)
+    rc = cli.main(["z3", "hello", "--workdir", str(tmp_path)])
+    assert rc == 1
+    assert "OPENROUTER_API_KEY" in capsys.readouterr().err
 
 
 # --- missing-engine error path -------------------------------------------

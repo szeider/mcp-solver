@@ -24,14 +24,23 @@ class MCPToolInfo:
 class MCPManager:
     """Manages MCP server connections and tool routing."""
 
-    def __init__(self, servers_config: dict[str, dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        servers_config: dict[str, dict[str, Any]],
+        tool_timeout: float = 300.0,
+    ) -> None:
         """Initialize with server configurations.
 
         Args:
             servers_config: Dict mapping server names to their config.
                 Each config has: command, args (optional), env (optional)
+            tool_timeout: Default client-side timeout (seconds) for a single
+                tool call. If a call's arguments carry a numeric ``timeout``
+                (e.g. python_exec), the effective timeout is at least that
+                value plus a margin, so the server-side timeout fires first.
         """
         self.servers_config = servers_config
+        self.tool_timeout = tool_timeout
         self._sessions: dict[str, ClientSession] = {}
         self._tools: dict[str, MCPToolInfo] = {}  # tool_name -> MCPToolInfo
         self._exit_stack: AsyncExitStack | None = None
@@ -123,7 +132,8 @@ class MCPManager:
 
         try:
             result = await asyncio.wait_for(
-                session.call_tool(name, arguments), timeout=60.0
+                session.call_tool(name, arguments),
+                timeout=self._effective_timeout(arguments),
             )
 
             if result.isError:
@@ -143,6 +153,19 @@ class MCPManager:
             return json.dumps({"error": f"Tool '{name}' timed out"})
         except Exception as e:
             return json.dumps({"error": f"Tool '{name}' failed: {e}"})
+
+    def _effective_timeout(self, arguments: dict[str, Any]) -> float:
+        """Client-side timeout for one tool call.
+
+        At least ``tool_timeout``; if the call itself carries a numeric
+        ``timeout`` argument (e.g. python_exec), allow that plus a margin so
+        the server-side timeout always fires first.
+        """
+        timeout = self.tool_timeout
+        arg_timeout = arguments.get("timeout")
+        if isinstance(arg_timeout, int | float):
+            timeout = max(timeout, float(arg_timeout) + 30.0)
+        return timeout
 
     def get_tools(self) -> list[MCPToolInfo]:
         """Get all discovered MCP tools."""

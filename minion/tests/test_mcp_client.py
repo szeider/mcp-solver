@@ -47,3 +47,26 @@ async def test_openai_tool_schema() -> None:
         params = by_name["echo"]["function"]["parameters"]
         assert params["type"] == "object"
         assert "message" in params["properties"]
+
+
+# --- client-side tool-call timeout -----------------------------------------
+
+
+def test_effective_timeout_default() -> None:
+    manager = MCPManager({})
+    assert manager._effective_timeout({}) == 300.0
+
+
+def test_effective_timeout_respects_arg_timeout() -> None:
+    manager = MCPManager({})
+    # A long python_exec timeout extends the client-side bound (plus margin).
+    assert manager._effective_timeout({"timeout": 400}) == 430.0
+    # A short one does not shrink it below tool_timeout.
+    assert manager._effective_timeout({"timeout": 30}) == 300.0
+
+
+def test_effective_timeout_custom_and_bad_arg() -> None:
+    manager = MCPManager({}, tool_timeout=60.0)
+    assert manager._effective_timeout({}) == 60.0
+    assert manager._effective_timeout({"timeout": "soon"}) == 60.0
+    assert manager._effective_timeout({"timeout": 90}) == 120.0
