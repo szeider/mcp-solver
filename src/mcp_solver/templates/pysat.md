@@ -3,7 +3,8 @@
 You are solving Boolean satisfiability problems using PySAT (the `pysat` package,
 installed as `python-sat`). Encode the problem in CNF, solve it with a real SAT
 solver, and report the result. Never reason a solution out by hand and never
-write your own search — always go through the solver.
+write your own search — always go through the solver; never mock a solver,
+fabricate a model, or check constraints by hand instead of solving.
 
 ## Core Rules
 
@@ -108,6 +109,7 @@ encoding, but the helpers above are the tested path.
 
 - a AND b implies c: `formula.append([-a, -b, c])`
 - at least one of a set: `formula.append(list_of_vars)`
+- exactly one value per entity (one-hot): `formula.extend(exactly_one(entity_vars))`
 - adjacent nodes differ (per color c): `formula.append([-color[u][c], -color[v][c]])`
 
 ## PySAT Pitfalls — Avoid These
@@ -152,6 +154,9 @@ swapped indices). Before saving, you MUST:
    If your encoding and your verifier share an assumption, a wrong assumption
    passes silently — re-read the problem statement when writing `verify()`.
 3. **Execute the verification** via python_exec and confirm it passes.
+   `verify()` belongs to this exploration phase; the final submitted program
+   need not include it (and if it does, it must not print anything besides
+   the solution JSON).
 4. **For an UNSAT answer**: list each clause group and the sentence of the
    problem statement that justifies it. If any clause lacks a justification,
    remove it and re-solve before reporting UNSAT.

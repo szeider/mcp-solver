@@ -83,6 +83,19 @@ from mcp_solver.helpers.pysat import soft_at_least_k, add_soft_clauses_to_wcnf
 add_soft_clauses_to_wcnf(wcnf, soft_at_least_k(items, k, weight=5))
 ```
 
+**Weighted budgets (pseudo-Boolean).** For a weighted sum bound like
+`sum(w_i * x_i) <= B`, use PBEnc instead of the unweighted `card.*` helpers
+(which count items, not weights, and scale badly for large k):
+
+```python
+from pysat.pb import PBEnc
+
+enc = PBEnc.atmost(lits=items, weights=w, bound=B, top_id=wcnf.nv)
+for cl in enc.clauses:
+    wcnf.append(cl)
+wcnf.nv = max(wcnf.nv, enc.nv)  # absorb PBEnc's auxiliary vars
+```
+
 ## Auxiliary-variable patterns (reified objectives)
 
 To reward or penalize a COMBINATION of variables, reify it with an auxiliary

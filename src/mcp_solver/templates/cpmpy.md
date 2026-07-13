@@ -101,6 +101,21 @@ CPMpy models can easily contain subtle logic bugs. Before saving, you MUST:
    assert not model2.solve(), "Solution is not optimal"
    ```
 
+### If the model reports no solution
+
+`model.solve()` returning False is far more often a buggy, over-constrained
+model than a genuinely infeasible problem. Before reporting "No solution":
+
+1. Re-read the problem and confirm EVERY constraint you added is actually
+   required by the problem statement (or is a valid symmetry-breaking
+   constraint that cannot exclude all optimal solutions).
+2. Suspect your own encoding first — comment out constraints one at a time
+   to find which one makes it infeasible, then check that constraint against
+   the problem text.
+3. Only once every remaining constraint is grounded in the problem is UNSAT a
+   valid answer. Then trust the solver — do not try to prove *why* it is
+   infeasible; report it.
+
 Finish by calling `submit_code` with the final, verified program as one
 self-contained script (all imports included, no reliance on session state).
 Do NOT call submit_code until verification passes. If it fails, fix the model

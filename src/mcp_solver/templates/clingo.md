@@ -27,7 +27,7 @@ Produce a solution using Answer Set Programming (ASP) that correctly models and 
 Before completing your solution, verify:
 ☐ 1. **Uses clingo API** - Solution uses `clingo.Control()` and ASP rules
 ☐ 2. **Model solves correctly** - At least one answer set is found (or UNSAT handled)
-☐ 3. **Optimization applied** - If problem asks for optimal, use #minimize/#maximize
+☐ 3. **Optimization applied** - Use #minimize/#maximize ONLY when no explicit bound is given; when the problem states a bound, encode it as a hard constraint instead (see the requirement above)
 ☐ 4. **Solution extracted** - Answer set atoms properly extracted and formatted
 ☐ 4b. **No Model escapes on_model** - All solution data extracted to plain Python objects inside the callback (touching a Model after solve() returns segfaults)
 ☐ 5. **Output format correct** - JSON output with appropriate structure
@@ -286,7 +286,11 @@ Use comments in your code to indicate which task you're working on:
 #### Step 4: Format & Verify Output
 - Convert to required JSON format
 - Verify solution satisfies constraints
-- Handle UNSAT cases gracefully
+- Handle UNSAT cases gracefully. A justified UNSAT is a correct final
+  answer — verify only that every integrity constraint is warranted by the
+  problem text; do not try to prove *why* it is unsatisfiable. Likewise,
+  trust the solver's optimality; do not attempt to prove global optimality
+  yourself.
 
 ### When to Create feedback.md
 
@@ -1228,6 +1232,23 @@ sum_cd(S) :- S = #sum { N,V : assign(V,N), (V=c; V=d) }.
 **Why it's fast:** The `#sum` aggregate is highly optimized. The solver computes each sum just once. The final constraint only compares the two resulting sum values, avoiding the combinatorial explosion.
 
 **General Takeaway:** Instead of writing complex arithmetic expressions with many variables in a single rule body, use aggregates to compute sub-expressions and constrain their results.
+
+### Recursive Aggregates (#sum over a derived relation)
+
+When a threshold depends on a relation you are still deriving, aggregate over
+that relation with a helper predicate to keep the rule stratified and readable
+(classic example: transitive company control via ownership percentages):
+
+```asp
+controls(X,X) :- company(X).
+contrib(A,B,A,P) :- owns(A,B,P).
+contrib(A,B,C,P) :- controls(A,C), owns(C,B,P), A != C.
+sum(A,B,S)      :- company(A), company(B), S = #sum { P,C : contrib(A,B,C,P) }.
+controls(A,B)   :- sum(A,B,S), S > 50, A != B.
+```
+
+Use a helper (`contrib/4`) so the aggregate ranges over ground tuples; do not
+inline a `#sum` that recurses on the predicate it defines.
 
 ### Debugging Temporal Models (CRITICAL)
 
