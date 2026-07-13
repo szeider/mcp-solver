@@ -284,13 +284,20 @@ async def test_submit_stats_ride_along(engine):
 
 async def test_episode_stats_jsonl(engine, monkeypatch, tmp_path):
     stats_file = tmp_path / "stats.jsonl"
+    open_file = tmp_path / "stats.jsonl.open"
     monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
     async with _session() as session:
         await session.call_tool("select_backend", {"solver": "z3"})
         await session.call_tool("python_exec", {"code": "1"})
+        # The open episode is snapshotted eagerly: a host that kills the
+        # server without a clean shutdown must not lose its stats.
+        snap = json.loads(open_file.read_text())
+        assert snap["end"] == "open" and snap["solver"] == "z3"
+        assert snap["tool_calls"] == {"select_backend": 1, "python_exec": 1}
         # A second selection closes the first episode...
         await session.call_tool("select_backend", {"solver": "pysat"})
-    # ...and server shutdown closes the second.
+    # ...and server shutdown closes the second, removing the snapshot.
+    assert not open_file.exists()
     lines = [json.loads(ln) for ln in stats_file.read_text().splitlines()]
     assert len(lines) == 2
     first, second = lines

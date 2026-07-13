@@ -31,6 +31,7 @@ across the host's tool calls.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -147,13 +148,35 @@ def _episode_open(solver: str) -> None:
     }
 
 
+def _episode_record(end: str) -> dict:
+    record = {k: v for k, v in _episode.items() if k != "t0"}
+    record["wall_seconds"] = round(time.monotonic() - _episode["t0"], 1)
+    record["end"] = end
+    return record
+
+
+def _episode_sync() -> None:
+    """Snapshot the open episode to <stats>.open after every counted call.
+
+    Hosts often kill the server without a clean shutdown (claude -p does),
+    so waiting for episode close would lose single-episode sessions
+    entirely. The snapshot is overwritten in place and removed on close.
+    """
+    path = os.environ.get("MCP_SOLVER_STATS")
+    if not path or _episode is None:
+        return
+    try:
+        with open(path + ".open", "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(_episode_record("open")) + "\n")
+    except OSError as e:
+        print(f"mcp-solver-serve: cannot write stats to {path}: {e}", file=sys.stderr)
+
+
 def _episode_close(end: str) -> None:
     global _episode
     if _episode is None:
         return
-    record = {k: v for k, v in _episode.items() if k != "t0"}
-    record["wall_seconds"] = round(time.monotonic() - _episode["t0"], 1)
-    record["end"] = end
+    record = _episode_record(end)
     _episode = None
     path = os.environ.get("MCP_SOLVER_STATS")
     if not path:
@@ -161,6 +184,8 @@ def _episode_close(end: str) -> None:
     try:
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(path + ".open")
     except OSError as e:
         print(f"mcp-solver-serve: cannot write stats to {path}: {e}", file=sys.stderr)
 
@@ -169,6 +194,7 @@ def _episode_count(tool: str) -> None:
     if _episode is not None:
         calls = _episode["tool_calls"]
         calls[tool] = calls.get(tool, 0) + 1
+        _episode_sync()
 
 
 def _episode_snapshot() -> dict | None:
@@ -321,6 +347,7 @@ async def select_backend(solver: str) -> str:
                 )
         _kernel_id = parsed.get("kernel_id") or _kernel_id
         _episode_open(solver)
+        _episode_sync()
 
     state_note = (
         "The solving kernel was recycled: previous session state is cleared."
@@ -357,6 +384,7 @@ async def python_exec(
     text = await _engine_call("python_exec", args)
     if _episode is not None and _parse_engine_json(text).get("success") is False:
         _episode["exec_failures"] += 1
+        _episode_sync()
     return text
 
 
@@ -423,6 +451,7 @@ async def submit_code(code: str) -> CallToolResult:
         if _episode is not None:
             _episode["submit_ok"] += 1
             _episode["code_bytes"] = len(code.encode())
+            _episode_sync()
         submission_id = uuid.uuid4().hex
         _submissions[submission_id] = code
         while len(_submissions) > _MAX_SUBMISSIONS:
