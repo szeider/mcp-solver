@@ -3,6 +3,8 @@
 from dataclasses import asdict
 from types import SimpleNamespace
 
+import pytest
+
 from mcp_minion.agent import Agent, AgentConfig, AgentResult
 
 
@@ -68,7 +70,7 @@ class TestAgentResult:
 # --- run_async behavior with a fake OpenAI client --------------------------
 
 
-def _response(content=None, tool_calls=None, prompt=7, completion=3):
+def _response(content=None, tool_calls=None, prompt=7, completion=3, cost=None):
     """Build a minimal chat-completions response object."""
     return SimpleNamespace(
         id="resp-1",
@@ -83,6 +85,7 @@ def _response(content=None, tool_calls=None, prompt=7, completion=3):
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=prompt + completion,
+            cost=cost,
         ),
     )
 
@@ -127,6 +130,20 @@ async def test_token_accumulation_without_logger() -> None:
     assert result.answer == "done"
     assert result.input_tokens == 30
     assert result.output_tokens == 6
+    # No cost reported by the provider -> stays 0.0.
+    assert result.cost == 0.0
+
+
+async def test_cost_accumulation_from_usage_accounting() -> None:
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], cost=0.0021),
+            _response(content="done", cost=0.0034),
+        ]
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.cost == pytest.approx(0.0055)
     assert result.max_steps_reached is False
 
 

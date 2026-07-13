@@ -139,6 +139,9 @@ class AgentResult:
     tool_calls_made: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Actual charge in USD, summed from OpenRouter's usage accounting
+    # (0.0 when the provider does not report cost).
+    cost: float = 0.0
     max_steps_reached: bool = False
 
 
@@ -244,6 +247,7 @@ class Agent:
         tool_calls_made = 0
         input_tokens = 0
         output_tokens = 0
+        cost = 0.0
 
         # Combine tools from registry and MCP (MCP takes precedence)
         openai_tools = []
@@ -285,6 +289,9 @@ class Agent:
                     "model": self.config.model,
                     "messages": messages,
                     "extra_headers": extra_headers,
+                    # OpenRouter usage accounting: the response then carries
+                    # the actual cost (USD) in usage.cost.
+                    "extra_body": {"usage": {"include": True}},
                     **safe_api_params,
                 }
 
@@ -304,10 +311,18 @@ class Agent:
 
                 assistant_message = response.choices[0].message
 
-                # Accumulate token usage (independent of logging).
+                # Accumulate token usage and cost (independent of logging).
+                step_cost = None
                 if response.usage:
                     input_tokens += response.usage.prompt_tokens
                     output_tokens += response.usage.completion_tokens
+                    step_cost = getattr(response.usage, "cost", None)
+                    if isinstance(step_cost, int | float) and not isinstance(
+                        step_cost, bool
+                    ):
+                        cost += float(step_cost)
+                    else:
+                        step_cost = None
 
                 # Log API response
                 if self.logger:
@@ -330,6 +345,7 @@ class Agent:
                             "prompt_tokens": response.usage.prompt_tokens,
                             "completion_tokens": response.usage.completion_tokens,
                             "total_tokens": response.usage.total_tokens,
+                            "cost": step_cost,
                         }
                         if response.usage
                         else None,
@@ -434,6 +450,7 @@ class Agent:
                         tool_calls_made=tool_calls_made,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        cost=cost,
                     )
 
                     if self.logger:
@@ -454,6 +471,7 @@ class Agent:
                 tool_calls_made=tool_calls_made,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cost=cost,
                 max_steps_reached=True,
             )
 
