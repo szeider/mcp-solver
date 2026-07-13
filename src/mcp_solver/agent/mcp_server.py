@@ -34,9 +34,11 @@ import asyncio
 import json
 import os
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -98,7 +100,9 @@ Choosing a backend:
 Tips: encode exactly the stated problem (every number matters); UNSAT is a
 legitimate answer, re-check the encoding before reporting it; keep the final
 program self-contained (all imports, no session state) and print only the
-solution JSON.
+solution JSON. Long solver runs: python_exec defaults to a 30 s limit —
+raise its `timeout` (up to 300) and give the solver an explicit time limit
+rather than concluding the model is wrong.
 """
 
 # Engine connection (one per server process; kernels persist across calls).
@@ -119,6 +123,63 @@ _MAX_EXEC_TIMEOUT = 300
 # Bounded store of successful submissions (Tier 2 resources).
 _submissions: dict[str, str] = {}
 _MAX_SUBMISSIONS = 50
+
+# Solve statistics per episode (episode = one select_backend up to the next
+# one, or server shutdown). The host's tokens are invisible to the server,
+# but its tool usage is not: counts, exec failures, submissions, wall time.
+# One JSONL line per episode goes to $MCP_SOLVER_STATS when set; a compact
+# snapshot rides along in submit_code's structuredContent.
+_episode: dict | None = None
+
+
+def _episode_open(solver: str) -> None:
+    global _episode
+    _episode_close("superseded")
+    _episode = {
+        "solver": solver,
+        "started": datetime.now(UTC).isoformat(timespec="seconds"),
+        "t0": time.monotonic(),
+        "tool_calls": {"select_backend": 1},
+        "exec_failures": 0,
+        "submit_attempts": 0,
+        "submit_ok": 0,
+        "code_bytes": None,
+    }
+
+
+def _episode_close(end: str) -> None:
+    global _episode
+    if _episode is None:
+        return
+    record = {k: v for k, v in _episode.items() if k != "t0"}
+    record["wall_seconds"] = round(time.monotonic() - _episode["t0"], 1)
+    record["end"] = end
+    _episode = None
+    path = os.environ.get("MCP_SOLVER_STATS")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError as e:
+        print(f"mcp-solver-serve: cannot write stats to {path}: {e}", file=sys.stderr)
+
+
+def _episode_count(tool: str) -> None:
+    if _episode is not None:
+        calls = _episode["tool_calls"]
+        calls[tool] = calls.get(tool, 0) + 1
+
+
+def _episode_snapshot() -> dict | None:
+    if _episode is None:
+        return None
+    return {
+        "exec_calls": _episode["tool_calls"].get("python_exec", 0),
+        "exec_failures": _episode["exec_failures"],
+        "submit_attempts": _episode["submit_attempts"],
+        "wall_seconds": round(time.monotonic() - _episode["t0"], 1),
+    }
 
 
 def _dev_path() -> str | None:
@@ -156,6 +217,7 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        _episode_close("shutdown")
         _engine = None
         _kernel_id = None
         await manager.__aexit__(None, None, None)
@@ -221,8 +283,8 @@ def submission_resource(submission_id: str) -> str:
     return code
 
 
-@mcp.tool(description=SELECT_BACKEND_DESCRIPTION)
-async def select_backend(solver: str) -> CallToolResult:
+@mcp.tool(description=SELECT_BACKEND_DESCRIPTION, structured_output=False)
+async def select_backend(solver: str) -> str:
     global _kernel_id
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
@@ -258,6 +320,7 @@ async def select_backend(solver: str) -> CallToolResult:
                     f" {parsed.get('error') or 'unknown engine error'}"
                 )
         _kernel_id = parsed.get("kernel_id") or _kernel_id
+        _episode_open(solver)
 
     state_note = (
         "The solving kernel was recycled: previous session state is cleared."
@@ -270,18 +333,13 @@ async def select_backend(solver: str) -> CallToolResult:
         " Finish with submit_code(final verified self-contained program)."
     )
     template = get_template(solver, root=dev)
-    return CallToolResult(
-        content=[TextContent(type="text", text=f"{template}\n\n---\n\n{kernel_note}")],
-        structuredContent={
-            "solver": solver,
-            "kernel_id": _kernel_id,
-            "packages": packages,
-            "recycled": recycled,
-        },
-    )
+    # Plain text on purpose: the template IS the payload, and clients that
+    # prefer structuredContent over text (Claude Code does) would otherwise
+    # hide it from the model. Field-tested 2026-07-12.
+    return f"{template}\n\n---\n\n{kernel_note}"
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def python_exec(
     code: str, timeout: float = 30, kernel_id: str | None = None
 ) -> str:
@@ -291,14 +349,18 @@ async def python_exec(
     it. State persists across calls (variables, imports). Raise timeout
     (seconds, max 300) for long solver runs.
     """
+    _episode_count("python_exec")
     args: dict = {"code": code, "timeout": min(timeout, _MAX_EXEC_TIMEOUT)}
     target = kernel_id or _kernel_id
     if target:
         args["kernel_id"] = target
-    return await _engine_call("python_exec", args)
+    text = await _engine_call("python_exec", args)
+    if _episode is not None and _parse_engine_json(text).get("success") is False:
+        _episode["exec_failures"] += 1
+    return text
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def python_reset(
     packages: list[str] | None = None, kernel_id: str | None = None
 ) -> str:
@@ -309,6 +371,7 @@ async def python_reset(
     calls.
     """
     global _kernel_id
+    _episode_count("python_reset")
     args = {"packages": packages or []}
     if kernel_id:
         args["kernel_id"] = kernel_id
@@ -320,18 +383,20 @@ async def python_reset(
     return text
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def python_status(kernel_id: str | None = None) -> str:
     """Check kernel state: active kernels, defined variables, packages."""
+    _episode_count("python_status")
     args: dict = {}
     if kernel_id:
         args["kernel_id"] = kernel_id
     return await _engine_call("python_status", args)
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 async def python_interrupt(kernel_id: str | None = None) -> str:
     """Interrupt running code in the solving kernel (state is preserved)."""
+    _episode_count("python_interrupt")
     args: dict = {}
     target = kernel_id or _kernel_id
     if target:
@@ -347,11 +412,17 @@ async def submit_code(code: str) -> CallToolResult:
     and passing your verification. The code is syntax-checked; on success it
     is stored and linked as a resource (the server keeps the last 50).
     """
+    _episode_count("submit_code")
+    if _episode is not None:
+        _episode["submit_attempts"] += 1
     result_text = await _engine_call("submit_code", {"code": code})
     verdict = _parse_engine_json(result_text)
 
     content: list = [TextContent(type="text", text=result_text)]
     if verdict.get("ok"):
+        if _episode is not None:
+            _episode["submit_ok"] += 1
+            _episode["code_bytes"] = len(code.encode())
         submission_id = uuid.uuid4().hex
         _submissions[submission_id] = code
         while len(_submissions) > _MAX_SUBMISSIONS:
@@ -366,9 +437,13 @@ async def submit_code(code: str) -> CallToolResult:
                 size=len(code.encode()),
             )
         )
+    structured = dict(verdict) if verdict else {}
+    stats = _episode_snapshot()
+    if stats:
+        structured["stats"] = stats
     return CallToolResult(
         content=content,
-        structuredContent=verdict or None,
+        structuredContent=structured or None,
     )
 
 

@@ -89,7 +89,9 @@ def engine(monkeypatch):
     fake = FakeEngine()
     monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: fake)
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
+    monkeypatch.delenv("MCP_SOLVER_STATS", raising=False)
     monkeypatch.setattr(mcp_server, "_kernel_id", None)
+    monkeypatch.setattr(mcp_server, "_episode", None)
     mcp_server._submissions.clear()
     return fake
 
@@ -177,16 +179,16 @@ async def test_toolkit_round_trip(engine):
         guide = await session.read_resource("mcp-solver://guide")
         assert "cpmpy" in guide.contents[0].text
 
-        # select_backend: fresh kernel, template + note, structuredContent.
+        # select_backend: fresh kernel, template + note as PLAIN TEXT (the
+        # template is the payload; structuredContent would hide it in
+        # clients that prefer it over text).
         result = await session.call_tool("select_backend", {"solver": "z3"})
         assert not result.isError
+        assert result.structuredContent is None
         text = result.content[0].text
         assert "fresh solving kernel" in text
         assert "submit_code" in text
-        sc = result.structuredContent
-        assert sc["solver"] == "z3" and sc["kernel_id"] == "k1"
-        assert sc["recycled"] is False
-        assert sc["packages"][0] == "z3-solver"
+        assert "z3" in text.lower()  # the template made it into the result
         name, args = engine.calls[0]
         assert name == "python_reset" and "kernel_id" not in args
         assert args["packages"][0] == "z3-solver"
@@ -205,17 +207,18 @@ async def test_toolkit_round_trip(engine):
         result = await session.call_tool("select_backend", {"solver": "pysat"})
         text = result.content[0].text
         assert "recycled" in text
-        sc = result.structuredContent
-        assert sc["kernel_id"] == "k1" and sc["recycled"] is True
-        assert sc["packages"][0] == "python-sat"
         name, args = engine.calls[-1]
         assert name == "python_reset" and args["kernel_id"] == "k1"
+        assert args["packages"][0] == "python-sat"
 
-        # A stale kernel falls back to a fresh one.
+        # A stale kernel falls back to a fresh one, and routing follows.
         engine.kernels.clear()
         result = await session.call_tool("select_backend", {"solver": "cpmpy"})
-        sc = result.structuredContent
-        assert sc["kernel_id"] == "k2" and sc["recycled"] is False
+        assert "fresh solving kernel" in result.content[0].text
+        name, args = engine.calls[-1]
+        assert name == "python_reset" and "kernel_id" not in args
+        await session.call_tool("python_exec", {"code": "print(1)"})
+        assert engine.calls[-1][1]["kernel_id"] == "k2"
 
 
 async def test_select_backend_rejects_unknown_solver(engine):
@@ -263,6 +266,38 @@ async def test_submission_store_is_bounded(engine, monkeypatch):
             assert result.structuredContent == {"ok": True}
     assert len(mcp_server._submissions) == 2
     assert list(mcp_server._submissions.values()) == ["print(1)", "print(2)"]
+
+
+async def test_submit_stats_ride_along(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "1"})
+        await session.call_tool("python_exec", {"code": "2"})
+        result = await session.call_tool("submit_code", {"code": "print(1)"})
+        sc = result.structuredContent
+        assert sc["ok"] is True
+        assert sc["stats"]["exec_calls"] == 2
+        assert sc["stats"]["exec_failures"] == 0
+        assert sc["stats"]["submit_attempts"] == 1
+        assert "wall_seconds" in sc["stats"]
+
+
+async def test_episode_stats_jsonl(engine, monkeypatch, tmp_path):
+    stats_file = tmp_path / "stats.jsonl"
+    monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "1"})
+        # A second selection closes the first episode...
+        await session.call_tool("select_backend", {"solver": "pysat"})
+    # ...and server shutdown closes the second.
+    lines = [json.loads(ln) for ln in stats_file.read_text().splitlines()]
+    assert len(lines) == 2
+    first, second = lines
+    assert first["solver"] == "z3" and first["end"] == "superseded"
+    assert first["tool_calls"] == {"select_backend": 1, "python_exec": 1}
+    assert first["submit_ok"] == 0 and "wall_seconds" in first
+    assert second["solver"] == "pysat" and second["end"] == "shutdown"
 
 
 async def test_manual_reset_retargets_routing(engine):

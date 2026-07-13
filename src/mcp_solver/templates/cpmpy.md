@@ -49,6 +49,11 @@ else:
 - CPMpy automatically finds the OPTIMAL solution, not just first valid
 - The solver continues searching until it proves optimality
 - Always verify the objective value matches your expectation
+- Optimization can be slow with loose variable bounds: keep domains as
+  tight as the problem allows. If execution hits the 30s default limit,
+  pass a solver budget (`model.solve(time_limit=...)`) and raise the
+  execution timeout (`python_exec` accepts `timeout` up to 300) — a
+  timeout does NOT mean the model is wrong
 - Example:
   ```python
   profit = sum(price[i] * x[i] for i in range(n))

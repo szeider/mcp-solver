@@ -89,7 +89,7 @@ def test_with_packages_pysat_pins_helpers(monkeypatch):
     # Outside a source checkout the helpers fall back to the PyPI pin.
     monkeypatch.setattr(cli, "_local_checkout", lambda: None)
     pkgs = cli.build_with_packages("pysat")
-    assert pkgs == ["python-sat", f"mcp-solver=={mcp_solver.__version__}"]
+    assert pkgs == ["python-sat", "pypblib", f"mcp-solver=={mcp_solver.__version__}"]
 
 
 def test_source_checkout_auto_detected():

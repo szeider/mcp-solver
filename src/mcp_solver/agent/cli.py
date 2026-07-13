@@ -30,9 +30,11 @@ from mcp_solver.templates import SOLVERS, get_template
 PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 
 # Solver libraries injected into the solve-time kernel, per backend.
+# pypblib backs pysat.pb.PBEnc (pseudo-Boolean encodings — budgets,
+# capacities); without it PBEnc raises at import time.
 SOLVER_PACKAGES: dict[str, list[str]] = {
-    "pysat": ["python-sat"],
-    "maxsat": ["python-sat"],
+    "pysat": ["python-sat", "pypblib"],
+    "maxsat": ["python-sat", "pypblib"],
     "z3": ["z3-solver"],
     "cpmpy": ["cpmpy"],
     "clingo": ["clingo"],
@@ -298,6 +300,7 @@ def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "total_tokens": result.input_tokens + result.output_tokens,
+            "cost_usd": round(getattr(result, "cost", 0.0), 6),
         },
         "tool_usage": tool_usage,
         "execution_time_seconds": elapsed,
@@ -355,10 +358,13 @@ async def solve(
 def print_stats(stats: dict) -> None:
     """Print a compact one-line summary of the solve run to stderr."""
     tokens = stats.get("token_consumption", {}).get("total_tokens", 0)
+    cost = stats.get("token_consumption", {}).get("cost_usd", 0)
     exec_calls = stats.get("tool_usage", {}).get("python_exec", 0)
     elapsed = stats.get("execution_time_seconds", 0)
+    cost_part = f", ${cost:.4f}" if cost else ""
     print(
-        f"mcp-solver: {tokens:,} tokens, {exec_calls} exec calls, {elapsed:.1f}s",
+        f"mcp-solver: {tokens:,} tokens{cost_part}, {exec_calls} exec calls,"
+        f" {elapsed:.1f}s",
         file=sys.stderr,
     )
 

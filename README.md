@@ -38,6 +38,13 @@ no API key:
 - **Resources:** `mcp-solver://guide` (backend selection and workflow) and
   `mcp-solver://template/{solver}` (the full modeling instructions,
   browsable without selecting).
+- **Statistics** (optional): set `MCP_SOLVER_STATS=/path/to/stats.jsonl` in
+  the server's `env` to log one JSON line per solving episode — tool-call
+  counts, execution failures, submissions, wall time. Host tokens are
+  invisible to the server by protocol design; tool usage is the comparable
+  metric across hosts. (`submit_code` results also carry a compact stats
+  snapshot as structured content; the CLI path reports tokens and actual
+  OpenRouter cost via `--stats-json`.)
 
 Claude Desktop configuration (once v4 is on PyPI):
 

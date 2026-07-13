@@ -41,8 +41,9 @@ Return a single JSON object on stdout with this schema:
 - `satisfiable` (boolean): `true` if a valid schedule exists, `false`
   otherwise.
 
-The chained same-room / consecutive-slot constraints (items 5-7) cannot all be
-satisfied together, so no valid schedule exists. The expected answer is:
+PH101 and BI101 both require the only lab with special equipment (Room 4),
+and constraint 3 forces them into the same time slot — colliding with
+constraint 1, so no valid schedule exists. The expected answer is:
 
 ```json
 {"satisfiable": false}
