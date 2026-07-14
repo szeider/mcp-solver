@@ -91,8 +91,10 @@ All of these return `list[list[int]]` clauses — append each clause to your for
 from mcp_solver.helpers.pysat import (
     VariableMap,
     at_most_one, exactly_one,          # pairwise encodings
-    at_most_k, at_least_k, exactly_k,  # cardinality (reliable pairwise <=20 vars,
-                                       #   CardEnc above; De Morgan for at_least)
+    at_most_k, at_least_k, exactly_k,  # cardinality (pairwise <=20 vars, CardEnc
+                                       #   above — then pass top_id=<max var id
+                                       #   in your formula> so auxiliaries don't
+                                       #   collide with your other variables)
     implies, mutually_exclusive, if_then_else,
 )
 
@@ -153,18 +155,32 @@ swapped indices). Before saving, you MUST:
    ```
    If your encoding and your verifier share an assumption, a wrong assumption
    passes silently — re-read the problem statement when writing `verify()`.
-3. **Execute the verification** via python_exec and confirm it passes.
+   Also assert the output's *structure* matches the stated format (element
+   order, axis convention, sizes) — constraint checks alone can pass a
+   transposed answer — and for problems with given input data (clues, edges),
+   check against a separately transcribed copy of the data, not the encoder's
+   variable.
+3. **Test any provided example against your model**: if the problem statement
+   includes a concrete example solution, run it through `verify()` and check
+   it satisfies your constraints. The example is ground truth about the
+   intended problem — if it fails, your model or verifier is wrong, never the
+   example; do not dismiss it as "just illustrating the format".
+4. **Execute the verification** via python_exec and confirm it passes.
    `verify()` belongs to this exploration phase; the final submitted program
    need not include it (and if it does, it must not print anything besides
    the solution JSON).
-4. **For an UNSAT answer**: list each clause group and the sentence of the
+5. **For an UNSAT answer**: list each clause group and the sentence of the
    problem statement that justifies it. If any clause lacks a justification,
-   remove it and re-solve before reporting UNSAT.
+   remove it and re-solve before reporting UNSAT. Also confirm the UNSAT is
+   not an artifact of over-constraining: relax one bound (one more color, one
+   more unit of budget) and check the solver then returns SAT — if even the
+   relaxation is UNSAT, suspect your encoding before the problem.
 
 Finish by calling `submit_code` with the final, verified program as one
-self-contained script (all imports included, no reliance on session state).
-Do NOT call submit_code until verification passes. If it fails, fix the
-encoding and re-verify.
+self-contained script (all imports included, no reliance on session state;
+`mcp_solver.helpers` imports are fine — the library is available wherever the
+program is re-executed). Do NOT call submit_code until verification passes.
+If it fails, fix the encoding and re-verify.
 
 That's it. Read the problem carefully, map entities to 1-based variables, encode
 exactly what is stated, verify independently, and let the SAT solver do the search.

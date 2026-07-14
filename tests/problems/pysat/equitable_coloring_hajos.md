@@ -1,5 +1,17 @@
 Find an equitable 3-coloring of the Hajós join of three C₅ cycles (cycle graphs with 5 vertices each).
 
+The graph is built from three 5-cycles — cycle `k` has vertices `ck_0`..`ck_4`
+and edges `ck_i`–`ck_{(i+1) mod 5}` — by two Hajós joins (join of G with edge
+(a,b) and H with edge (u,v): delete both edges, identify u with a, add the
+edge (b,v)):
+
+1. Join cycle 0 with edge (`c0_0`,`c0_1`) and cycle 1 with edge
+   (`c1_0`,`c1_1`): delete both edges, identify `c1_0` with `c0_0`, add the
+   edge (`c0_1`,`c1_1`).
+2. Join the result with edge (`c0_2`,`c0_3`) and cycle 2 with edge
+   (`c2_0`,`c2_1`): delete both edges, identify `c2_0` with `c0_2`, add the
+   edge (`c0_3`,`c2_1`).
+
 ## Output Format
 
 Return a single JSON object. On success, `satisfiable` is `true` and

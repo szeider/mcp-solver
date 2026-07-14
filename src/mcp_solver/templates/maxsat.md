@@ -31,6 +31,9 @@ wcnf = WCNF()
 var_map = VariableMap()
 
 # 1. Variables (1-based ids; comment each with its meaning)
+#    item = var_map.get_id("item_A")   # allocate/look up an id per name
+#    (the method is get_id; after solving, var_map.interpret_model(model)
+#    returns {name: bool})
 # 2. Hard constraints:  wcnf.append([literals])
 # 3. Soft constraints:  wcnf.append([literals], weight=w)
 # 4. Solve
@@ -161,20 +164,29 @@ independent of the encoding:
    - re-check every hard constraint with plain Python;
    - recompute the objective (total value/cost) directly from the decoded
      solution — never from solver internals;
-   - check the penalty accounting: for a maximize-encoding,
-     `objective_achieved + solver.cost == total_possible_value` must hold.
-3. **Sanity-check optimality direction**: perturb one obvious decision by
+   - check the penalty accounting: recompute the total weight of the
+     VIOLATED soft clauses directly from the decoded solution — it must
+     equal `solver.cost` (for a pure maximize-encoding this is the identity
+     `objective_achieved + solver.cost == total_possible_value`).
+3. **Test any provided example against your model**: if the problem
+   statement includes a concrete example solution, check it satisfies your
+   hard constraints and that your objective accounting prices it correctly.
+   The example is ground truth about the intended problem — if it fails,
+   your model is wrong, never the example.
+4. **Sanity-check optimality direction**: perturb one obvious decision by
    hand (e.g. add the highest-value unselected item, dropping what blocks
    it) and confirm the objective does not improve while respecting hard
    constraints — a cheap smoke test against inverted polarity.
-4. **Execute the verification** via python_exec and confirm it passes.
-5. **For an UNSAT answer**: justify every hard clause from the problem
+5. **Execute the verification** via python_exec and confirm it passes.
+6. **For an UNSAT answer**: justify every hard clause from the problem
    statement; if any clause lacks justification, remove it and re-solve
-   before reporting UNSAT.
+   before reporting UNSAT. Also relax one hard bound by a unit and check
+   the instance becomes satisfiable — if not, suspect your encoding.
 
 Finish by calling `submit_code` with the final, verified program as one
-self-contained script (all imports included, no reliance on session state).
-Do NOT call submit_code until verification passes.
+self-contained script (all imports included, no reliance on session state;
+`mcp_solver.helpers` imports are fine — the library is available wherever the
+program is re-executed). Do NOT call submit_code until verification passes.
 
 That's it. Separate hard from soft, penalize what you don't want, verify the
 objective independently, and let RC2 find the optimum.
