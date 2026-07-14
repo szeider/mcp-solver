@@ -46,20 +46,21 @@ no API key:
   snapshot as structured content; the CLI path reports tokens and actual
   OpenRouter cost via `--stats-json`.)
 
-Claude Desktop configuration:
+Claude Desktop configuration (once the PyPI name transfer completes — see
+[Installation](#installation)):
 
 ```json
 {
   "mcpServers": {
     "mcp-solver": {
       "command": "uvx",
-      "args": ["--from", "mcpsolver[agent]", "mcp-solver-serve"]
+      "args": ["--from", "mcp-solver[agent]", "mcp-solver-serve"]
     }
   }
 }
 ```
 
-From a checkout (the development path):
+From a checkout (the working setup today, and the development path always):
 
 ```json
 {
@@ -86,21 +87,23 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 
 ## Installation
 
-> The PyPI package name is **`mcpsolver`** (no hyphen). The PyPI project
-> `mcp-solver` is an unrelated third-party upload of stale v2.0.0 code; a
-> name-transfer request is pending.
+> **v4 is not yet installable from PyPI.** The PyPI name `mcp-solver` is
+> held by a third-party upload of stale v2.0.0 code, and PyPI blocks
+> confusably similar names; a [PEP 541](https://peps.python.org/pep-0541/)
+> name-transfer request is pending. Until it resolves, install from a
+> checkout:
 
 ```bash
-uv pip install "mcpsolver[agent]"
+git clone https://github.com/szeider/mcp-solver.git
+cd mcp-solver
+uv pip install -e ".[agent]"
 
 # OpenRouter key — only needed for the CLI path, not the MCP server:
 mkdir -p ~/.config/coder
 echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 ```
 
-For development, clone the repo and install editable instead
-(`uv pip install -e ".[agent]"`). See [INSTALL.md](INSTALL.md) for details
-and troubleshooting.
+See [INSTALL.md](INSTALL.md) for details and troubleshooting.
 
 ## Command-line use
 
@@ -160,11 +163,11 @@ CPMpy.
 
 ## How it works
 
-The base `mcpsolver` package is a dependency-free **solver helper library**
+The base `mcp-solver` package is a dependency-free **solver helper library**
 (`mcp_solver.helpers.{pysat,maxsat,z3}`; the CPMpy and Clingo backends need
 no helper module). It is never pip-installed into your
 environment; instead it is injected into each solve-time kernel via
-`uv run --with mcpsolver==<version>`, alongside the backend's solver library.
+`uv run --with mcp-solver==<version>`, alongside the backend's solver library.
 This keeps the host environment clean and each solve reproducible.
 
 Each backend ships a **project template**: a markdown prompt (package data)

@@ -107,7 +107,7 @@ def helpers_package(dev_path: str | None = None) -> str:
     """
     if dev_path:
         return dev_path
-    return f"mcpsolver=={mcp_solver.__version__}"
+    return f"mcp-solver=={mcp_solver.__version__}"
 
 
 def build_with_packages(solver: str, dev_path: str | None = None) -> list[str]:

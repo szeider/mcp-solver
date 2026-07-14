@@ -23,9 +23,10 @@
 - **Improvement:** Every shipped test problem carries an output-format contract
   and a semantic ground-truth validator; validated end-to-end on the bundled
   26-problem benchmark and externally on CP-Bench and ASP-Bench.
-- **Note:** Published on PyPI as **`mcpsolver`** (no hyphen). The PyPI name
-  `mcp-solver` is held by an unrelated third-party upload of stale v2.0.0
-  code; a name-transfer request is pending.
+- **Note:** Not yet installable from PyPI: the name `mcp-solver` is held by an
+  unrelated third-party upload of stale v2.0.0 code, and PyPI blocks
+  confusably similar names; a PEP 541 name-transfer request is pending. The
+  companion agent **mcp-minion** is on PyPI.
 
 ### [3.4.0] - 2025-09-13
 
