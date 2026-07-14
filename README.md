@@ -53,7 +53,7 @@ Claude Desktop configuration:
   "mcpServers": {
     "mcp-solver": {
       "command": "uvx",
-      "args": ["--from", "mcp-solver[agent]", "mcp-solver-serve"]
+      "args": ["--from", "mcpsolver[agent]", "mcp-solver-serve"]
     }
   }
 }
@@ -86,8 +86,12 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 
 ## Installation
 
+> The PyPI package name is **`mcpsolver`** (no hyphen). The PyPI project
+> `mcp-solver` is an unrelated third-party upload of stale v2.0.0 code; a
+> name-transfer request is pending.
+
 ```bash
-uv pip install "mcp-solver[agent]"
+uv pip install "mcpsolver[agent]"
 
 # OpenRouter key — only needed for the CLI path, not the MCP server:
 mkdir -p ~/.config/coder
@@ -156,11 +160,11 @@ CPMpy.
 
 ## How it works
 
-The base `mcp-solver` package is a dependency-free **solver helper library**
+The base `mcpsolver` package is a dependency-free **solver helper library**
 (`mcp_solver.helpers.{pysat,maxsat,z3}`; the CPMpy and Clingo backends need
 no helper module). It is never pip-installed into your
 environment; instead it is injected into each solve-time kernel via
-`uv run --with mcp-solver==<version>`, alongside the backend's solver library.
+`uv run --with mcpsolver==<version>`, alongside the backend's solver library.
 This keeps the host environment clean and each solve reproducible.
 
 Each backend ships a **project template**: a markdown prompt (package data)

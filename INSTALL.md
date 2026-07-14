@@ -72,17 +72,21 @@ echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 
 ### From PyPI (normal use)
 
+> The PyPI package name is **`mcpsolver`** (no hyphen). The PyPI project
+> `mcp-solver` is an unrelated third-party upload of stale v2.0.0 code; a
+> name-transfer request is pending.
+
 The `[agent]` extra pulls in `mcp-minion` (the agent loop) and
 `agentic-python-coder` (the IPython kernel MCP server and model aliases); the
-bare `mcp-solver` package is only the dependency-free helper library and
+bare `mcpsolver` package is only the dependency-free helper library and
 cannot solve anything on its own.
 
 ```bash
-uv pip install "mcp-solver[agent]"
+uv pip install "mcpsolver[agent]"
 ```
 
 The MCP server can also run without any install at all:
-`uvx --from "mcp-solver[agent]" mcp-solver-serve`.
+`uvx --from "mcpsolver[agent]" mcp-solver-serve`.
 
 ### Clone + editable (development)
 
@@ -174,7 +178,7 @@ mcp-solver-bench pysat --runs 1
 
 **`mcp-solver: the agent layer is not installed`**
 You installed the bare package without the product layer. Install the `[agent]`
-extra: `uv pip install "mcp-solver[agent]"` (or `-e ".[agent]"` from a
+extra: `uv pip install "mcpsolver[agent]"` (or `-e ".[agent]"` from a
 checkout, see [Install](#install)).
 
 **`the ipython_mcp server does not provide submit_code`** (CLI) or

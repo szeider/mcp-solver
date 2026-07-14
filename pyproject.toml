@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-solver"
+name = "mcpsolver"
 version = "4.0.0"
 description = "LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP) on top of agentic-python-coder"
 readme = "README.md"
@@ -38,7 +38,7 @@ dev = [
     "ruff>=0.4.10",
 ]
 all = [
-    "mcp-solver[agent,test,dev]",
+    "mcpsolver[agent,test,dev]",
 ]
 
 [project.scripts]
