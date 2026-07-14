@@ -199,7 +199,11 @@ Each run is bounded by `--step-limit` (default: 30 agent steps), and results
 are appended to `results.jsonl` in the output directory.
 
 Current status: in our runs with `gpt-5.6-terra`, all 26 test problems solve
-correctly.
+correctly. The MCP server path is validated with Claude Opus as host: 229/229
+instances across [CP-Bench](https://doi.org/10.5281/zenodo.18034815) (101)
+and [ASP-Bench](https://doi.org/10.5281/zenodo.18062939) (128) solve
+correctly under strict semantic validation, as do the bundled SAT, MaxSAT,
+and SMT problems.
 
 ## From v3 to v4: a new architecture
 
