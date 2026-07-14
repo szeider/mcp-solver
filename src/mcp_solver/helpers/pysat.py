@@ -176,18 +176,31 @@ def at_least_k(
         return at_most_k(neg_vars, n - k, encoding=encoding, top_id=top_id)
 
 
-def exactly_k(variables: list[int], k: int) -> list[list[int]]:
+def exactly_k(
+    variables: list[int],
+    k: int,
+    *,
+    encoding: int = EncType.seqcounter,
+    top_id: int | None = None,
+) -> list[list[int]]:
     """Clauses enforcing that exactly ``k`` of ``variables`` are true.
 
-    Uses auxiliary-free encodings: ``k == 0`` forbids every variable, ``k == 1``
-    combines a single at-least-one clause with pairwise at-most-one, and the
-    general case is :func:`at_most_k` plus :func:`at_least_k`. An impossible
-    request (``k < 0`` or ``k > len(variables)``) returns ``[[]]`` (a single
-    empty clause), which any solver reads as UNSAT.
+    ``k == 0`` forbids every variable and ``k == 1`` combines a single
+    at-least-one clause with pairwise at-most-one (both auxiliary-free). The
+    general case is :func:`at_most_k` plus :func:`at_least_k`; above the
+    pairwise threshold those allocate CardEnc auxiliary variables, with the
+    IDs threaded so the two encodings never collide with each other or with
+    ``variables``. Pass ``top_id`` when your formula already uses IDs above
+    ``max(variables)``. An impossible request (``k < 0`` or
+    ``k > len(variables)``) returns ``[[]]`` (a single empty clause), which
+    any solver reads as UNSAT.
 
     Args:
         variables: Signed variable IDs.
         k: Exact count required.
+        encoding: pysat ``EncType`` used only on the CardEnc path.
+        top_id: Highest variable ID already in use, so CardEnc allocates
+            auxiliary variables above it (CardEnc path only).
 
     Returns:
         A list of clauses.
@@ -207,7 +220,13 @@ def exactly_k(variables: list[int], k: int) -> list[list[int]]:
         ]
         return at_least + at_most
 
-    return at_most_k(variables, k) + at_least_k(variables, k)
+    at_most = at_most_k(variables, k, encoding=encoding, top_id=top_id)
+    used = max(
+        (abs(lit) for clause in at_most for lit in clause),
+        default=0,
+    )
+    used = max(used, max(abs(v) for v in variables), top_id or 0)
+    return at_most + at_least_k(variables, k, encoding=encoding, top_id=used)
 
 
 def at_most_one(variables: list[int]) -> list[list[int]]:

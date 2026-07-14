@@ -109,6 +109,40 @@ def test_exactly_k_impossible_is_unsat():
     assert models == set()
 
 
+def test_exactly_k_cardenc_path_25_vars_is_sat():
+    # Regression: above the pairwise threshold, at_most_k and at_least_k both
+    # allocate CardEnc auxiliaries; without top_id threading their IDs collided
+    # and exactly_k(25 vars, 10) was spuriously UNSAT (2026-07-13 campaign).
+    variables = list(range(1, 26))
+    clauses = ph.exactly_k(variables, 10)
+    solver = Glucose3()
+    for clause in clauses:
+        solver.add_clause(clause)
+    assert solver.solve()
+    model = solver.get_model()
+    assert sum(1 for v in variables if v in model) == 10
+    # And the count is enforced, not merely allowed: block-and-check a few
+    # models, all must have exactly 10 true.
+    for _ in range(5):
+        block = [(-v if v in model else v) for v in variables]
+        solver.add_clause(block)
+        if not solver.solve():
+            break
+        model = solver.get_model()
+        assert sum(1 for v in variables if v in model) == 10
+    solver.delete()
+
+
+def test_exactly_k_cardenc_path_respects_top_id():
+    # Formula vars 1..30 exist; exactly_k over the first 25 must not allocate
+    # auxiliaries that collide with vars 26..30 when top_id says they exist.
+    variables = list(range(1, 26))
+    clauses = ph.exactly_k(variables, 10, top_id=30)
+    aux = {abs(lit) for cl in clauses for lit in cl} - set(variables)
+    assert aux, "expected CardEnc auxiliaries on the >20-vars path"
+    assert min(aux) > 30
+
+
 def test_one_hot_matches_exactly_one():
     variables = [1, 2, 3, 4]
     assert enumerate_projected(
