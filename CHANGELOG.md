@@ -1,5 +1,29 @@
 # Changelog
 
+### [4.0.0] - 2026-07-14
+
+- **Major Change:** Complete re-architecture. The solving LLM now writes, runs,
+  and verifies a real solver program in a persistent IPython kernel (the kernel
+  server of agentic-python-coder) instead of editing a model item by item
+  through protocol tools. The final program is submitted through a
+  syntax-checked gate (`submit_code`), persisted, and re-executed to produce
+  the solution JSON.
+- **Major Change:** The MCP server (`mcp-solver-serve`) is a solver toolkit for
+  the host LLM — it runs no LLM and needs no API key: `select_backend` sets up
+  a kernel with the solver library, helpers, and modeling instructions; kernel
+  tools and `submit_code` do the rest.
+- **Major Change:** MiniZinc mode retired; CPMpy added. Backends are now
+  PySAT, MaxSAT, Z3, CPMpy, and Clingo. The v3 MCP server lives on unchanged
+  on the `v3` branch.
+- **New Feature:** `mcp-solver` CLI and `mcp-solver-bench` benchmark harness,
+  driven by the bundled **mcp-minion** ReAct agent (also published separately
+  on PyPI) via OpenRouter.
+- **New Feature:** Dependency-free helper library (`mcp_solver.helpers`)
+  injected into solve-time kernels via `uv run --with`.
+- **Improvement:** Every shipped test problem carries an output-format contract
+  and a semantic ground-truth validator; validated end-to-end on the bundled
+  26-problem benchmark and externally on CP-Bench and ASP-Bench.
+
 ### [3.4.0] - 2025-09-13
 
 - **New Feature:** Complete Answer Set Programming (ASP) mode implementation with Clingo solver (contributed by Luis Angel Rodriguez Reiners)

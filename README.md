@@ -13,7 +13,7 @@ it.
 > **Version 4 is a complete re-architecture.** Both the MCP interface and the
 > solving engine changed; the design from the SAT 2025 paper (v3) lives on
 > unchanged on the
-> [`heritage`](https://github.com/szeider/mcp-solver/tree/heritage) branch.
+> [`v3`](https://github.com/szeider/mcp-solver/tree/v3) branch.
 > See [From v3 to v4](#from-v3-to-v4-a-new-architecture) below.
 
 ## The MCP server
@@ -46,7 +46,7 @@ no API key:
   snapshot as structured content; the CLI path reports tokens and actual
   OpenRouter cost via `--stats-json`.)
 
-Claude Desktop configuration (once v4 is on PyPI):
+Claude Desktop configuration:
 
 ```json
 {
@@ -59,7 +59,7 @@ Claude Desktop configuration (once v4 is on PyPI):
 }
 ```
 
-From a checkout (the standard setup today, and the development path always):
+From a checkout (the development path):
 
 ```json
 {
@@ -86,20 +86,17 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 
 ## Installation
 
-> **v4 is not yet on PyPI.** PyPI still serves the old v3 server, so
-> `uv pip install "mcp-solver[agent]"` installs the wrong software. Until v4
-> is published, the only working install is a clone plus an editable install:
-
 ```bash
-git clone https://github.com/szeider/mcp-solver.git
-cd mcp-solver
-uv pip install -e ".[agent]"
+uv pip install "mcp-solver[agent]"
 
+# OpenRouter key — only needed for the CLI path, not the MCP server:
 mkdir -p ~/.config/coder
 echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 ```
 
-See [INSTALL.md](INSTALL.md) for details and troubleshooting.
+For development, clone the repo and install editable instead
+(`uv pip install -e ".[agent]"`). See [INSTALL.md](INSTALL.md) for details
+and troubleshooting.
 
 ## Command-line use
 
@@ -214,10 +211,9 @@ documents **v3**: an MCP server exposing model-editing tools (`add_item`,
 model item by item, with solving happening inside the server.
 
 **v4 follows the IPython-kernel approach** laid out in the
-[CP-Agent](https://doi.org/10.1145/3786181.3788711) (LLM4Code '26,
-[arXiv:2508.07468](https://arxiv.org/abs/2508.07468)) and
-[ASP-Bench](https://doi.org/10.1145/3786168.3788402) (NSE '26,
-[arXiv:2602.01171](https://arxiv.org/abs/2602.01171)) papers: instead of a
+[CP-Agent](https://doi.org/10.1145/3786181.3788711) (LLM4Code 2026) and
+[ASP-Bench](https://doi.org/10.1145/3786168.3788402) (NSE '26) papers:
+instead of a
 host LLM editing a model through protocol tools, a dedicated coding agent
 works in a persistent IPython kernel, where it iteratively writes an actual
 Python solver program, executes it against the real solver, verifies the
@@ -236,17 +232,18 @@ result independently, and only then submits the program as the answer.
 ## Citations
 
 - Stefan Szeider, "Bridging Language Models and Symbolic Solvers via the Model
-  Context Protocol", SAT 2025. Documents the v3 architecture (heritage branch).
+  Context Protocol", SAT 2025. Documents the v3 architecture (v3 branch).
   [DOI 10.4230/LIPIcs.SAT.2025.30](https://doi.org/10.4230/LIPIcs.SAT.2025.30)
-- Stefan Szeider, "CP-Agent: Agentic Constraint Programming", LLM4Code '26
-  (ACM). The IPython-kernel approach behind v4.
-  [DOI 10.1145/3786181.3788711](https://doi.org/10.1145/3786181.3788711),
-  preprint [arXiv:2508.07468](https://arxiv.org/abs/2508.07468)
-- Stefan Szeider, "ASP-Bench: From Natural Language to Logic Programs",
-  NSE '26 (IEEE/ACM). The verification-gated benchmark methodology used by
-  v4's test problems.
-  [DOI 10.1145/3786168.3788402](https://doi.org/10.1145/3786168.3788402),
-  preprint [arXiv:2602.01171](https://arxiv.org/abs/2602.01171)
+- Stefan Szeider, "CP-Agent: Agentic Constraint Programming", in
+  *Proceedings of the 3rd International Workshop on Large Language Models
+  For Code (LLM4Code 2026)*, pages 6–13, ACM, 2026. The IPython-kernel
+  approach behind v4.
+  [DOI 10.1145/3786181.3788711](https://doi.org/10.1145/3786181.3788711)
+- Stefan Szeider, "ASP-Bench: From Natural Language to Logic Programs", in
+  *Proceedings of the 2026 IEEE/ACM 2nd International Workshop on
+  Neuro-Symbolic Software Engineering (NSE '26)*, pages 1–8, ACM, 2026.
+  The verification-gated benchmark methodology used by v4's test problems.
+  [DOI 10.1145/3786168.3788402](https://doi.org/10.1145/3786168.3788402)
 
 ## License
 

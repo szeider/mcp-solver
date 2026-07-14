@@ -52,9 +52,3 @@ tests/problems/pysat/
 
 A `test.md` file (if present) is treated as a smoke problem and skipped by the
 harness.
-
-## Retired v3 material
-
-`tests/problems/mzn/` and `tests/run_test.py` (plus `test_config.py`) belong to
-the retired v3 ReAct test client and are **not** used by v4. They are kept for
-reference until the release cleanup; ignore them when working with v4.

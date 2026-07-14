@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-solver"
-version = "4.0.0a0"
+version = "4.0.0"
 description = "LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP) on top of agentic-python-coder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -48,35 +48,13 @@ mcp-solver-serve = "mcp_solver.agent.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_solver"]
-# Legacy v3 sources remain in the tree during the v4 transition for
-# reference; they are not part of the package.
-exclude = [
-    "src/mcp_solver/asp",
-    "src/mcp_solver/client",
-    "src/mcp_solver/core",
-    "src/mcp_solver/maxsat",
-    "src/mcp_solver/mzn",
-    "src/mcp_solver/pysat",
-    "src/mcp_solver/z3",
-    "src/mcp_solver/solution.py",
-]
 
 [tool.ruff]
 target-version = "py313"
 line-length = 88
 fix = true
-# Legacy v3 code and infrastructure, kept for reference until the main swap.
+# Untracked local scratch directories.
 exclude = [
-    "src/mcp_solver/asp",
-    "src/mcp_solver/client",
-    "src/mcp_solver/core",
-    "src/mcp_solver/maxsat",
-    "src/mcp_solver/mzn",
-    "src/mcp_solver/pysat",
-    "src/mcp_solver/z3",
-    "src/mcp_solver/solution.py",
-    "tests/run_test.py",
-    "tests/test_config.py",
     "local",
     "tmp",
 ]
