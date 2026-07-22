@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -24,6 +25,94 @@ _DEFAULTS = AgentConfig()
 def strip_html_comments(text: str) -> str:
     """Remove HTML comments (<!-- ... -->) from text."""
     return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+
+
+# --- verbose step rendering --------------------------------------------------
+
+_RESULT_TEXT_LIMIT = 500  # chars of plain-text result shown on the console
+_STREAM_LIMIT = 2000  # chars of a kernel stdout/stderr stream shown
+_ARG_LIMIT = 120  # chars of a non-code argument value shown
+
+
+def _indent(text: str, prefix: str = "    ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + f"\n… ({len(text):,} chars — full text in run log)"
+
+
+def render_tool_call(name: str, arguments: dict) -> str:
+    """One tool call as 'Tool: name' plus indented arguments.
+
+    Multi-line string arguments (code) are shown as real code blocks;
+    everything else is a truncated repr on one line.
+    """
+    lines = [f"Tool: {name}"]
+    for key, val in (arguments or {}).items():
+        if isinstance(val, str) and "\n" in val:
+            lines.append(f"  {key}:")
+            lines.append(_indent(val.rstrip()))
+        else:
+            r = repr(val)
+            if len(r) > _ARG_LIMIT:
+                r = r[:_ARG_LIMIT] + f"… ({len(r):,} chars)"
+            lines.append(f"  {key}: {r}")
+    return "\n".join(lines)
+
+
+def render_tool_result(text: str) -> str:
+    """A tool result, unwrapped and truncated for the console.
+
+    Unwraps the client's ``{"result": ...}`` envelope; renders kernel
+    payloads (stdout/stderr/success) as labeled blocks; long plain text
+    (e.g. a modeling template) collapses to its first line plus a size
+    note. The complete text is always in the run_*.json log.
+    """
+    inner = text
+    try:
+        envelope = json.loads(text)
+        if isinstance(envelope, dict) and "result" in envelope:
+            inner = str(envelope["result"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    payload = None
+    with contextlib.suppress(json.JSONDecodeError, TypeError):
+        payload = json.loads(inner)
+
+    if isinstance(payload, dict) and ("success" in payload or "ok" in payload):
+        lines = []
+        if "success" in payload:
+            status = "ok" if payload.get("success") else "FAILED"
+            kid = payload.get("kernel_id")
+            lines.append(f"Result: {status}" + (f" (kernel {kid})" if kid else ""))
+        else:
+            ok = payload.get("ok")
+            lines.append(
+                "Result: accepted"
+                if ok
+                else f"Result: rejected — {payload.get('error', '?')}"
+            )
+        for stream in ("stdout", "stderr"):
+            value = payload.get(stream)
+            if value and value.strip():
+                lines.append(f"  {stream}:")
+                lines.append(_indent(_truncate(value.rstrip(), _STREAM_LIMIT)))
+        error = payload.get("error")
+        if "success" in payload and error:
+            lines.append(f"  error: {error}")
+        return "\n".join(lines)
+
+    plain = inner.strip()
+    if len(plain) > _RESULT_TEXT_LIMIT:
+        first_line = plain.splitlines()[0] if plain.splitlines() else ""
+        return (
+            f"Result: text, {len(plain):,} chars (full text in run log)\n  {first_line}"
+        )
+    return f"Result: {plain}" if "\n" not in plain else "Result:\n" + _indent(plain)
 
 
 def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, str]:
@@ -138,10 +227,17 @@ async def run_agent_async(
     # Create tool registry with built-in tools
     tools = create_default_registry()
 
-    # Start MCP servers if configured
+    # Start MCP servers if configured; their stderr (and their children's,
+    # e.g. kernel processes) goes to a per-folder log, not the console.
     mcp_manager = None
+    server_log = None
     if mcp_servers:
-        mcp_manager = MCPManager(mcp_servers)
+        server_log_path = args.folder / "server.log"
+        # Deliberately no context manager: the file must outlive this block
+        # (servers write to it until the finally below closes it).
+        server_log = open(server_log_path, "w", encoding="utf-8")  # noqa: SIM115
+        print(f"server stderr → {server_log_path}", file=sys.stderr)
+        mcp_manager = MCPManager(mcp_servers, errlog=server_log)
 
     try:
         if mcp_manager:
@@ -178,8 +274,8 @@ async def run_agent_async(
                     print(f"Thought: {step['content']}")
                 if step.get("tool_calls"):
                     for tc in step["tool_calls"]:
-                        print(f"Tool: {tc['name']}({tc['arguments']})")
-                        print(f"Result: {tc['result']}")
+                        print(render_tool_call(tc["name"], tc["arguments"]))
+                        print(render_tool_result(tc["result"]))
             print("\n" + "=" * 40)
             print(f"Tool calls made: {result.tool_calls_made}")
             print("=" * 40)
@@ -199,6 +295,8 @@ async def run_agent_async(
     finally:
         if mcp_manager:
             await mcp_manager.__aexit__(None, None, None)
+        if server_log:
+            server_log.close()
 
 
 def main() -> None:

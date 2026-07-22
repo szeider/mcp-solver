@@ -33,6 +33,7 @@ across the host's tool calls.
 import asyncio
 import contextlib
 import json
+import logging
 import math
 import os
 import sys
@@ -488,6 +489,10 @@ async def submit_code(code: str) -> CallToolResult:
 
 def main() -> None:
     """Entry point for mcp-solver-serve (stdio transport)."""
+    # The mcp library logs every request at INFO ("Processing request of
+    # type CallToolRequest"), which is pure noise on the host's console
+    # or log; keep warnings and errors.
+    logging.getLogger("mcp").setLevel(logging.WARNING)
     mcp.run()
 
 

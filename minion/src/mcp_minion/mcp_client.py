@@ -67,6 +67,7 @@ class MCPManager:
         self,
         servers_config: dict[str, dict[str, Any]],
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
+        errlog: Any = None,
     ) -> None:
         """Initialize with server configurations.
 
@@ -77,9 +78,13 @@ class MCPManager:
                 tool call. If a call's arguments carry a numeric ``timeout``
                 (e.g. python_exec), the effective timeout is at least that
                 value plus a margin, so the server-side timeout fires first.
+            errlog: Optional text file object receiving the spawned servers'
+                stderr (default: inherit this process's stderr). Lets a CLI
+                keep its console clean while preserving server logs on disk.
         """
         self.servers_config = servers_config
         self.tool_timeout = tool_timeout
+        self._errlog = errlog
         self._sessions: dict[str, ClientSession] = {}
         self._tools: dict[str, MCPToolInfo] = {}  # tool_name -> MCPToolInfo
         self._resources: list[MCPResourceInfo] = []
@@ -127,8 +132,14 @@ class MCPManager:
             env=server_env,
         )
 
-        # Enter stdio_client context
-        transport = await self._exit_stack.enter_async_context(stdio_client(params))
+        # Enter stdio_client context; errlog (when set) receives the whole
+        # child process tree's stderr instead of this process's console.
+        client = (
+            stdio_client(params, errlog=self._errlog)
+            if self._errlog is not None
+            else stdio_client(params)
+        )
+        transport = await self._exit_stack.enter_async_context(client)
         read_stream, write_stream = transport
 
         # Enter ClientSession context

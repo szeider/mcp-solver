@@ -332,3 +332,78 @@ class TestRunFolderExtras:
             assert "packages" not in agent_config.api_params
             assert "files" not in agent_config.api_params
             assert agent_config.api_params == {"temperature": 0}
+
+
+class TestVerboseRendering:
+    """The -v step renderer: readable code blocks, unwrapped results."""
+
+    def test_code_argument_rendered_as_block(self) -> None:
+        from mcp_minion.cli import render_tool_call
+
+        out = render_tool_call(
+            "python_exec", {"code": "x = 1\nprint(x)", "timeout": 60}
+        )
+        assert "Tool: python_exec" in out
+        assert "    x = 1\n    print(x)" in out  # real newlines, indented
+        assert "\\n" not in out
+        assert "timeout: 60" in out
+
+    def test_long_scalar_argument_truncated(self) -> None:
+        from mcp_minion.cli import render_tool_call
+
+        out = render_tool_call("t", {"arg": "y" * 500})
+        assert "chars)" in out and "y" * 500 not in out
+
+    def test_kernel_result_shows_stdout_block(self) -> None:
+        from mcp_minion.cli import render_tool_result
+
+        envelope = json.dumps(
+            {
+                "result": json.dumps(
+                    {
+                        "stdout": "54 True\n",
+                        "stderr": "",
+                        "result": None,
+                        "error": None,
+                        "kernel_id": "k1",
+                        "success": True,
+                    }
+                )
+            }
+        )
+        out = render_tool_result(envelope)
+        assert "Result: ok (kernel k1)" in out
+        assert "stdout:" in out and "54 True" in out
+        assert '"stderr"' not in out  # no raw JSON leakage
+
+    def test_failed_exec_marked(self) -> None:
+        from mcp_minion.cli import render_tool_result
+
+        envelope = json.dumps(
+            {
+                "result": json.dumps(
+                    {
+                        "stdout": "",
+                        "stderr": "boom",
+                        "error": "NameError",
+                        "success": False,
+                    }
+                )
+            }
+        )
+        out = render_tool_result(envelope)
+        assert "FAILED" in out and "boom" in out and "NameError" in out
+
+    def test_long_text_result_collapses_to_size_note(self) -> None:
+        from mcp_minion.cli import render_tool_result
+
+        template = "# DIDP project prompt\n" + "body\n" * 500
+        out = render_tool_result(json.dumps({"result": template}))
+        assert "full text in run log" in out
+        assert "# DIDP project prompt" in out  # first line survives
+        assert out.count("body") == 0
+
+    def test_short_plain_result_passes_through(self) -> None:
+        from mcp_minion.cli import render_tool_result
+
+        assert render_tool_result("hello") == "Result: hello"
