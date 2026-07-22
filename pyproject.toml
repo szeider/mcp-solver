@@ -43,6 +43,7 @@ all = [
 ]
 
 [project.scripts]
+mcp-solver-runfolder = "mcp_solver.agent.runfolder:main"
 mcp-solver = "mcp_solver.agent.cli:main"
 mcp-solver-bench = "mcp_solver.agent.harness:main"
 mcp-solver-serve = "mcp_solver.agent.mcp_server:main"
