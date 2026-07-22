@@ -3,7 +3,7 @@
 from importlib.resources import files
 from pathlib import Path
 
-SOLVERS = ("pysat", "maxsat", "z3", "cpmpy", "clingo")
+SOLVERS = ("pysat", "maxsat", "z3", "cpmpy", "clingo", "didp")
 
 
 def get_template(solver: str, root: str | None = None) -> str:

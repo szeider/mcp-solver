@@ -1,5 +1,13 @@
 # Changelog
 
+### [4.1.0] - 2026-07-22
+
+- **New Feature:** DIDP backend (domain-independent dynamic programming via
+  didppy): state-based modeling with dual-bound and dominance safety rules in
+  the template, plus four benchmark problems (knapsack, talent scheduling,
+  weighted tardiness, TSPTW) with in-validator exact oracles. The bundled
+  benchmark now spans 30 problems across six backends.
+
 ### [4.0.0] - 2026-07-14
 
 - **Major Change:** Complete re-architecture. The solving LLM now writes, runs,

@@ -110,7 +110,7 @@ The individual extras are:
 | Extra     | Contents                                                        |
 | --------- | -------------------------------------------------------------- |
 | `[agent]` | Product layer: CLI, templates, mcp-minion agent, kernel server  |
-| `[test]`  | Solver libraries (python-sat, z3-solver, cpmpy, clingo) + pytest |
+| `[test]`  | Solver libraries (python-sat, z3-solver, cpmpy, clingo, didppy) + pytest |
 | `[dev]`   | ruff                                                            |
 | `[all]`   | `[agent]` + `[test]` + `[dev]`                                  |
 

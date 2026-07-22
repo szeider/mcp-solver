@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-solver"
-version = "4.0.0"
+version = "4.1.0"
 description = "LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP) on top of agentic-python-coder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -34,6 +34,7 @@ test = [
     "z3-solver>=4.14.1.0",
     "cpmpy>=0.9.24",
     "clingo>=5.8.0",
+    "didppy>=0.10.1,<0.11",
 ]
 dev = [
     "ruff>=0.4.10",

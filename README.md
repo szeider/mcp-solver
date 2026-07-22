@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
 
-An MCP server for constraint solving (SAT, MaxSAT, SMT, CP, ASP). It turns
+An MCP server for constraint solving (SAT, MaxSAT, SMT, CP, ASP, DP). It turns
 the connected LLM host into a solver-writing agent: the host gets a Python
 kernel preloaded with a real solver library, modeling instructions for the
 chosen backend, and a submission gate. The host encodes the problem, runs
@@ -157,15 +157,20 @@ solve-time kernel automatically.
 | `z3`     | SMT solving / verification      | z3-solver           |
 | `cpmpy`  | Constraint programming (CP)     | cpmpy               |
 | `clingo` | Answer Set Programming (ASP)    | clingo              |
+| `didp`   | Dynamic programming (DIDP)      | didppy              |
 
 MiniZinc mode from v3 is retired; constraint programming is now covered by
-CPMpy.
+CPMpy. The `didp` backend is based on domain-independent dynamic programming
+([Kuroiwa & Beck](https://didp.ai/); solved with
+[didppy](https://didppy.readthedocs.io)'s anytime beam search): problems are
+modeled as state transition systems, a natural fit for routing, sequencing,
+scheduling, and packing.
 
 ## How it works
 
 The base `mcp-solver` package is a dependency-free **solver helper library**
-(`mcp_solver.helpers.{pysat,maxsat,z3}`; the CPMpy and Clingo backends need
-no helper module). It is never pip-installed into your
+(`mcp_solver.helpers.{pysat,maxsat,z3}`; the CPMpy, Clingo, and DIDP
+backends need no helper module). It is never pip-installed into your
 environment; instead it is injected into each solve-time kernel via
 `uv run --with mcp-solver==<version>`, alongside the backend's solver library.
 This keeps the host environment clean and each solve reproducible.
@@ -202,12 +207,20 @@ mcp-solver-bench pysat z3 --runs 3 --jobs 4
 Each run is bounded by `--step-limit` (default: 30 agent steps), and results
 are appended to `results.jsonl` in the output directory.
 
-Current status: in our runs with `gpt-5.6-terra`, all 26 test problems solve
-correctly. The MCP server path is validated with Claude Opus as host: 229/229
-instances across [CP-Bench](https://doi.org/10.5281/zenodo.18034815) (101)
-and [ASP-Bench](https://doi.org/10.5281/zenodo.18062939) (128) solve
-correctly under strict semantic validation, as do the bundled SAT, MaxSAT,
-and SMT problems.
+The same problems are also runnable as pytest end-to-end tests
+(`uv run pytest minion/e2e_tests -k didp`), and `mcp-solver-runfolder
+<solver> <problem> <dir>` materializes a standalone mcp-minion run folder
+for any of them.
+
+Current status: in our runs with `gpt-5.6-terra`, all 30 bundled test
+problems solve correctly, including the four `didp` problems (TSPTW,
+knapsack, weighted tardiness, talent scheduling), each solved to proven
+optimality in every run. The MCP server path is validated with Claude Opus
+as host: 229/229 instances across
+[CP-Bench](https://doi.org/10.5281/zenodo.18034815) (101) and
+[ASP-Bench](https://doi.org/10.5281/zenodo.18062939) (128) solve correctly
+under strict semantic validation, as do the bundled SAT, MaxSAT, and SMT
+problems.
 
 ## From v3 to v4: a new architecture
 
@@ -234,7 +247,7 @@ result independently, and only then submits the program as the answer.
 | Verification       | Manual, by the host LLM                      | Built into the loop: run → check → `submit_code`   |
 | Artifact           | Transient model state                        | A verified, re-executable program you keep         |
 | Host interface     | Many fine-grained model-editing tools        | A solving kernel: `select_backend`, `python_exec`, `submit_code` |
-| Backends           | MiniZinc, PySAT, MaxSAT, Z3, ASP             | PySAT, MaxSAT, Z3, CPMpy, Clingo                   |
+| Backends           | MiniZinc, PySAT, MaxSAT, Z3, ASP             | PySAT, MaxSAT, Z3, CPMpy, Clingo, DIDP             |
 
 ## Citations
 

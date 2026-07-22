@@ -41,7 +41,7 @@ on the CLI to use the published helpers.
 ## Problem layout
 
 Each backend has its own folder under `tests/problems/<solver>/`
-(`pysat`, `maxsat`, `z3`, `cpmpy`, `clingo`). A problem is a pair of files:
+(`pysat`, `maxsat`, `z3`, `cpmpy`, `clingo`, `didp`). A problem is a pair of files:
 
 ```
 tests/problems/pysat/

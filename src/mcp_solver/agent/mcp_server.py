@@ -70,6 +70,7 @@ Backends:
 - z3: SMT — integers/reals/bitvectors, proofs, program verification
 - cpmpy: finite-domain constraint programming — scheduling, assignment, puzzles
 - clingo: Answer Set Programming — logic rules, defaults, reachability
+- didp: dynamic programming (state-space search) — routing, sequencing, packing
 
 Unsure which backend fits? Read the resource mcp-solver://guide first.
 
@@ -99,6 +100,10 @@ Choosing a backend:
   global constraints (all-different, cumulative), optimization over integers.
 - **clingo** — rule-based knowledge: transitive closure/reachability,
   defaults with exceptions, choice under logical rules, #minimize/#maximize.
+- **didp** — dynamic programming as state-space search (didppy): sequential
+  decisions with a natural state — routing with time windows, sequencing,
+  scheduling, knapsack/packing. Often beats CP on these; optimality proofs
+  via anytime beam search.
 
 Tips: encode exactly the stated problem (every number matters); UNSAT is a
 legitimate answer, re-check the encoding before reporting it; keep the final

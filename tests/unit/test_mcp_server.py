@@ -13,7 +13,7 @@ import pytest
 
 from mcp_solver.agent import mcp_server
 
-BACKENDS = ("pysat", "maxsat", "z3", "cpmpy", "clingo")
+BACKENDS = ("pysat", "maxsat", "z3", "cpmpy", "clingo", "didp")
 
 ENGINE_TOOLS = {
     "python_exec",

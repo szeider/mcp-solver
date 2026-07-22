@@ -38,6 +38,9 @@ SOLVER_PACKAGES: dict[str, list[str]] = {
     "z3": ["z3-solver"],
     "cpmpy": ["cpmpy"],
     "clingo": ["clingo"],
+    # didppy is bounded: the didp template documents the 0.10.x API, which
+    # was verified empirically; lift the cap only after re-testing.
+    "didp": ["didppy>=0.10.1,<0.11"],
 }
 
 

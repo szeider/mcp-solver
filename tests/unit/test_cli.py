@@ -16,7 +16,7 @@ def test_valid_solver_parses():
     assert args.task == ["solve", "this"]
 
 
-@pytest.mark.parametrize("solver", ["pysat", "maxsat", "z3", "cpmpy", "clingo"])
+@pytest.mark.parametrize("solver", ["pysat", "maxsat", "z3", "cpmpy", "clingo", "didp"])
 def test_all_solvers_accepted(solver):
     args = cli.build_parser().parse_args([solver, "hi"])
     assert args.solver == solver
@@ -25,6 +25,14 @@ def test_all_solvers_accepted(solver):
 def test_unknown_solver_rejected():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["gurobi", "hi"])
+
+
+def test_solver_packages_covers_all_solvers():
+    # SOLVER_PACKAGES and SOLVERS are maintained by hand in two files;
+    # a backend present in one but not the other fails at runtime.
+    from mcp_solver.templates import SOLVERS
+
+    assert set(cli.SOLVER_PACKAGES) == set(SOLVERS)
 
 
 def test_defaults():
@@ -117,6 +125,7 @@ def test_source_checkout_auto_detected():
         ("z3", "z3-solver"),
         ("cpmpy", "cpmpy"),
         ("clingo", "clingo"),
+        ("didp", "didppy>=0.10.1,<0.11"),
     ],
 )
 def test_with_packages_solver_libraries(solver, lib, monkeypatch):
