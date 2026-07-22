@@ -1,4 +1,4 @@
-"""mcp-solver-serve: the v4.1 MCP server — a solver toolkit for host LLMs.
+"""mcp-solver-serve: the v4 MCP server — a solver toolkit for host LLMs.
 
 The HOST does the solving. Claude Desktop, Claude Code, or mcp-minion (the
 batchable open-source host substitute) connects here and writes, runs, and

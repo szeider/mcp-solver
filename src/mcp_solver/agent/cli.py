@@ -57,11 +57,11 @@ def _local_checkout() -> str | None:
 def _is_unpublishable(version: str) -> bool:
     """Return True when *version* looks like a pre-release/dev build.
 
-    Published releases are plain numeric (e.g. ``4.0.0``). Any alphabetic
-    marker (``a``/``b``/``rc``/``dev`` per PEP 440) means the version is not
-    on PyPI, so a PyPI pin to it would fail.
+    Published releases are plain numeric (e.g. ``4.0.0``). Anything else —
+    an alphabetic marker (``a``/``b``/``rc``/``dev`` per PEP 440) or a local
+    segment (``4.0.0+1``) — is not on PyPI, so a PyPI pin to it would fail.
     """
-    return bool(re.search(r"[a-zA-Z]", version))
+    return re.fullmatch(r"\d+(\.\d+)*", version) is None
 
 
 def resolve_dev_path(
@@ -278,8 +278,8 @@ def resolve_task(
         problem_path = Path(args.problem)
         try:
             return problem_path.read_text(encoding="utf-8"), problem_path.stem
-        except FileNotFoundError:
-            parser.error(f"problem file not found: {args.problem}")
+        except (OSError, UnicodeDecodeError) as exc:
+            parser.error(f"cannot read problem file {args.problem}: {exc}")
     return task_text, "task"
 
 
@@ -379,7 +379,15 @@ def run_program(program: Path, with_packages: list[str]) -> int:
     for pkg in with_packages:
         cmd += ["--with", pkg]
     cmd += ["python", str(program)]
-    return subprocess.run(cmd).returncode
+    try:
+        return subprocess.run(cmd).returncode
+    except FileNotFoundError:
+        print(
+            "mcp-solver: 'uv' not found on PATH; it is required to run the"
+            " submitted program (https://docs.astral.sh/uv/).",
+            file=sys.stderr,
+        )
+        return 127
 
 
 def main(argv: list[str] | None = None) -> int:

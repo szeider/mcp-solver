@@ -79,7 +79,16 @@ def test_missing_problem_file_clean_error(capsys):
     args = parser.parse_args(["z3", "--problem", "does/not/exist.md"])
     with pytest.raises(SystemExit):
         cli.resolve_task(args, parser)
-    assert "problem file not found" in capsys.readouterr().err
+    assert "cannot read problem file" in capsys.readouterr().err
+
+
+def test_problem_path_is_directory_clean_error(tmp_path, capsys):
+    # A directory (IsADirectoryError, an OSError) must also exit cleanly.
+    parser = cli.build_parser()
+    args = parser.parse_args(["z3", "--problem", str(tmp_path)])
+    with pytest.raises(SystemExit):
+        cli.resolve_task(args, parser)
+    assert "cannot read problem file" in capsys.readouterr().err
 
 
 # --- with_packages construction ------------------------------------------
