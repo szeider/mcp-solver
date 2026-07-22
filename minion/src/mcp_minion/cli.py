@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from mcp_minion import __version__
 from mcp_minion.agent import Agent, AgentConfig
+from mcp_minion.artifacts import extract_last_submission
 from mcp_minion.logging import RunLogger
 from mcp_minion.mcp_client import MCPManager
 from mcp_minion.tools import create_default_registry
@@ -25,6 +26,21 @@ _DEFAULTS = AgentConfig()
 def strip_html_comments(text: str) -> str:
     """Remove HTML comments (<!-- ... -->) from text."""
     return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+
+
+def save_submission(steps: Any, folder: Path) -> Path | None:
+    """Write the last successfully submitted program to <folder>/submission.py.
+
+    Returns the path when a successful submission exists in *steps*, else
+    None. Overwritten on every run; earlier submissions remain recoverable
+    from the timestamped run_*.json logs.
+    """
+    code = extract_last_submission(steps)
+    if code is None:
+        return None
+    path = folder / "submission.py"
+    path.write_text(code, encoding="utf-8")
+    return path
 
 
 # --- verbose step rendering --------------------------------------------------
@@ -283,9 +299,18 @@ async def run_agent_async(
         print("\n=== Final Answer ===")
         print(result.answer)
 
+        # Persist the submitted program (if any) next to the run log.
+        submission_path = save_submission(result.steps, args.folder)
+        if submission_path:
+            print(f"\nSubmission: {submission_path}")
+
         # Show log file location
         if logger:
-            print(f"\nLog: {logger.log_path}")
+            print(
+                f"Log: {logger.log_path}"
+                if submission_path
+                else f"\nLog: {logger.log_path}"
+            )
 
     except Exception as e:
         print(f"Error running agent: {e}", file=sys.stderr)

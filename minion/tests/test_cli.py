@@ -407,3 +407,38 @@ class TestVerboseRendering:
         from mcp_minion.cli import render_tool_result
 
         assert render_tool_result("hello") == "Result: hello"
+
+
+class TestSaveSubmission:
+    """save_submission writes the last accepted program to submission.py."""
+
+    def _steps(self, code, ok=True):
+        result = json.dumps(
+            {"result": json.dumps({"ok": True})} if ok else {"error": "rejected"}
+        )
+        return [
+            {
+                "step": 1,
+                "tool_calls": [
+                    {
+                        "name": "submit_code",
+                        "arguments": {"code": code},
+                        "result": result,
+                    }
+                ],
+            }
+        ]
+
+    def test_writes_last_successful_submission(self, tmp_path) -> None:
+        from mcp_minion.cli import save_submission
+
+        path = save_submission(self._steps("print('hi')"), tmp_path)
+        assert path == tmp_path / "submission.py"
+        assert path.read_text() == "print('hi')"
+
+    def test_no_submission_writes_nothing(self, tmp_path) -> None:
+        from mcp_minion.cli import save_submission
+
+        assert save_submission([], tmp_path) is None
+        assert save_submission(self._steps("x", ok=False), tmp_path) is None
+        assert not (tmp_path / "submission.py").exists()
