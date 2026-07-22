@@ -33,6 +33,7 @@ across the host's tool calls.
 import asyncio
 import contextlib
 import json
+import math
 import os
 import sys
 import time
@@ -271,7 +272,12 @@ async def _engine_call(name: str, arguments: dict) -> str:
     if _engine is None:
         raise ToolError("engine not connected (server starting or shut down)")
     raw = await _engine.call_tool(name, arguments)
-    payload = json.loads(raw)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ToolError(f"engine returned a malformed envelope: {e}") from None
+    if not isinstance(payload, dict):
+        raise ToolError("engine returned a malformed envelope (not a JSON object)")
     if "error" in payload:
         raise ToolError(str(payload["error"]))
     return str(payload.get("result", ""))
@@ -377,7 +383,9 @@ async def python_exec(
     (seconds, max 300) for long solver runs.
     """
     _episode_count("python_exec")
-    args: dict = {"code": code, "timeout": min(timeout, _MAX_EXEC_TIMEOUT)}
+    if not math.isfinite(timeout):
+        timeout = 30.0
+    args: dict = {"code": code, "timeout": max(1.0, min(timeout, _MAX_EXEC_TIMEOUT))}
     target = kernel_id or _kernel_id
     if target:
         args["kernel_id"] = target
@@ -440,9 +448,11 @@ async def submit_code(code: str) -> CallToolResult:
     and passing your verification. The code is syntax-checked; on success it
     is stored and linked as a resource (the server keeps the last 50).
     """
-    _episode_count("submit_code")
+    # Count the attempt BEFORE _episode_count syncs the .open snapshot, so a
+    # failed submission (which never syncs again) is not lost on a host kill.
     if _episode is not None:
         _episode["submit_attempts"] += 1
+    _episode_count("submit_code")
     result_text = await _engine_call("submit_code", {"code": code})
     verdict = _parse_engine_json(result_text)
 

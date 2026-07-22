@@ -163,6 +163,26 @@ async def test_engine_call_surfaces_client_error(monkeypatch):
         await mcp_server._engine_call("python_exec", {"code": "1"})
 
 
+async def test_engine_call_rejects_malformed_envelope(monkeypatch):
+    class Broken:
+        async def call_tool(self, name, arguments):
+            return "not json at all"
+
+    monkeypatch.setattr(mcp_server, "_engine", Broken())
+    with pytest.raises(Exception, match="malformed envelope"):
+        await mcp_server._engine_call("python_exec", {"code": "1"})
+
+
+async def test_engine_call_rejects_non_object_envelope(monkeypatch):
+    class Broken:
+        async def call_tool(self, name, arguments):
+            return json.dumps([1, 2, 3])
+
+    monkeypatch.setattr(mcp_server, "_engine", Broken())
+    with pytest.raises(Exception, match="malformed envelope"):
+        await mcp_server._engine_call("python_exec", {"code": "1"})
+
+
 # --- full in-memory round trip ----------------------------------------------
 
 
@@ -280,6 +300,31 @@ async def test_submit_stats_ride_along(engine):
         assert sc["stats"]["exec_failures"] == 0
         assert sc["stats"]["submit_attempts"] == 1
         assert "wall_seconds" in sc["stats"]
+
+
+async def test_exec_timeout_clamped_to_valid_range(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "1", "timeout": -5})
+        assert engine.calls[-1][1]["timeout"] == 1.0
+        await session.call_tool("python_exec", {"code": "1", "timeout": 9999})
+        assert engine.calls[-1][1]["timeout"] == 300
+
+
+async def test_failed_submit_attempt_survives_in_snapshot(
+    engine, monkeypatch, tmp_path
+):
+    # A failed submission never syncs again later; the attempt must already
+    # be in the .open snapshot when the host kills the server afterwards.
+    stats_file = tmp_path / "stats.jsonl"
+    open_file = tmp_path / "stats.jsonl.open"
+    monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("submit_code", {"code": "def broken(:"})
+        snap = json.loads(open_file.read_text())
+        assert snap["submit_attempts"] == 1
+        assert snap["submit_ok"] == 0
 
 
 async def test_episode_stats_jsonl(engine, monkeypatch, tmp_path):
