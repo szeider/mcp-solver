@@ -6,8 +6,12 @@ Morning slot while forbidding any two workshops from sharing a slot. With
 only two slots this is unsatisfiable, so the correct answer is
 {"satisfiable": false}.
 
-A candidate that claims satisfiable=true is checked against the hard
-constraints and rejected, naming the violated constraint.
+Unsatisfiability is confirmed here by an in-validator exhaustive oracle
+(stdlib only): the search space is just the 2**3 = 8 ways to assign the three
+workshops to the two slots, and enumerating all of them shows none satisfies
+the forced-Morning and no-shared-slot constraints together. A candidate that
+claims satisfiable=true is also checked against the hard constraints and
+rejected, naming the violated constraint.
 
 Reads a candidate solution as JSON from stdin, prints
 {"valid": bool, "message": str}, exits 0 on valid, 1 otherwise.
@@ -15,18 +19,39 @@ Reads a candidate solution as JSON from stdin, prints
 
 import json
 import sys
+from itertools import product
 
 WORKSHOPS = ["Workshop A", "Workshop B", "Workshop C"]
 SLOTS = {"Morning", "Afternoon"}
+SLOT_LIST = ["Morning", "Afternoon"]
 # Each workshop is forced into the Morning slot by a hard constraint.
 FORCED_MORNING = {"Workshop A", "Workshop B", "Workshop C"}
+
+
+def has_satisfying_assignment():
+    """Exhaustively test all 2**3 slot assignments for a feasible schedule."""
+    for combo in product(SLOT_LIST, repeat=len(WORKSHOPS)):
+        schedule = dict(zip(WORKSHOPS, combo, strict=False))
+        if any(schedule[ws] != "Morning" for ws in FORCED_MORNING):
+            continue  # forced-Morning hard constraint violated
+        if len(set(schedule.values())) != len(schedule):
+            continue  # two workshops share a slot
+        return True
+    return False
+
+
+# Confirm the instance really is unsatisfiable before trusting that verdict.
+assert not has_satisfying_assignment(), "instance unexpectedly satisfiable"
 
 
 def validate(data):
     satisfiable = data.get("satisfiable")
 
     if satisfiable is False:
-        return True, "Correctly reports the instance as unsatisfiable"
+        return True, (
+            "Correctly reports the instance as unsatisfiable "
+            "(confirmed by exhaustive search over all 8 slot assignments)"
+        )
 
     if satisfiable is not True:
         return False, "Missing or invalid 'satisfiable' field"

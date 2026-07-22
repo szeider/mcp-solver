@@ -5,10 +5,14 @@ Checks the reported placements: each piece matches its dimensions (rotation
 allowed), all pieces lie within the 12-ft-wide roll and within the claimed
 length, no two pieces overlap, and the claimed roll length is the optimum.
 
-This is 2D strip packing and cannot be brute-forced cheaply, so the optimum is
-hardcoded. It was computed once with an exact CP-SAT model (CPMpy/OR-Tools
-minimizing the used length over a 12-wide roll): the minimum length is 18 ft.
-Re-running that model reproduces 18.
+The optimum is recomputed here by an in-validator exact oracle (stdlib only).
+Completeness argument: any feasible packing can be normalized by repeatedly
+pushing every piece left and then down; the resulting coordinates are sums of
+piece dimensions, hence integers (all dimensions are integers). It therefore
+suffices to search integer positions. The oracle tries candidate roll lengths
+in increasing order and, for each, runs a depth-first search placing the
+pieces (both axis orientations) at all integer positions with overlap checks;
+the first feasible length is the exact optimum. It reproduces 18 ft.
 
 Reads JSON on stdin, prints {"valid": bool, "message": str}, exits 0/1.
 Plain stdlib only.
@@ -20,7 +24,49 @@ import sys
 ROLL_WIDTH = 12
 # Piece index (1-based) -> (a, b) nominal dimensions.
 PIECES = {1: (6, 8), 2: (4, 5), 3: (5, 7), 4: (8, 10)}
-OPTIMAL_LENGTH = 18  # exact minimum, computed once via CP-SAT (see docstring)
+
+
+def optimal_length():
+    """Exact minimum roll length via integer-grid depth-first search.
+
+    Normalization (push every piece left, then down, to a fixpoint) maps any
+    feasible packing to one with integer coordinates, so searching integer
+    positions is complete. Pieces are placed largest-area-first to prune
+    early; both axis orientations are tried for each piece.
+    """
+    items = sorted(PIECES.values(), key=lambda ab: -(ab[0] * ab[1]))
+    n = len(items)
+
+    def fits(length):
+        def dfs(k, placed):
+            if k == n:
+                return True
+            a, b = items[k]
+            for w, h in {(a, b), (b, a)}:
+                if w > ROLL_WIDTH or h > length:
+                    continue
+                for x in range(ROLL_WIDTH - w + 1):
+                    for y in range(length - h + 1):
+                        if all(
+                            x + w <= px or px + pw <= x or y + h <= py or py + ph <= y
+                            for px, py, pw, ph in placed
+                        ):
+                            placed.append((x, y, w, h))
+                            if dfs(k + 1, placed):
+                                return True
+                            placed.pop()
+            return False
+
+        return dfs(0, [])
+
+    upper = sum(max(a, b) for a, b in items)  # stack every piece vertically
+    for length in range(1, upper + 1):
+        if fits(length):
+            return length
+    return upper
+
+
+OPTIMAL_LENGTH = optimal_length()  # previously hardcoded: 18, matches oracle
 
 
 def overlaps(a, b):

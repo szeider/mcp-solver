@@ -2,9 +2,14 @@
 
 Checks every hard constraint on the reported schedule, recomputes the number
 of soft-preference violations (only item 7: HI101 in the last slot), verifies
-it matches the reported value, and confirms it equals the optimum. A feasible
-schedule with zero violations exists (found once via CP-SAT), so the optimum
-is 0.
+it matches the reported value, and confirms it equals the optimum.
+
+The optimum is recomputed here by an in-validator exact oracle (stdlib only): a
+backtracking search over (time_slot, room) assignments enforces exactly the
+same hard constraints checked below and computes the minimum number of soft
+violations. The soft count is non-negative, so as soon as the search exhibits a
+feasible schedule with zero violations that is provably the global optimum; the
+oracle finds one, so the optimum is 0.
 
 Reads JSON on stdin, prints {"valid": bool, "message": str}, exits 0/1.
 Plain stdlib only.
@@ -27,7 +32,104 @@ COURSES = [
 ]
 COMPUTER_LAB = 1  # Room 1
 SPECIAL_LAB = 4  # Room 4
-OPTIMAL_VIOLATIONS = 0
+SLOTS = [1, 2, 3, 4, 5]
+ROOMS = [1, 2, 3, 4]
+
+
+def hard_ok(slot, room):
+    """Full hard-constraint predicate on a complete (slot, room) assignment.
+
+    Mirrors exactly the hard constraints enforced in validate() below.
+    """
+    used = set()
+    for c in COURSES:
+        key = (slot[c], room[c])
+        if key in used:
+            return False  # no two courses share a room in the same slot
+        used.add(key)
+    if room["CS101"] != COMPUTER_LAB or room["CS201"] != COMPUTER_LAB:
+        return False
+    if slot["CS101"] == slot["CS201"]:
+        return False
+    if slot["MA101"] != 1:
+        return False
+    if room["PH101"] != SPECIAL_LAB or room["BI101"] != SPECIAL_LAB:
+        return False
+    if room["EC101"] != 2:
+        return False
+    if slot["PS101"] == 1:
+        return False
+    return room["PS101"] != room["MA101"]
+
+
+def soft_violations(slot):
+    """Soft-preference cost: 1 iff HI101 lands in the last slot (item 7)."""
+    return 1 if slot["HI101"] == 5 else 0
+
+
+def optimal_violations():
+    """Exact minimum soft-violation count via constraint backtracking.
+
+    Per-course (slot, room) domains are pre-reduced by the pinned hard
+    constraints; the recursion prunes on the constraints checkable from a
+    partial assignment and confirms completeness with hard_ok() at the leaf.
+    The objective is non-negative, so the search stops once it reaches 0.
+    """
+
+    def domain(course):
+        slots, rooms = SLOTS, ROOMS
+        if course in ("CS101", "CS201"):
+            rooms = [COMPUTER_LAB]
+        if course in ("PH101", "BI101"):
+            rooms = [SPECIAL_LAB]
+        if course == "EC101":
+            rooms = [2]
+        if course == "MA101":
+            slots = [1]
+        if course == "PS101":
+            slots = [s for s in SLOTS if s != 1]
+        return [(s, r) for s in slots for r in rooms]
+
+    doms = {c: domain(c) for c in COURSES}
+    order = sorted(COURSES, key=lambda c: len(doms[c]))
+    slot, room = {}, {}
+    best = [None]
+
+    def partial_ok():
+        used = set()
+        for c in slot:
+            key = (slot[c], room[c])
+            if key in used:
+                return False
+            used.add(key)
+        if "CS101" in slot and "CS201" in slot and slot["CS101"] == slot["CS201"]:
+            return False
+        return not (
+            "PS101" in slot and "MA101" in room and room["PS101"] == room["MA101"]
+        )
+
+    def dfs(i):
+        if best[0] == 0:
+            return  # reached the global lower bound of the objective
+        if i == len(order):
+            if hard_ok(slot, room):
+                v = soft_violations(slot)
+                if best[0] is None or v < best[0]:
+                    best[0] = v
+            return
+        c = order[i]
+        for s, r in doms[c]:
+            slot[c], room[c] = s, r
+            if partial_ok():
+                dfs(i + 1)
+            del slot[c]
+            del room[c]
+
+    dfs(0)
+    return best[0]
+
+
+OPTIMAL_VIOLATIONS = optimal_violations()  # previously hardcoded: 0, matches oracle
 
 
 def validate(data):

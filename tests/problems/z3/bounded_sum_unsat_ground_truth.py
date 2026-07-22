@@ -2,9 +2,13 @@
 """Semantic validator for the bounded-sum (unsatisfiable) problem.
 
 The instance is unsatisfiable by design, so the correct verdict is
-{"satisfiable": false}. If a candidate instead claims satisfiability, the
-supplied assignment is checked against all six constraints; since no such
-assignment exists, this always exposes a violated constraint.
+{"satisfiable": false}. Unsatisfiability is confirmed here by an in-validator
+exhaustive oracle (stdlib only): every constraint forces the five variables to
+be distinct integers in [1, 10], so the whole search space is the
+P(10, 5) = 30240 ordered 5-tuples of distinct values, and enumerating them
+shows none satisfies all six constraints. If a candidate instead claims
+satisfiability, the supplied assignment is also checked against every
+constraint, which always exposes a violated one.
 
 Reads JSON on stdin, prints {"valid": bool, "message": str}, exits 0/1.
 Plain stdlib only.
@@ -12,9 +16,17 @@ Plain stdlib only.
 
 import json
 import sys
-from itertools import combinations
+from itertools import combinations, permutations
 
 VARS = ("a", "b", "c", "d", "e")
+
+
+def has_satisfying_assignment():
+    """Exhaustively test all 30240 distinct in-range tuples for a solution."""
+    for tup in permutations(range(1, 11), len(VARS)):
+        if check_assignment(dict(zip(VARS, tup, strict=False))) is None:
+            return True
+    return False
 
 
 def check_assignment(values):
@@ -38,13 +50,20 @@ def check_assignment(values):
     return None
 
 
+# Confirm the instance really is unsatisfiable before trusting that verdict.
+assert not has_satisfying_assignment(), "instance unexpectedly satisfiable"
+
+
 def validate(data):
     if not isinstance(data, dict):
         return False, "Top-level JSON must be an object"
 
     satisfiable = data.get("satisfiable")
     if satisfiable is False:
-        return True, "correctly reported unsatisfiable"
+        return True, (
+            "correctly reported unsatisfiable "
+            "(confirmed by exhaustive search over all 30240 distinct tuples)"
+        )
 
     if satisfiable is True:
         assignment = data.get("assignment")
