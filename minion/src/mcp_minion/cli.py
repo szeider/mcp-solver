@@ -176,16 +176,25 @@ def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, s
             model=model_name,
             max_steps=agent_cfg.get("max_steps", _DEFAULTS.max_steps),
             api_params=model_cfg,  # temperature, max_tokens, etc.
+            max_total_tokens=agent_cfg.get(
+                "max_total_tokens", _DEFAULTS.max_total_tokens
+            ),
         )
     else:
         # Old flat format (backward compat)
         model = data.pop("modelstring", _DEFAULTS.model)
         max_steps = data.pop("max_steps", _DEFAULTS.max_steps)
+        max_total_tokens = data.pop("max_total_tokens", _DEFAULTS.max_total_tokens)
         # Keep shared/structural keys out of api_params — everything left in
         # `data` goes verbatim into the API request.
         for key in ("files", "packages", "mcpServers", "model", "agent"):
             data.pop(key, None)
-        config = AgentConfig(model=model, max_steps=max_steps, api_params=data)
+        config = AgentConfig(
+            model=model,
+            max_steps=max_steps,
+            api_params=data,
+            max_total_tokens=max_total_tokens,
+        )
         mcp_servers = None
 
     # Optional system prompt file (files.system), resolved relative to folder.
@@ -336,7 +345,11 @@ Run Folder Structure:
                 - model.name: OpenRouter model ID (e.g., "google/gemini-3-flash-preview")
                 - model.temperature, model.max_tokens: API parameters
                 - agent.max_steps: Maximum reasoning steps (default: 10)
-                - mcpServers: Optional MCP server configurations
+                - agent.max_total_tokens: Per-run cap on cumulative
+                  input+output tokens; the run stops after the step that
+                  exceeds it (default: absent = unlimited)
+                - mcpServers: Optional MCP server configurations (a server
+                  that fails to start aborts the run)
                 - files.system: Optional path to a system-prompt markdown file
                 - packages: Optional list of packages for python_exec kernels
   project.md    General instructions (optional, shared context)

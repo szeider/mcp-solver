@@ -1,9 +1,9 @@
 """MCP client for connecting to MCP servers and using their tools."""
 
 import asyncio
+import contextlib
 import json
 import os
-import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -101,15 +101,32 @@ class MCPManager:
             try:
                 await self._start_server(server_name, cfg)
             except Exception as e:
-                # Log error but continue with other servers. Stderr, never
-                # stdout: when the manager runs inside a stdio MCP server,
-                # stdout is the protocol channel.
-                print(
-                    f"Warning: Failed to start MCP server '{server_name}': {e}",
-                    file=sys.stderr,
+                # Fail loudly: a configured server that does not start would
+                # leave the agent running with a silently reduced tool set,
+                # producing plausible-looking but unusable runs. Close the
+                # servers already started, then abort.
+                failure = RuntimeError(
+                    f"MCP server '{server_name}' failed to start: {e}"
                 )
+                await self._close_started_servers()
+                raise failure from e
 
         return self
+
+    async def _close_started_servers(self) -> None:
+        """Tear down whatever the exit stack has already entered.
+
+        Cleanup errors are suppressed so the original start-up failure is the
+        one that reaches the caller.
+        """
+        stack, self._exit_stack = self._exit_stack, None
+        if stack is not None:
+            with contextlib.suppress(Exception):
+                await stack.aclose()
+        self._sessions.clear()
+        self._tools.clear()
+        self._resources.clear()
+        self._link_origins.clear()
 
     async def __aexit__(
         self,

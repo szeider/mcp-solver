@@ -90,6 +90,16 @@ class RunLogger:
         )
         self._write()
 
+    def log_step_metadata(self, **fields: Any) -> None:
+        """Attach extra fields to the current step.
+
+        Used for step-level facts that are not part of the API exchange,
+        e.g. the per-run token cap firing after a step.
+        """
+        if self._log_data["steps"]:
+            self._log_data["steps"][-1].update(fields)
+            self._write()
+
     def log_api_request(self, request: dict[str, Any]) -> None:
         """Log an API request (for the current step)."""
         if self._log_data["steps"]:

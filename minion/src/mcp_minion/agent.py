@@ -128,6 +128,9 @@ class AgentConfig:
     # Packages to preinstall in a python_exec kernel via an automatic
     # python_reset before the first python_exec call.
     packages: list[str] = field(default_factory=list)
+    # Hard cap on the cumulative input+output tokens of one run; 0 (the
+    # default) means unlimited. Checked after each completed step.
+    max_total_tokens: int = 0
 
 
 @dataclass
@@ -143,6 +146,8 @@ class AgentResult:
     # (0.0 when the provider does not report cost).
     cost: float = 0.0
     max_steps_reached: bool = False
+    # True when the run was aborted by AgentConfig.max_total_tokens.
+    token_cap_reached: bool = False
 
 
 class Agent:
@@ -248,6 +253,7 @@ class Agent:
         input_tokens = 0
         output_tokens = 0
         cost = 0.0
+        token_cap_reached = False
 
         # Combine tools from registry and MCP (MCP takes precedence)
         openai_tools = []
@@ -438,6 +444,20 @@ class Agent:
                     if self.on_step:
                         self.on_step(step_info)
 
+                    # Per-run token cap: stop looping once the cumulative
+                    # input+output tokens exceed the cap. Checked only after a
+                    # completed step, so a step is never cut in half.
+                    cap = self.config.max_total_tokens
+                    if cap > 0 and input_tokens + output_tokens > cap:
+                        token_cap_reached = True
+                        if self.logger:
+                            self.logger.log_step_metadata(
+                                token_cap_reached=True,
+                                cumulative_tokens=input_tokens + output_tokens,
+                                token_cap=cap,
+                            )
+                        break
+
                 else:
                     # No tool calls - this is the final answer
                     steps.append(step_info)
@@ -464,15 +484,27 @@ class Agent:
 
                     return result
 
-            # Reached max steps without final answer
+            # Reached max steps or the token cap without a final answer
+            if token_cap_reached:
+                stop_msg = (
+                    "[Agent stopped: per-run token cap of"
+                    f" {self.config.max_total_tokens} exceeded"
+                    f" (cumulative {input_tokens + output_tokens})]"
+                )
+            else:
+                stop_msg = (
+                    "[Agent reached maximum steps without providing a final answer]"
+                )
+
             result = AgentResult(
-                answer="[Agent reached maximum steps without providing a final answer]",
+                answer=stop_msg,
                 steps=steps,
                 tool_calls_made=tool_calls_made,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost=cost,
-                max_steps_reached=True,
+                max_steps_reached=not token_cap_reached,
+                token_cap_reached=token_cap_reached,
             )
 
             if self.logger:
@@ -481,7 +513,9 @@ class Agent:
                         "answer": result.answer,
                         "steps_count": len(result.steps),
                         "tool_calls_made": result.tool_calls_made,
-                        "max_steps_reached": True,
+                        "max_steps_reached": result.max_steps_reached,
+                        "token_cap_reached": token_cap_reached,
+                        "cumulative_tokens": input_tokens + output_tokens,
                     }
                 )
 

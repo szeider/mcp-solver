@@ -17,6 +17,8 @@ class TestAgentConfig:
         assert config.max_steps == 10
         assert config.base_url == "https://openrouter.ai/api/v1"
         assert config.api_params == {}
+        # 0 = no per-run token cap.
+        assert config.max_total_tokens == 0
 
     def test_custom_values(self) -> None:
         config = AgentConfig(
@@ -65,6 +67,7 @@ class TestAgentResult:
         assert result.input_tokens == 0
         assert result.output_tokens == 0
         assert result.max_steps_reached is False
+        assert result.token_cap_reached is False
 
 
 # --- run_async behavior with a fake OpenAI client --------------------------
@@ -108,11 +111,12 @@ class FakeClient:
         return self._responses.pop(0)
 
 
-def _make_agent(responses, config=None, on_step=None):
+def _make_agent(responses, config=None, on_step=None, logger=None):
     agent = Agent(
         api_key="test-key",
         tools=None,
         config=config or AgentConfig(),
+        logger=logger,
         on_step=on_step,
     )
     agent.client = FakeClient(responses)
@@ -171,6 +175,82 @@ async def test_max_steps_reached_flag() -> None:
     assert result.max_steps_reached is True
     assert "maximum steps" in result.answer
     assert result.input_tokens == 7
+
+
+# --- per-run token cap -------------------------------------------------------
+
+
+async def test_token_cap_stops_run_after_step() -> None:
+    # Step 1 spends 12 tokens (> cap 10), so the run stops after that step
+    # instead of asking the model again.
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], prompt=10, completion=2),
+            _response(content="never reached", prompt=99, completion=99),
+        ],
+        config=AgentConfig(max_steps=5, max_total_tokens=10),
+    )
+    result = await agent.run_async("hi")
+    assert result.token_cap_reached is True
+    assert result.max_steps_reached is False
+    assert "per-run token cap of 10 exceeded (cumulative 12)" in result.answer
+    assert len(result.steps) == 1
+    assert result.input_tokens == 10
+    assert result.output_tokens == 2
+
+
+async def test_token_cap_not_reached_lets_run_finish() -> None:
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], prompt=10, completion=2),
+            _response(content="done", prompt=10, completion=2),
+        ],
+        config=AgentConfig(max_steps=5, max_total_tokens=1000),
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.token_cap_reached is False
+
+
+async def test_token_cap_zero_is_unlimited() -> None:
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], prompt=10_000, completion=10_000),
+            _response(content="done", prompt=10_000, completion=10_000),
+        ],
+        config=AgentConfig(max_steps=5, max_total_tokens=0),
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.token_cap_reached is False
+
+
+async def test_token_cap_recorded_in_run_log(tmp_path) -> None:
+    import json as json_mod
+
+    from mcp_minion.logging import RunLogger
+
+    logger = RunLogger(log_dir=tmp_path)
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call()], prompt=10, completion=2),
+            _response(content="never reached"),
+        ],
+        config=AgentConfig(max_steps=5, max_total_tokens=10),
+        logger=logger,
+    )
+    await agent.run_async("hi")
+
+    log = json_mod.loads(logger.log_path.read_text())
+    # Terminal status is recorded the same way as any other finished run.
+    assert log["status"] == "completed"
+    assert log["result"]["token_cap_reached"] is True
+    assert log["result"]["max_steps_reached"] is False
+    assert log["result"]["cumulative_tokens"] == 12
+    # The step that tripped the cap carries the details.
+    assert log["steps"][-1]["token_cap_reached"] is True
+    assert log["steps"][-1]["cumulative_tokens"] == 12
+    assert log["steps"][-1]["token_cap"] == 10
 
 
 # --- read_resource built-in tool --------------------------------------------

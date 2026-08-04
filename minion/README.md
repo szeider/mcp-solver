@@ -50,7 +50,7 @@ A run folder holds everything for a single run:
     "temperature": 0,
     "max_tokens": 2048
   },
-  "agent": { "max_steps": 10 },
+  "agent": { "max_steps": 10, "max_total_tokens": 500000 },
   "files": { "system": "system.md" },
   "packages": ["z3-solver"],
   "mcpServers": {
@@ -68,6 +68,16 @@ Key options:
   ASP templates — are left untouched); otherwise the tool list is appended
   after the file contents. When `files.system` is absent, a built-in default
   system prompt is used.
+- **`agent.max_total_tokens`** — hard cap on the cumulative input+output
+  tokens of a single run. The cap is checked after each completed step: once
+  the total exceeds it, the loop stops, the final answer becomes
+  `[Agent stopped: per-run token cap of N exceeded (cumulative M)]`, and the
+  run log records `token_cap_reached` (both on the last step and in the
+  result). Omit the key — or set it to `0` — for no cap. `max_steps` alone
+  does not bound spending, since a single step can be arbitrarily expensive.
+- **`mcpServers`** — the servers to start for the run. If any of them fails
+  to start, `mcp-minion` aborts with a `RuntimeError` naming the server rather
+  than running the agent with a silently reduced tool set.
 - **`packages`** — packages to preinstall in a code-execution kernel. On the
   first call to a `python_exec` tool, if no `python_reset` has happened yet,
   `mcp-minion` automatically calls `python_reset` with these packages and

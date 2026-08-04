@@ -7,6 +7,8 @@ call_tool) with no LLM involved.
 import json
 import sys
 
+import pytest
+
 from mcp_minion.mcp_client import MCPManager
 
 BUNDLED_SERVER = {
@@ -47,6 +49,43 @@ async def test_openai_tool_schema() -> None:
         params = by_name["echo"]["function"]["parameters"]
         assert params["type"] == "object"
         assert "message" in params["properties"]
+
+
+# --- a server that fails to start aborts the run ----------------------------
+
+MISSING_SERVER = {
+    "broken": {
+        "command": "mcp-minion-no-such-executable",
+        "args": [],
+    }
+}
+
+
+async def test_failed_server_start_raises() -> None:
+    manager = MCPManager(MISSING_SERVER)
+    with pytest.raises(RuntimeError, match="MCP server 'broken' failed to start"):
+        await manager.__aenter__()
+    assert manager.get_tools() == []
+
+
+async def test_failed_server_start_closes_started_servers() -> None:
+    # The good server starts first, then the broken one aborts the run; no
+    # half-connected manager may survive.
+    manager = MCPManager({**BUNDLED_SERVER, **MISSING_SERVER})
+    with pytest.raises(RuntimeError, match="failed to start"):
+        await manager.__aenter__()
+    assert manager.get_tools() == []
+    assert manager.get_resources() == []
+    assert manager._sessions == {}
+    assert manager._exit_stack is None
+    # A later __aexit__ (e.g. from the CLI's finally block) is a no-op.
+    await manager.__aexit__(None, None, None)
+
+
+async def test_failed_server_start_aborts_async_with() -> None:
+    with pytest.raises(RuntimeError, match="failed to start"):
+        async with MCPManager(MISSING_SERVER):
+            raise AssertionError("body must not run")
 
 
 # --- client-side tool-call timeout -----------------------------------------

@@ -208,6 +208,50 @@ class TestLoadRunFolder:
             assert "test" in mcp_servers
             assert mcp_servers["test"]["command"] == "uv"
 
+    def test_max_total_tokens_loaded(self) -> None:
+        """agent.max_total_tokens reaches the agent config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            config = {
+                "model": {"name": "test/model"},
+                "agent": {"max_steps": 80, "max_total_tokens": 500000},
+            }
+            (folder / "config.json").write_text(json.dumps(config))
+            (folder / "task.md").write_text("Test task")
+
+            agent_config, _, _ = load_run_folder(folder)
+
+            assert agent_config.max_total_tokens == 500000
+            assert "max_total_tokens" not in agent_config.api_params
+
+    def test_max_total_tokens_absent_is_unlimited(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            config = {"model": {"name": "test/model"}, "agent": {"max_steps": 3}}
+            (folder / "config.json").write_text(json.dumps(config))
+            (folder / "task.md").write_text("Test task")
+
+            agent_config, _, _ = load_run_folder(folder)
+
+            assert agent_config.max_total_tokens == 0
+
+    def test_max_total_tokens_old_format(self) -> None:
+        """The flat format accepts the cap too, and keeps it out of the API."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            config = {
+                "modelstring": "test/model",
+                "max_total_tokens": 1234,
+                "temperature": 0,
+            }
+            (folder / "config.json").write_text(json.dumps(config))
+            (folder / "task.md").write_text("Test task")
+
+            agent_config, _, _ = load_run_folder(folder)
+
+            assert agent_config.max_total_tokens == 1234
+            assert agent_config.api_params == {"temperature": 0}
+
     def test_invalid_json_config(self) -> None:
         """Invalid JSON in config.json should exit with clear error."""
         with tempfile.TemporaryDirectory() as tmpdir:
