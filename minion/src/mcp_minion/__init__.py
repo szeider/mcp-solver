@@ -11,7 +11,7 @@ from mcp_minion.tools import Tool, ToolRegistry, create_default_registry
 try:
     __version__ = version("mcp-minion")
 except PackageNotFoundError:  # pragma: no cover - source checkout without install
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
 __all__ = [
     "Agent",

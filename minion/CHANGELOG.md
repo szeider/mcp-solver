@@ -3,6 +3,13 @@
 Changes to the `mcp-minion` package. The monorepo's root `CHANGELOG.md`
 tracks `mcp-solver` releases, which version independently of this package.
 
+### [0.2.1] - 2026-08-04
+
+- **Fix:** Pin `mcp>=1.25.0,<2`. The `mcp` 2.0.0 SDK changed the client API
+  (`ClientSession.list_tools` no longer takes `cursor`), so fresh installs of
+  0.1.0 and 0.2.0 failed to connect to any MCP server. The workspace lockfile
+  masked this by resolving `mcp` 1.28.1.
+
 ### [0.2.0] - 2026-08-04
 
 - **New Feature:** Per-run token cap, `agent.max_total_tokens` in
@@ -17,5 +24,3 @@ tracks `mcp-solver` releases, which version independently of this package.
   after closing any servers already started. Previously the failure was a
   warning on stderr and the agent continued with a reduced tool set, which
   produced plausible-looking but unusable runs.
-</content>
-</invoke>
