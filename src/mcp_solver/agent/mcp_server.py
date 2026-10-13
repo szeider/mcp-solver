@@ -244,7 +244,7 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
         await manager.__aexit__(None, None, None)
         raise RuntimeError(
             "the ipython_mcp engine is unavailable or lacks submit_code;"
-            " install agentic-python-coder >=3.4.1 in this environment"
+            " install agentic-python-coder >=3.4.3 in this environment"
         )
     _engine = manager
     try:

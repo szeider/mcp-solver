@@ -26,9 +26,13 @@ verification, and common problems.
 
 ## Prerequisites
 
-### Python 3.13
+### Python 3.13 or 3.14
 
-MCP Solver v4 requires Python 3.13.
+MCP Solver v4 requires Python 3.13 or 3.14. Python 3.15 does not work yet:
+the solver kernels run on the same Python version as the server, and ortools
+(needed by cpmpy) and python-sat publish no 3.15 wheels yet. uv picks a
+supported version automatically from `pyproject.toml`, even when its own
+default is 3.15.
 
 ```bash
 # macOS (Homebrew)
@@ -87,6 +91,7 @@ cannot solve anything on its own.
 ```bash
 git clone https://github.com/szeider/mcp-solver.git
 cd mcp-solver
+uv venv                               # Python 3.13 or 3.14, per pyproject.toml
 uv pip install -e ".[agent]"          # product layer
 uv pip install -e ".[agent,test]"     # + benchmark harness and unit tests
 # uv pip install -e ".[all]"          # everything, including dev tools
@@ -126,8 +131,8 @@ Run the CLI or the benchmark harness from anywhere by pointing `uv` at the
 checkout:
 
 ```bash
-uv run --project /path/to/mcp-solver mcp-solver z3 "task ..."
-uv run --project /path/to/mcp-solver mcp-solver-bench pysat
+uv run --project /path/to/mcp-solver --extra agent mcp-solver z3 "task ..."
+uv run --project /path/to/mcp-solver --extra agent --extra test mcp-solver-bench pysat
 ```
 
 Use the local MCP server in an MCP host (Claude Desktop, Claude Code, Cursor)
@@ -138,7 +143,7 @@ with this configuration:
   "mcpServers": {
     "mcp-solver": {
       "command": "uv",
-      "args": ["run", "--project", "/path/to/mcp-solver", "mcp-solver-serve"]
+      "args": ["run", "--project", "/path/to/mcp-solver", "--extra", "agent", "mcp-solver-serve"]
     }
   }
 }
@@ -184,9 +189,9 @@ extra: `uv pip install -e ".[agent]"` from a checkout (see
 
 **`the ipython_mcp server does not provide submit_code`** (CLI) or
 **`the ipython_mcp engine is unavailable or lacks submit_code`** (server)
-Your installed `agentic-python-coder` is older than 3.4.1, or missing from
+Your installed `agentic-python-coder` is older than 3.4.3, or missing from
 the environment the server runs in. Upgrade it:
-`uv pip install "agentic-python-coder>=3.4.1"` (or `-e` from a checkout).
+`uv pip install "agentic-python-coder>=3.4.3"` (or `-e` from a checkout).
 
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its
@@ -205,8 +210,9 @@ are running from the repo root (the shipped problems live under
 `tests/problems/<solver>/`).
 
 **Wrong Python version.**
-v4 needs Python 3.13. Check with `python3.13 --version`; uv can also pin a
-version with `uv python install 3.13`.
+v4 needs Python 3.13 or 3.14. Check the checkout's environment with
+`.venv/bin/python --version`. If it shows 3.15 (for example after an explicit
+`uv venv --python 3.15`), recreate it with `uv venv --python 3.14`.
 
 For kernel-server details and the bundled model aliases, see the
 [agentic-python-coder README](https://github.com/szeider/agentic-python-coder);

@@ -11,7 +11,7 @@ license = { text = "MIT" }
 authors = [
     { name = "Stefan Szeider", email = "stefan@szeider.net" },
 ]
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13,<3.15"
 # The base package is the solver helper library only. It is installed into
 # ephemeral solve-time kernels via `uv run --with mcp-solver==<version>`,
 # so it must stay dependency-free. Solver packages (python-sat, z3-solver,
@@ -21,10 +21,10 @@ dependencies = []
 [project.optional-dependencies]
 # The product layer: CLI, templates, (later) MCP server.
 agent = [
-    "agentic-python-coder>=3.4.1",
+    "agentic-python-coder>=3.4.3",
     "python-dotenv>=1.0.0",
     "mcp-minion>=0.2.1",
-    "mcp>=1.10",
+    "mcp>=1.25,<2",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
 test = [

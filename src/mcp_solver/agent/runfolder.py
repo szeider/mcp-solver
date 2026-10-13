@@ -4,7 +4,7 @@ A run folder (config.json + task.md) points mcp-minion at mcp-solver-serve
 with instructions to solve one benchmark problem using one specific backend:
 
     mcp-solver-runfolder didp tsptw ~/demos/tsptw
-    uv run --project <checkout> mcp-minion -v ~/demos/tsptw
+    uv run --project <checkout> --extra agent mcp-minion -v ~/demos/tsptw
 
 The problem text comes from ``tests/problems/<solver>/<problem>.md`` in the
 source checkout (problems are not shipped as package data, so this tool
@@ -60,7 +60,14 @@ def build_config(repo_root: Path, model: str = DEFAULT_MODEL) -> dict:
         "mcpServers": {
             "mcp-solver": {
                 "command": "uv",
-                "args": ["run", "--project", str(repo_root), "mcp-solver-serve"],
+                "args": [
+                    "run",
+                    "--project",
+                    str(repo_root),
+                    "--extra",
+                    "agent",
+                    "mcp-solver-serve",
+                ],
             }
         },
     }
@@ -144,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
     )
     print(f"run folder ready: {folder}")
-    print(f"run it: uv run --project {root} mcp-minion -v {folder}")
+    print(f"run it: uv run --project {root} --extra agent mcp-minion -v {folder}")
     return 0
 
 

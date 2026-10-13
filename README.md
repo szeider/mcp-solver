@@ -1,6 +1,6 @@
 # MCP Solver
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![Python Version](https://img.shields.io/badge/Python-3.13%20%7C%203.14-blue.svg)](https://www.python.org/)
 
 An MCP server for constraint solving (SAT, MaxSAT, SMT, CP, ASP, DP). It turns
 the connected LLM host into a solver-writing agent: the host gets a Python
@@ -46,28 +46,30 @@ no API key:
   snapshot as structured content; the CLI path reports tokens and actual
   OpenRouter cost via `--stats-json`.)
 
-Claude Desktop configuration (once the PyPI name transfer completes — see
-[Installation](#installation)):
-
-```json
-{
-  "mcpServers": {
-    "mcp-solver": {
-      "command": "uvx",
-      "args": ["--from", "mcp-solver[agent]", "mcp-solver-serve"]
-    }
-  }
-}
-```
-
-From a checkout (the working setup today, and the development path always):
+Claude Desktop configuration, from a checkout (the working setup today, and
+the development path always; see [Installation](#installation)):
 
 ```json
 {
   "mcpServers": {
     "mcp-solver": {
       "command": "uv",
-      "args": ["run", "--project", "/path/to/mcp-solver", "mcp-solver-serve"]
+      "args": ["run", "--project", "/path/to/mcp-solver", "--extra", "agent", "mcp-solver-serve"]
+    }
+  }
+}
+```
+
+Once the PyPI name transfer completes, no checkout will be needed. Until then
+this configuration fetches an unrelated stale v2.0.0 upload, so do not use it
+yet:
+
+```json
+{
+  "mcpServers": {
+    "mcp-solver": {
+      "command": "uvx",
+      "args": ["--python", "3.14", "--from", "mcp-solver[agent]", "mcp-solver-serve"]
     }
   }
 }
@@ -79,7 +81,8 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 
 ## Requirements
 
-- Python 3.13
+- Python 3.13 or 3.14 (not yet 3.15: the solver kernels run on the server's
+  Python version, and ortools and python-sat publish no 3.15 wheels yet)
 - [uv](https://docs.astral.sh/uv/) (a hard runtime requirement: solver
   libraries are supplied at solve time via `uv run --with`)
 - An [OpenRouter](https://openrouter.ai) API key — for the CLI and benchmark
@@ -96,6 +99,7 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 ```bash
 git clone https://github.com/szeider/mcp-solver.git
 cd mcp-solver
+uv venv                         # Python 3.13 or 3.14, per pyproject.toml
 uv pip install -e ".[agent]"
 
 # OpenRouter key — only needed for the CLI path, not the MCP server:
