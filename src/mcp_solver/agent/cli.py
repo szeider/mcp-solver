@@ -40,7 +40,7 @@ SOLVER_PACKAGES: dict[str, list[str]] = {
     "clingo": ["clingo"],
     # didppy is bounded: the didp template documents the 0.10.x API, which
     # was verified empirically; lift the cap only after re-testing.
-    "didp": ["didppy>=0.10.1,<0.11"],
+    "didp": ["didppy>=0.11.1,<0.12"],
 }
 
 

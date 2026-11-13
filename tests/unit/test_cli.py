@@ -125,7 +125,7 @@ def test_source_checkout_auto_detected():
         ("z3", "z3-solver"),
         ("cpmpy", "cpmpy"),
         ("clingo", "clingo"),
-        ("didp", "didppy>=0.10.1,<0.11"),
+        ("didp", "didppy>=0.11.1,<0.12"),
     ],
 )
 def test_with_packages_solver_libraries(solver, lib, monkeypatch):
