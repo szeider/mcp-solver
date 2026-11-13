@@ -46,8 +46,22 @@ no API key:
   snapshot as structured content; the CLI path reports tokens and actual
   OpenRouter cost via `--stats-json`.)
 
-Claude Desktop configuration, from a checkout (the working setup today, and
-the development path always; see [Installation](#installation)):
+Claude Desktop configuration, straight from PyPI (no install step; see
+[Installation](#installation) for why the package is called
+`agentic-mcp-solver`):
+
+```json
+{
+  "mcpServers": {
+    "mcp-solver": {
+      "command": "uvx",
+      "args": ["--python", "3.14", "--from", "agentic-mcp-solver[agent]", "mcp-solver-serve"]
+    }
+  }
+}
+```
+
+From a checkout (the development path):
 
 ```json
 {
@@ -55,21 +69,6 @@ the development path always; see [Installation](#installation)):
     "mcp-solver": {
       "command": "uv",
       "args": ["run", "--project", "/path/to/mcp-solver", "--extra", "agent", "mcp-solver-serve"]
-    }
-  }
-}
-```
-
-Once the PyPI name transfer completes, no checkout will be needed. Until then
-this configuration fetches an unrelated stale v2.0.0 upload, so do not use it
-yet:
-
-```json
-{
-  "mcpServers": {
-    "mcp-solver": {
-      "command": "uvx",
-      "args": ["--python", "3.14", "--from", "mcp-solver[agent]", "mcp-solver-serve"]
     }
   }
 }
@@ -90,11 +89,18 @@ host. An [OpenRouter](https://openrouter.ai) key is required only for the
 
 ## Installation
 
-> **v4 is not yet installable from PyPI.** The PyPI name `mcp-solver` is
-> held by a third-party upload of stale v2.0.0 code, and PyPI blocks
-> confusably similar names; a [PEP 541](https://peps.python.org/pep-0541/)
-> name-transfer request is pending. Until it resolves, install from a
-> checkout:
+> **The PyPI package is called `agentic-mcp-solver`.** The PyPI name
+> `mcp-solver` is held by a third-party upload of stale v2.0.0 code, and a
+> [PEP 541](https://peps.python.org/pep-0541/) name-transfer request is
+> pending. Do not install `mcp-solver` from PyPI. The import package
+> (`mcp_solver`) and the commands (`mcp-solver`, `mcp-solver-serve`) keep
+> their names.
+
+```bash
+uv tool install --python 3.14 "agentic-mcp-solver[agent]"   # CLI + MCP server
+```
+
+From a checkout (development):
 
 ```bash
 git clone https://github.com/szeider/mcp-solver.git

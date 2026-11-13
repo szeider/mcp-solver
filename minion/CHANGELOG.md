@@ -3,6 +3,14 @@
 Changes to the `mcp-minion` package. The monorepo's root `CHANGELOG.md`
 tracks `mcp-solver` releases, which version independently of this package.
 
+### [0.2.2] - 2026-11-13
+
+- **New Feature:** Supports the MCP Python SDK 2.x alongside 1.x
+  (`mcp>=1.25.0,<3`): paginated listing through `PaginatedRequestParams`,
+  protocol fields read under both the 2.x snake_case and the 1.x camelCase
+  names, and `read_resource` called with a plain string URI.
+- **Behavior Change:** Requires Python 3.13 or 3.14 (`>=3.13,<3.15`).
+
 ### [0.2.1] - 2026-08-04
 
 - **Fix:** Pin `mcp>=1.25.0,<2`. The `mcp` 2.0.0 SDK changed the client API

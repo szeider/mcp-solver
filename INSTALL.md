@@ -8,12 +8,11 @@ via `mcp-solver-serve`) or the bundled [mcp-minion](minion/) agent (via the
 `mcp-solver` CLI). This guide covers prerequisites, the install variants,
 verification, and common problems.
 
-> **v4 is not yet installable from PyPI.** The PyPI name `mcp-solver` is held
-> by a third-party upload of stale v2.0.0 code, and PyPI blocks confusably
-> similar names; a [PEP 541](https://peps.python.org/pep-0541/) name-transfer
-> request is pending. Until it resolves, the only working install — for both
-> normal use and development — is a clone plus an editable install (see
-> [Install](#install) below).
+> **The PyPI package is called `agentic-mcp-solver`.** The PyPI name
+> `mcp-solver` is held by a third-party upload of stale v2.0.0 code, and a
+> [PEP 541](https://peps.python.org/pep-0541/) name-transfer request is
+> pending. Do not install `mcp-solver` from PyPI. The import package
+> (`mcp_solver`) and the commands keep their names.
 
 > **Platform note.** v4 has so far been tested on macOS only. The Windows and
 > Linux instructions below carry over from v3 and have not yet been
@@ -81,11 +80,11 @@ echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 
 ## Install
 
-### Clone + editable (required today)
+### Clone + editable (development)
 
 The `[agent]` extra pulls in `mcp-minion` (the agent loop) and
 `agentic-python-coder` (the IPython kernel MCP server and model aliases); the
-bare `mcp-solver` package is only the dependency-free helper library and
+bare `agentic-mcp-solver` package is only the dependency-free helper library and
 cannot solve anything on its own.
 
 ```bash
@@ -103,12 +102,12 @@ from it (printing one provenance line to stderr), so nothing extra is needed to
 run a solve. Use `--dev PATH` (or `MCP_SOLVER_DEV`) to point at a checkout
 explicitly, or `--no-dev` to force the published (PyPI-pinned) helpers.
 
-### From PyPI (once the name transfer completes)
+### From PyPI
 
-When the PEP 541 request resolves, `uv pip install "mcp-solver[agent]"` will
-install the product layer directly, with no clone required, and the MCP
-server will run without any install at all:
-`uvx --from "mcp-solver[agent]" mcp-solver-serve`.
+`uv tool install --python 3.14 "agentic-mcp-solver[agent]"` installs the
+`mcp-solver` CLI and the `mcp-solver-serve` MCP server, with no clone
+required; the MCP server also runs without any install:
+`uvx --python 3.14 --from "agentic-mcp-solver[agent]" mcp-solver-serve`.
 
 The individual extras are:
 
@@ -184,8 +183,8 @@ mcp-solver-bench pysat --runs 1
 
 **`mcp-solver: the agent layer is not installed`**
 You installed the bare package without the product layer. Install the `[agent]`
-extra: `uv pip install -e ".[agent]"` from a checkout (see
-[Install](#install); the PyPI path opens up once the name transfer completes).
+extra: `uv pip install "agentic-mcp-solver[agent]"`, or
+`uv pip install -e ".[agent]"` from a checkout (see [Install](#install)).
 
 **`the ipython_mcp server does not provide submit_code`** (CLI) or
 **`the ipython_mcp engine is unavailable or lacks submit_code`** (server)

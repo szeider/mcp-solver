@@ -9,7 +9,12 @@ without any solver library installed.
 
 from importlib.metadata import PackageNotFoundError, version
 
+# PyPI distribution name. The `mcp-solver` name is held by an unrelated
+# upload (PEP 541 request pending), so releases go out as `agentic-mcp-solver`
+# for now. Solve kernels fetch the helper library under this name.
+DIST_NAME = "agentic-mcp-solver"
+
 try:
-    __version__ = version("mcp-solver")
+    __version__ = version(DIST_NAME)
 except PackageNotFoundError:
     __version__ = "0.0.0.dev0"

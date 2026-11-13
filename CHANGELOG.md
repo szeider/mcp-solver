@@ -1,5 +1,18 @@
 # Changelog
 
+### [4.2.0] - 2026-11-13
+
+- **Major Change:** Published on PyPI as `agentic-mcp-solver`, since the name
+  `mcp-solver` is held by an unrelated upload (PEP 541 request pending). The
+  import package and the commands keep their names. Solve kernels fetch the
+  helper library as `agentic-mcp-solver==<version>`.
+- **New Feature:** Supports the MCP Python SDK 2.x alongside 1.x
+  (`mcp>=1.25,<3`); requires agentic-python-coder 3.4.4 and mcp-minion 0.2.2.
+  Resource errors (for example an unknown solver) now raise `ResourceError`,
+  so their text reaches the client under mcp 2.x.
+- **Behavior Change:** The didp backend requires didppy 0.11.1 or later
+  (`>=0.11.1,<0.12`).
+
 ### [4.1.0] - 2026-07-22
 
 - **New Feature:** DIDP backend (domain-independent dynamic programming via

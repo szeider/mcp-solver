@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-solver"
-version = "4.1.0"
+name = "agentic-mcp-solver"
+version = "4.2.0"
 description = "LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP) on top of agentic-python-coder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,7 +13,7 @@ authors = [
 ]
 requires-python = ">=3.13,<3.15"
 # The base package is the solver helper library only. It is installed into
-# ephemeral solve-time kernels via `uv run --with mcp-solver==<version>`,
+# ephemeral solve-time kernels via `uv run --with agentic-mcp-solver==<version>`,
 # so it must stay dependency-free. Solver packages (python-sat, z3-solver,
 # cpmpy, clingo) are likewise supplied at solve time via --with.
 dependencies = []
@@ -21,9 +21,9 @@ dependencies = []
 [project.optional-dependencies]
 # The product layer: CLI, templates, (later) MCP server.
 agent = [
-    "agentic-python-coder>=3.4.3",
+    "agentic-python-coder>=3.4.4",
     "python-dotenv>=1.0.0",
-    "mcp-minion>=0.2.1",
+    "mcp-minion>=0.2.2",
     "mcp>=1.25,<3",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
@@ -40,7 +40,7 @@ dev = [
     "ruff>=0.4.10",
 ]
 all = [
-    "mcp-solver[agent,test,dev]",
+    "agentic-mcp-solver[agent,test,dev]",
 ]
 
 [project.scripts]

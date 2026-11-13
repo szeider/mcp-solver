@@ -110,7 +110,7 @@ def helpers_package(dev_path: str | None = None) -> str:
     """
     if dev_path:
         return dev_path
-    return f"mcp-solver=={mcp_solver.__version__}"
+    return f"{mcp_solver.DIST_NAME}=={mcp_solver.__version__}"
 
 
 def build_with_packages(solver: str, dev_path: str | None = None) -> list[str]:
@@ -423,9 +423,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "mcp-solver: the agent layer is not installed"
             " (needs agentic-python-coder and mcp-minion).\n"
-            "Install it with: uv pip install 'mcp-solver[agent]'\n"
-            "(until v4 is on PyPI: clone the repo and run"
-            " uv pip install -e '.[agent]')",
+            f"Install it with: uv pip install '{mcp_solver.DIST_NAME}[agent]'"
+            " (from a checkout: uv pip install -e '.[agent]')",
             file=sys.stderr,
         )
         return 1

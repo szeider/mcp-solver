@@ -106,7 +106,11 @@ def test_with_packages_pysat_pins_helpers(monkeypatch):
     # Outside a source checkout the helpers fall back to the PyPI pin.
     monkeypatch.setattr(cli, "_local_checkout", lambda: None)
     pkgs = cli.build_with_packages("pysat")
-    assert pkgs == ["python-sat", "pypblib", f"mcp-solver=={mcp_solver.__version__}"]
+    assert pkgs == [
+        "python-sat",
+        "pypblib",
+        f"agentic-mcp-solver=={mcp_solver.__version__}",
+    ]
 
 
 def test_source_checkout_auto_detected():
@@ -133,7 +137,7 @@ def test_with_packages_solver_libraries(solver, lib, monkeypatch):
     pkgs = cli.build_with_packages(solver)
     assert pkgs[0] == lib
     # helpers package is always injected, for every backend.
-    assert pkgs[-1] == f"mcp-solver=={mcp_solver.__version__}"
+    assert pkgs[-1] == f"agentic-mcp-solver=={mcp_solver.__version__}"
 
 
 def test_dev_path_used_as_helpers(monkeypatch):
@@ -363,7 +367,7 @@ def test_missing_engine_returns_1(monkeypatch, capsys):
     rc = cli.main(["z3", "hello"])
     assert rc == 1
     err = capsys.readouterr().err
-    assert "uv pip install 'mcp-solver[agent]'" in err
+    assert "uv pip install 'agentic-mcp-solver[agent]'" in err
 
 
 # --- fast-fail: unpublishable version with dev mode off ------------------
