@@ -24,7 +24,7 @@ agent = [
     "agentic-python-coder>=3.4.3",
     "python-dotenv>=1.0.0",
     "mcp-minion>=0.2.1",
-    "mcp>=1.25,<2",
+    "mcp>=1.25,<3",
 ]
 # Solver libraries needed to unit-test the helpers and run problem validators.
 test = [

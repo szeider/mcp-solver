@@ -153,7 +153,6 @@ async def test_resource_link_origin_allows_read() -> None:
 
 def test_content_text_renders_resource_links() -> None:
     from mcp.types import ResourceLink, TextContent
-    from pydantic import AnyUrl
 
     from mcp_minion.mcp_client import _content_text
 
@@ -161,7 +160,7 @@ def test_content_text_renders_resource_links() -> None:
         TextContent(type="text", text="solution"),
         ResourceLink(
             type="resource_link",
-            uri=AnyUrl("app://runs/1/code.py"),
+            uri="app://runs/1/code.py",
             name="code.py",
             description="the program",
         ),

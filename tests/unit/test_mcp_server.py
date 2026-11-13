@@ -10,6 +10,7 @@ for kernel tools, ``ok`` for submit_code) inside the client's
 import json
 
 import pytest
+from mcp_minion.mcp_client import _field
 
 from mcp_solver.agent import mcp_server
 
@@ -97,9 +98,14 @@ def engine(monkeypatch):
 
 
 def _session():
-    from mcp.shared.memory import create_connected_server_and_client_session
+    try:  # mcp 2.x: in-process client
+        from mcp.client import Client
 
-    return create_connected_server_and_client_session(mcp_server.mcp._mcp_server)
+        return Client(mcp_server.mcp)
+    except ImportError:  # mcp 1.x
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        return create_connected_server_and_client_session(mcp_server.mcp._mcp_server)
 
 
 def _engine_payload(result) -> dict:
@@ -129,12 +135,12 @@ def test_template_resource_returns_backend_instructions():
 
 
 def test_template_resource_rejects_unknown_solver():
-    with pytest.raises(ValueError, match="unknown solver"):
+    with pytest.raises(mcp_server.ResourceError, match="unknown solver"):
         mcp_server.template_resource("gurobi")
 
 
 def test_submission_resource_rejects_unknown_id():
-    with pytest.raises(ValueError, match="unknown submission"):
+    with pytest.raises(mcp_server.ResourceError, match="unknown submission"):
         mcp_server.submission_resource("nope")
 
 
@@ -203,8 +209,8 @@ async def test_toolkit_round_trip(engine):
         # template is the payload; structuredContent would hide it in
         # clients that prefer it over text).
         result = await session.call_tool("select_backend", {"solver": "z3"})
-        assert not result.isError
-        assert result.structuredContent is None
+        assert not _field(result, "is_error")
+        assert _field(result, "structured_content") is None
         text = result.content[0].text
         assert "fresh solving kernel" in text
         assert "submit_code" in text
@@ -244,7 +250,7 @@ async def test_toolkit_round_trip(engine):
 async def test_select_backend_rejects_unknown_solver(engine):
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "gurobi"})
-        assert result.isError
+        assert _field(result, "is_error")
         assert "unknown solver" in result.content[0].text
 
 
@@ -254,7 +260,7 @@ async def test_select_backend_fails_closed_on_malformed_reset(engine):
     engine.break_reset = True
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "z3"})
-        assert result.isError
+        assert _field(result, "is_error")
         assert "kernel setup" in result.content[0].text
     assert mcp_server._kernel_id is None
 
@@ -263,14 +269,14 @@ async def test_submit_code_round_trip(engine):
     async with _session() as session:
         # Syntax errors are rejected: no resource_link, ok=false rides along.
         result = await session.call_tool("submit_code", {"code": "def f(:"})
-        assert not result.isError
-        assert result.structuredContent["ok"] is False
+        assert not _field(result, "is_error")
+        assert _field(result, "structured_content")["ok"] is False
         assert all(c.type != "resource_link" for c in result.content)
 
         # A valid program is stored and linked as a fetchable resource.
         program = "print('{\"answer\": 42}')"
         result = await session.call_tool("submit_code", {"code": program})
-        assert result.structuredContent == {"ok": True}
+        assert _field(result, "structured_content") == {"ok": True}
         links = [c for c in result.content if c.type == "resource_link"]
         assert len(links) == 1
         assert links[0].size == len(program.encode())
@@ -283,7 +289,7 @@ async def test_submission_store_is_bounded(engine, monkeypatch):
     async with _session() as session:
         for i in range(3):
             result = await session.call_tool("submit_code", {"code": f"print({i})"})
-            assert result.structuredContent == {"ok": True}
+            assert _field(result, "structured_content") == {"ok": True}
     assert len(mcp_server._submissions) == 2
     assert list(mcp_server._submissions.values()) == ["print(1)", "print(2)"]
 
@@ -294,7 +300,7 @@ async def test_submit_stats_ride_along(engine):
         await session.call_tool("python_exec", {"code": "1"})
         await session.call_tool("python_exec", {"code": "2"})
         result = await session.call_tool("submit_code", {"code": "print(1)"})
-        sc = result.structuredContent
+        sc = _field(result, "structured_content")
         assert sc["ok"] is True
         assert sc["stats"]["exec_calls"] == 2
         assert sc["stats"]["exec_failures"] == 0
@@ -360,3 +366,11 @@ async def test_manual_reset_retargets_routing(engine):
         assert _engine_payload(result)["kernel_id"] == "k2"
         await session.call_tool("python_exec", {"code": "print(1)"})
         assert engine.calls[-1][1]["kernel_id"] == "k2"
+
+
+async def test_resource_error_text_reaches_client(engine):
+    # mcp>=2.1 hides the text of a plain exception raised in a resource;
+    # ResourceError keeps it visible on both mcp 1.x and 2.x.
+    async with _session() as session:
+        with pytest.raises(Exception, match="unknown solver 'gurobi'"):
+            await session.read_resource("mcp-solver://template/gurobi")

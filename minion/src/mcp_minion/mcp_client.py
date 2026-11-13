@@ -10,13 +10,21 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import AnyUrl
+from mcp.types import PaginatedRequestParams
 
 # Client-side timeouts (seconds).
 INIT_TIMEOUT = 30.0
 RESOURCE_TIMEOUT = 30.0
 DEFAULT_TOOL_TIMEOUT = 300.0
 TIMEOUT_MARGIN = 30.0
+
+
+def _field(obj: Any, name: str) -> Any:
+    """Read a protocol-type field under mcp 2.x (snake_case) or 1.x (camelCase)."""
+    if hasattr(obj, name):
+        return getattr(obj, name)
+    head, *rest = name.split("_")
+    return getattr(obj, head + "".join(w.title() for w in rest), None)
 
 
 def _content_text(content: Any) -> str:
@@ -176,7 +184,8 @@ class MCPManager:
         cursor: str | None = None
         while capabilities.tools is not None:
             tools_result = await asyncio.wait_for(
-                session.list_tools(cursor=cursor), timeout=INIT_TIMEOUT
+                session.list_tools(params=PaginatedRequestParams(cursor=cursor)),
+                timeout=INIT_TIMEOUT,
             )
             for tool in tools_result.tools:
                 if tool.name in self._tools or tool.name in staged:
@@ -192,10 +201,11 @@ class MCPManager:
                 staged[tool.name] = MCPToolInfo(
                     name=tool.name,
                     description=tool.description or "",
-                    parameters=tool.inputSchema or {"type": "object", "properties": {}},
+                    parameters=_field(tool, "input_schema")
+                    or {"type": "object", "properties": {}},
                     server_name=server_name,
                 )
-            cursor = tools_result.nextCursor
+            cursor = _field(tools_result, "next_cursor")
             if not cursor:
                 break
 
@@ -208,7 +218,8 @@ class MCPManager:
         cursor = None
         while True:
             res_result = await asyncio.wait_for(
-                session.list_resources(cursor=cursor), timeout=INIT_TIMEOUT
+                session.list_resources(params=PaginatedRequestParams(cursor=cursor)),
+                timeout=INIT_TIMEOUT,
             )
             for res in res_result.resources:
                 self._resources.append(
@@ -216,11 +227,11 @@ class MCPManager:
                         uri=str(res.uri),
                         name=res.name or str(res.uri),
                         description=res.description or "",
-                        mime_type=res.mimeType,
+                        mime_type=_field(res, "mime_type"),
                         server_name=server_name,
                     )
                 )
-            cursor = res_result.nextCursor
+            cursor = _field(res_result, "next_cursor")
             if not cursor:
                 break
 
@@ -249,7 +260,7 @@ class MCPManager:
             raise ValueError(f"MCP server '{owner}' not connected")
 
         result = await asyncio.wait_for(
-            session.read_resource(AnyUrl(uri)), timeout=RESOURCE_TIMEOUT
+            session.read_resource(uri), timeout=RESOURCE_TIMEOUT
         )
         parts = []
         for item in result.contents:
@@ -285,7 +296,7 @@ class MCPManager:
                 timeout=self._effective_timeout(arguments),
             )
 
-            if result.isError:
+            if _field(result, "is_error"):
                 return json.dumps({"error": _content_text(result.content)})
 
             # Remember which server produced each resource_link so later

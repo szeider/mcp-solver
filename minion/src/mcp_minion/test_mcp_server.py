@@ -1,24 +1,32 @@
 """Minimal MCP server for testing - provides echo/add tools and a resource."""
 
 import asyncio
+import importlib.metadata
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Resource, TextContent, Tool
-from pydantic import AnyUrl
+from mcp.types import (
+    CallToolResult,
+    ListResourcesResult,
+    ListToolsResult,
+    ReadResourceResult,
+    Resource,
+    TextContent,
+    TextResourceContents,
+    Tool,
+)
 
-server = Server("test-server")
+_MCP_V2 = int(importlib.metadata.version("mcp").split(".")[0]) >= 2
 
 GREETING_URI = "test://greeting"
 GREETING_TEXT = "Hello from the test resource."
 
 
-@server.list_resources()
 async def list_resources() -> list[Resource]:
     """Return available resources."""
     return [
         Resource(
-            uri=AnyUrl(GREETING_URI),
+            uri=GREETING_URI,
             name="greeting",
             description="A test greeting resource",
             mimeType="text/plain",
@@ -26,15 +34,13 @@ async def list_resources() -> list[Resource]:
     ]
 
 
-@server.read_resource()
-async def read_resource(uri: AnyUrl) -> str:
+async def read_resource(uri) -> str:
     """Serve a resource by URI."""
     if str(uri) == GREETING_URI:
         return GREETING_TEXT
     raise ValueError(f"Unknown resource: {uri}")
 
 
-@server.list_tools()
 async def list_tools() -> list[Tool]:
     """Return available tools."""
     return [
@@ -64,7 +70,6 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-@server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Execute a tool."""
     if name == "echo":
@@ -77,6 +82,43 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=str(result))]
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+
+async def _on_list_resources(ctx, params) -> ListResourcesResult:
+    return ListResourcesResult(resources=await list_resources())
+
+
+async def _on_read_resource(ctx, params) -> ReadResourceResult:
+    text = await read_resource(params.uri)
+    return ReadResourceResult(
+        contents=[
+            TextResourceContents(uri=params.uri, text=text, mime_type="text/plain")
+        ]
+    )
+
+
+async def _on_list_tools(ctx, params) -> ListToolsResult:
+    return ListToolsResult(tools=await list_tools())
+
+
+async def _on_call_tool(ctx, params) -> CallToolResult:
+    return CallToolResult(content=await call_tool(params.name, params.arguments or {}))
+
+
+if _MCP_V2:
+    server = Server(
+        "test-server",
+        on_list_resources=_on_list_resources,
+        on_read_resource=_on_read_resource,
+        on_list_tools=_on_list_tools,
+        on_call_tool=_on_call_tool,
+    )
+else:
+    server = Server("test-server")
+    server.list_resources()(list_resources)
+    server.read_resource()(read_resource)
+    server.list_tools()(list_tools)
+    server.call_tool()(call_tool)
 
 
 async def main() -> None:

@@ -43,10 +43,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+try:  # mcp 2.x
+    from mcp.server.mcpserver import MCPServer as FastMCP
+    from mcp.server.mcpserver.exceptions import ResourceError, ToolError
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.exceptions import ResourceError, ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
-from pydantic import AnyUrl
 
 import mcp_solver
 from mcp_solver.agent.cli import (
@@ -308,7 +311,7 @@ def guide() -> str:
 def template_resource(solver: str) -> str:
     """The full modeling instructions for a backend."""
     if solver not in SOLVERS:
-        raise ValueError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
+        raise ResourceError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
     return get_template(solver, root=_dev_path())
 
 
@@ -317,7 +320,7 @@ def submission_resource(submission_id: str) -> str:
     """A previously submitted (compile-checked) solver program."""
     code = _submissions.get(submission_id)
     if code is None:
-        raise ValueError(f"unknown submission {submission_id!r}")
+        raise ResourceError(f"unknown submission {submission_id!r}")
     return code
 
 
@@ -475,7 +478,7 @@ async def submit_code(code: str) -> CallToolResult:
         content.append(
             ResourceLink(
                 type="resource_link",
-                uri=AnyUrl(f"mcp-solver://submissions/{submission_id}"),
+                uri=f"mcp-solver://submissions/{submission_id}",
                 name=f"submission_{submission_id[:8]}.py",
                 description="The accepted solver program (compile-checked).",
                 mimeType="text/x-python",
