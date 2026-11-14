@@ -32,10 +32,10 @@ else:
 - `AllDifferent(vars)` - all different values
 - `sum(vars) == total` - sum constraint
 - `Circuit(x)` - variables x form a Hamiltonian circuit (for routing/tour problems)
-- `InDomain(var, [values])` - restrict variable to a set of values. **Must be explicitly imported**: `from cpmpy import InDomain`
+- `InDomain(var, [values])` - restrict variable to a set of values
 - Logical: `&`, `|`, `~` on constraints; `(cond).implies(other)` on constraints only
 - Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=` between variables and expressions
-- Element: `vars[idx]` where idx is a decision variable (direct indexing works)
+- Element: `vars[idx]` where idx is a decision variable (direct indexing works on `intvar(..., shape=n)` and `cpm_array(list)`, not on a Python list)
 
 ## CPMpy Pitfalls - Avoid These
 - Do NOT use `.is_in()`, `.in_domain()`, or other methods that don't exist — use `InDomain(var, list)` instead
@@ -66,11 +66,11 @@ else:
 - If the narrative text conflicts with the explicit "Output format" block, the Output format block wins
 - If the narrative mentions optional variants or extensions of the problem ("one extension is...", "another version..."), solve the base problem as specified by the input data and the Output format block — do not output an extended variant unless the output spec explicitly requires it
 - Derive every output array's dimensions from parameters stated in the problem and from the axis names in the format spec: `result[a][b]` means outer axis `a` and inner axis `b` — never swap axes or substitute a different quantity
-- Check array dimensions and value ranges match the spec before saving
+- Check array dimensions and value ranges match the spec before submitting
 
 ## Verification Requirement (MANDATORY)
 
-CPMpy models can easily contain subtle logic bugs. Before saving, you MUST:
+CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
 
 1. **Solve and extract** the solution values
 2. **Write a `verify()` function** that checks every constraint from the problem statement using plain Python loops and asserts — independent of your CPMpy model:

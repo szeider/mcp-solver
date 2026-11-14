@@ -102,7 +102,9 @@ wcnf.nv = max(wcnf.nv, enc.nv)  # absorb PBEnc's auxiliary vars
 ## Auxiliary-variable patterns (reified objectives)
 
 To reward or penalize a COMBINATION of variables, reify it with an auxiliary
-variable. Allocate fresh ids above all existing ones:
+variable. Allocate fresh ids above all existing ones (`wcnf.nv` counts only
+ids already in clauses, and `var_map` does not know `aux`, so do this only
+after every named variable is allocated and appears in a clause):
 
 ```python
 aux = wcnf.nv + 1            # next free variable id
@@ -140,8 +142,8 @@ weights to the underlying variables again.
 - Variable ids are positive integers starting at 1; after helper calls that
   add auxiliaries, allocate new ids from `wcnf.nv + 1`.
 - Use `WCNF()`, not `CNF()`; add soft clauses only via `weight=`.
-- Helper functions return clause lists — append EVERY clause, don't append
-  the list itself.
+- `mcp_solver.helpers.pysat` functions return clause lists — append EVERY
+  clause, don't append the list itself (`card.*` appends to `wcnf` itself).
 - Building the WCNF without instantiating RC2 solves nothing.
 - Do NOT print anything except the final JSON in the submitted program.
 

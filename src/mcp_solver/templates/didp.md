@@ -96,7 +96,7 @@ else:
 State variables (all take `target=` = initial value, optional `name=`):
 - `model.add_set_var(object_type=ot, target=[...])` — a set of object
   indices; effects: `.add(j)`, `.remove(j)`; conditions: `.contains(j)`,
-  `.is_empty()`, `len(var)`
+  `.is_empty()`, `.len()`
 - `model.add_element_var(object_type=ot, target=i)` — one object index
 - `model.add_int_var(target=i)`, `model.add_float_var(target=x)`
 - `model.add_int_resource_var(target=i, less_is_better=True)` — declares
@@ -110,8 +110,8 @@ State variables (all take `target=` = initial value, optional `name=`):
 
 Tables: `model.add_int_table(list_or_nested_list)`, `add_float_table`,
 `add_bool_table`; index with ints or element vars: `table[i, j]`. Indexing
-with a set variable aggregates: `travel[location, unvisited].min()`
-(also `.sum()`, `.max()`).
+with a set variable sums: `travel[location, unvisited]`; for min/max
+use `travel.min(location, unvisited)`, `travel.max(location, unvisited)`.
 
 Transitions:
 - `dp.Transition(name=..., cost=..., effects=[(var, expr), ...],
@@ -152,7 +152,7 @@ from a state. It can speed up search dramatically, BUT:
   aid, never required for correctness.
 
 Good simple bounds: minimization routing — sum over unvisited customers of
-the cheapest incoming edge, `cheapest_in[unvisited].sum()`; maximization
+the cheapest incoming edge, `cheapest_in[unvisited]`; maximization
 knapsack — sum of the POSITIVE profits of items still selectable (a
 negative-profit item never forces its way into an upper bound).
 
@@ -170,8 +170,8 @@ negative-profit item never forces its way into an upper bound).
 - Do NOT try to mutate a set constant (`create_set_const`) in effects —
   only set VARIABLES change; constants are for conditions and targets
 - Do NOT combine conditions with Python `and`/`or`/`not` — use the
-  expression operators `&`, `|`, `~` (Python keywords coerce to bool and
-  break the model)
+  expression operators `&`, `|`, `~` (Python keywords convert a condition
+  to bool, which raises an exception)
 - All effects of a transition are evaluated against the PRE-transition
   state simultaneously — `effects=[(x, y), (y, x)]` swaps x and y
 - Give transitions unique names that encode the decision (e.g.
@@ -209,7 +209,7 @@ negative-profit item never forces its way into an upper bound).
 
 DP models fail subtly: a state variable too few, a precondition too weak, an
 inadmissible bound — and the solver still returns a confident answer. Before
-saving, you MUST:
+submitting, you MUST:
 
 1. **Solve and decode** the transition sequence into a concrete solution
    (tour, packing, schedule).

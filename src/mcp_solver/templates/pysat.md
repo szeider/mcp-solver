@@ -90,7 +90,8 @@ All of these return `list[list[int]]` clauses — append each clause to your for
 ```python
 from mcp_solver.helpers.pysat import (
     VariableMap,
-    at_most_one, exactly_one,          # pairwise encodings
+    at_most_one, exactly_one,          # pairwise (at_most_one: CardEnc above
+                                       #   20 vars, without top_id)
     at_most_k, at_least_k, exactly_k,  # cardinality (pairwise <=20 vars, CardEnc
                                        #   above — then pass top_id=<max var id
                                        #   in your formula> so auxiliaries don't
@@ -138,12 +139,14 @@ encoding, but the helpers above are the tested path.
 ## Verification Requirement (MANDATORY)
 
 SAT encodings easily contain subtle bugs (wrong polarity, missing clauses,
-swapped indices). Before saving, you MUST:
+swapped indices). Before submitting, you MUST:
 
 1. **Solve and decode** the model into problem-level values.
 2. **Write a `verify()` function** that checks every constraint from the problem
    statement using plain Python — independent of your CNF encoding:
    ```python
+   import itertools
+
    def verify(result):
        # Re-derive sizes and constraints from the problem TEXT,
        # not from your encoding's variables
