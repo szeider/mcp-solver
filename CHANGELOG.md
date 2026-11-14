@@ -41,7 +41,8 @@
 - **Fix:** `mcp-solver-bench` kills the whole process group of a timed-out
   solve on macOS and Linux (uv, python, engine), not only the CLI process;
   the result row is unchanged.
-- **Fix:** Requires agentic-python-coder >=3.6.0, which reports a kernel
+- **Fix:** Requires agentic-python-coder >=3.6.0,<4 (the next major engine
+  version changes how kernel ids work), which reports a kernel
   whose code is still running after a timeout (the interrupt did not stop
   it), refuses new code behind it with a reply saying the code was not
   executed, and lets `python_reset` replace such a kernel without waiting.

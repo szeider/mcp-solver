@@ -21,10 +21,12 @@ def _engine_pin() -> str:
     assert checkout is not None, "unit tests must run from a source checkout"
     data = tomllib.loads((Path(checkout) / "pyproject.toml").read_text())
     for req in data["project"]["optional-dependencies"]["agent"]:
-        match = re.fullmatch(r"agentic-python-coder\s*>=\s*([\w.]+)", req.strip())
+        match = re.fullmatch(
+            r"agentic-python-coder\s*>=\s*([\w.]+)\s*,\s*<\s*4", req.strip()
+        )
         if match:
             return match.group(1)
-    raise AssertionError("no agentic-python-coder>=X pin in the [agent] extra")
+    raise AssertionError("no agentic-python-coder>=X,<4 pin in the [agent] extra")
 
 
 def test_min_engine_version_matches_pyproject_pin():
