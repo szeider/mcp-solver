@@ -3,11 +3,14 @@
 Each problem is solved in its own subprocess (the engine does not support
 concurrent solves in one process), its JSON solution is piped into the
 problem's ``*_ground_truth.py`` validator, and one result row per run is
-appended to ``results.jsonl`` in the output directory.
+appended to ``results.jsonl`` in the output directory. Each subprocess runs
+with its own run directory as working directory, so the kernels and
+re-executed programs of parallel runs do not share one.
 """
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -16,6 +19,20 @@ from datetime import datetime
 from pathlib import Path
 
 from mcp_solver.templates import SOLVERS
+
+# File in each run directory holding the CLI subprocess's stderr.
+STDERR_FILE = "cli_stderr.txt"
+# Lines of that stderr copied into the result row of a failed run.
+STDERR_TAIL_LINES = 20
+
+
+def _text(captured: str | bytes | None) -> str:
+    """Captured output as text (TimeoutExpired may carry bytes or None)."""
+    if captured is None:
+        return ""
+    if isinstance(captured, bytes):
+        return captured.decode("utf-8", errors="replace")
+    return captured
 
 
 def discover(problems_root: Path, solvers: list[str]) -> list[tuple[str, Path]]:
@@ -31,6 +48,56 @@ def discover(problems_root: Path, solvers: list[str]) -> list[tuple[str, Path]]:
     return found
 
 
+def build_command(
+    solver: str, problem_md: Path, args: argparse.Namespace, workdir: Path
+) -> list[str]:
+    """The CLI command for one run, with every path argument absolute.
+
+    The command runs with *workdir* as its working directory, so relative
+    inputs are resolved against the harness's own working directory first:
+    problem files, --dev PATH or a path in $MCP_SOLVER_DEV (passed on as
+    --dev, which the CLI ranks above the environment; ``1``/``true``/``auto``
+    stay with the child, whose auto-detection does not depend on the cwd),
+    a model .json file, and an alias that a local ``<alias>.json`` overrides
+    (the engine's lookup order).
+    """
+    workdir = workdir.resolve()
+    model = args.model
+    if model.endswith(".json"):
+        model = str(Path(model).expanduser().resolve())
+    elif "/" not in model and Path(f"{model}.json").is_file():
+        model = str(Path(f"{model}.json").resolve())
+    dev = args.dev
+    if dev is None:
+        env_dev = os.environ.get("MCP_SOLVER_DEV")
+        if env_dev and env_dev.lower() not in ("1", "true", "auto"):
+            dev = env_dev
+    cmd = [
+        sys.executable,
+        "-m",
+        "mcp_solver.agent.cli",
+        solver,
+        "--problem",
+        str(problem_md.resolve()),
+        "--workdir",
+        str(workdir),
+        "--model",
+        model,
+        "--stats-json",
+        str(workdir / "stats.json"),
+        "-q",
+    ]
+    if dev is not None:
+        cmd.append("--dev")
+        if dev != "auto":
+            cmd.append(str(Path(dev).expanduser().resolve()))
+    if args.step_limit:
+        cmd += ["--step-limit", str(args.step_limit)]
+    if args.token_limit is not None:
+        cmd += ["--token-limit", str(args.token_limit)]
+    return cmd
+
+
 def run_one(
     solver: str,
     problem_md: Path,
@@ -38,33 +105,17 @@ def run_one(
     out_root: Path,
     run_idx: int,
 ) -> dict:
-    """Solve one problem in a CLI subprocess and validate its output."""
+    """Solve one problem in a CLI subprocess and validate its output.
+
+    The subprocess's stderr goes to ``<run dir>/cli_stderr.txt`` (also on a
+    timeout, with whatever was captured); for a nonzero exit or a result
+    that is not valid, its last lines are also in the row as ``stderr_tail``.
+    """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    workdir = out_root / solver / f"{problem_md.stem}_{stamp}_r{run_idx}"
+    workdir = (out_root / solver / f"{problem_md.stem}_{stamp}_r{run_idx}").resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     stats_file = workdir / "stats.json"
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "mcp_solver.agent.cli",
-        solver,
-        "--problem",
-        str(problem_md),
-        "--workdir",
-        str(workdir),
-        "--model",
-        args.model,
-        "--stats-json",
-        str(stats_file),
-        "-q",
-    ]
-    if args.dev is not None:
-        cmd.append("--dev")
-        if args.dev != "auto":
-            cmd.append(args.dev)
-    if args.step_limit:
-        cmd += ["--step-limit", str(args.step_limit)]
+    cmd = build_command(solver, problem_md, args, workdir)
 
     row = {
         "solver": solver,
@@ -76,14 +127,22 @@ def run_one(
     }
     start = time.monotonic()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=args.timeout, cwd=workdir
+        )
         row["exit_code"] = proc.returncode
         row["solution"] = proc.stdout.strip()
-    except subprocess.TimeoutExpired:
+        stderr = _text(proc.stderr)
+    except subprocess.TimeoutExpired as exc:
         row["exit_code"] = -1
         row["solution"] = ""
         row["error"] = f"timeout after {args.timeout}s"
+        stderr = _text(exc.stderr)
     row["wall_seconds"] = round(time.monotonic() - start, 1)
+    try:
+        (workdir / STDERR_FILE).write_text(stderr, encoding="utf-8")
+    except OSError as exc:
+        row["stderr_file_error"] = str(exc)
 
     if stats_file.is_file():
         try:
@@ -96,7 +155,17 @@ def run_one(
         row["exec_calls"] = stats.get("tool_usage", {}).get("python_exec", 0)
         if stats.get("step_limit_reached"):
             row["step_limit_reached"] = True
+        if stats.get("token_limit_reached"):
+            row["token_limit_reached"] = True
 
+    _validate(row, problem_md)
+    if row["exit_code"] != 0 or row.get("valid") is False:
+        row["stderr_tail"] = "\n".join(stderr.splitlines()[-STDERR_TAIL_LINES:])
+    return row
+
+
+def _validate(row: dict, problem_md: Path) -> None:
+    """Set ``valid`` and ``message`` in *row* from the problem's validator."""
     validator = problem_md.with_name(f"{problem_md.stem}_ground_truth.py")
     if not validator.is_file():
         row["valid"] = None
@@ -116,7 +185,7 @@ def run_one(
         except subprocess.TimeoutExpired:
             row["valid"] = False
             row["message"] = "validator timed out after 120s"
-            return row
+            return
         out = check.stdout.strip()
         verdict = None
         for candidate in (out, out.splitlines()[-1] if out else ""):
@@ -131,7 +200,6 @@ def run_one(
         else:
             row["valid"] = False
             row["message"] = f"validator produced no verdict: {check.stderr[:200]}"
-    return row
 
 
 def print_summary(rows: list[dict]) -> None:
@@ -191,6 +259,14 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=30,
         help="maximum agent steps per solve (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--token-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="maximum total tokens per solve, passed to the CLI (0 = no limit;"
+        " default: the CLI's default)",
     )
     parser.add_argument(
         "--dev",

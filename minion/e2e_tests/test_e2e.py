@@ -129,7 +129,7 @@ class TestLogIntegrity:
 
     def test_log_has_all_fields(self) -> None:
         folder = E2E_RUNS / "simple_add"
-        result, logger = run_agent_from_folder(folder)
+        _result, logger = run_agent_from_folder(folder)
 
         log_data = json.loads(logger.log_path.read_text())
 

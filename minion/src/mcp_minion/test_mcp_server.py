@@ -1,124 +1,139 @@
-"""Minimal MCP server for testing - provides echo/add tools and a resource."""
+"""Minimal MCP server for testing: tools, a resource and server instructions.
+
+Tools: ``echo``, ``add``, ``lines`` (multi-line text), ``fail`` (an
+``isError`` result), ``image`` (an image block) and ``link`` (a
+resource_link to the greeting resource).
+"""
 
 import asyncio
-import importlib.metadata
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
     CallToolResult,
+    ImageContent,
     ListResourcesResult,
     ListToolsResult,
     ReadResourceResult,
     Resource,
+    ResourceLink,
     TextContent,
     TextResourceContents,
     Tool,
 )
 
-_MCP_V2 = int(importlib.metadata.version("mcp").split(".")[0]) >= 2
-
 GREETING_URI = "test://greeting"
 GREETING_TEXT = "Hello from the test resource."
+INSTRUCTIONS = "Test server: call echo before add."
+# 4 bytes of PNG signature, base64-encoded.
+IMAGE_DATA = "iVBORw=="
 
+_NO_ARGS = {"type": "object", "properties": {}}
 
-async def list_resources() -> list[Resource]:
-    """Return available resources."""
-    return [
-        Resource(
-            uri=GREETING_URI,
-            name="greeting",
-            description="A test greeting resource",
-            mimeType="text/plain",
-        )
-    ]
-
-
-async def read_resource(uri) -> str:
-    """Serve a resource by URI."""
-    if str(uri) == GREETING_URI:
-        return GREETING_TEXT
-    raise ValueError(f"Unknown resource: {uri}")
-
-
-async def list_tools() -> list[Tool]:
-    """Return available tools."""
-    return [
-        Tool(
-            name="echo",
-            description="Echo back the input message",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "Message to echo"},
-                },
-                "required": ["message"],
+TOOLS = [
+    Tool(
+        name="echo",
+        description="Echo back the input message",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "Message to echo"},
             },
-        ),
-        Tool(
-            name="add",
-            description="Add two numbers",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "a": {"type": "number", "description": "First number"},
-                    "b": {"type": "number", "description": "Second number"},
-                },
-                "required": ["a", "b"],
+            "required": ["message"],
+        },
+    ),
+    Tool(
+        name="add",
+        description="Add two numbers",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "a": {"type": "number", "description": "First number"},
+                "b": {"type": "number", "description": "Second number"},
             },
-        ),
-    ]
+            "required": ["a", "b"],
+        },
+    ),
+    Tool(name="lines", description="Return multi-line text", input_schema=_NO_ARGS),
+    Tool(name="fail", description="Return an error result", input_schema=_NO_ARGS),
+    Tool(name="image", description="Return an image", input_schema=_NO_ARGS),
+    Tool(name="link", description="Return a resource link", input_schema=_NO_ARGS),
+]
 
 
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+def call_tool(name: str, arguments: dict) -> CallToolResult:
     """Execute a tool."""
     if name == "echo":
-        message = arguments.get("message", "")
-        return [TextContent(type="text", text=f"Echo: {message}")]
+        text = f"Echo: {arguments.get('message', '')}"
     elif name == "add":
-        a = arguments.get("a", 0)
-        b = arguments.get("b", 0)
-        result = a + b
-        return [TextContent(type="text", text=str(result))]
+        text = str(arguments.get("a", 0) + arguments.get("b", 0))
+    elif name == "lines":
+        text = 'line "one"\nline two'
+    elif name == "fail":
+        return CallToolResult(
+            content=[TextContent(type="text", text="it failed")], is_error=True
+        )
+    elif name == "image":
+        return CallToolResult(
+            content=[ImageContent(type="image", data=IMAGE_DATA, mime_type="image/png")]
+        )
+    elif name == "link":
+        return CallToolResult(
+            content=[
+                ResourceLink(
+                    type="resource_link",
+                    uri=GREETING_URI,
+                    name="greeting",
+                    description="the greeting",
+                )
+            ]
+        )
     else:
-        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+        text = f"Unknown tool: {name}"
+    return CallToolResult(content=[TextContent(type="text", text=text)])
 
 
 async def _on_list_resources(ctx, params) -> ListResourcesResult:
-    return ListResourcesResult(resources=await list_resources())
+    return ListResourcesResult(
+        resources=[
+            Resource(
+                uri=GREETING_URI,
+                name="greeting",
+                description="A test greeting resource",
+                mime_type="text/plain",
+            )
+        ]
+    )
 
 
 async def _on_read_resource(ctx, params) -> ReadResourceResult:
-    text = await read_resource(params.uri)
+    if str(params.uri) != GREETING_URI:
+        raise ValueError(f"Unknown resource: {params.uri}")
     return ReadResourceResult(
         contents=[
-            TextResourceContents(uri=params.uri, text=text, mime_type="text/plain")
+            TextResourceContents(
+                uri=params.uri, text=GREETING_TEXT, mime_type="text/plain"
+            )
         ]
     )
 
 
 async def _on_list_tools(ctx, params) -> ListToolsResult:
-    return ListToolsResult(tools=await list_tools())
+    return ListToolsResult(tools=TOOLS)
 
 
 async def _on_call_tool(ctx, params) -> CallToolResult:
-    return CallToolResult(content=await call_tool(params.name, params.arguments or {}))
+    return call_tool(params.name, params.arguments or {})
 
 
-if _MCP_V2:
-    server = Server(
-        "test-server",
-        on_list_resources=_on_list_resources,
-        on_read_resource=_on_read_resource,
-        on_list_tools=_on_list_tools,
-        on_call_tool=_on_call_tool,
-    )
-else:
-    server = Server("test-server")
-    server.list_resources()(list_resources)
-    server.read_resource()(read_resource)
-    server.list_tools()(list_tools)
-    server.call_tool()(call_tool)
+server = Server(
+    "test-server",
+    instructions=INSTRUCTIONS,
+    on_list_resources=_on_list_resources,
+    on_read_resource=_on_read_resource,
+    on_list_tools=_on_list_tools,
+    on_call_tool=_on_call_tool,
+)
 
 
 async def main() -> None:

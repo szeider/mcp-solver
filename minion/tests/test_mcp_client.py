@@ -4,12 +4,11 @@ These exercise the full stdio MCP round-trip (spawn, initialize, list_tools,
 call_tool) with no LLM involved.
 """
 
-import json
 import sys
 
 import pytest
 
-from mcp_minion.mcp_client import MCPManager
+from mcp_minion.mcp_client import MCPManager, ToolOutcome
 
 BUNDLED_SERVER = {
     "test": {
@@ -29,16 +28,14 @@ async def test_discovers_bundled_tools() -> None:
 
 async def test_call_echo() -> None:
     async with MCPManager(BUNDLED_SERVER) as mgr:
-        raw = await mgr.call_tool("echo", {"message": "hello"})
-        payload = json.loads(raw)
-        assert payload["result"] == "Echo: hello"
+        outcome = await mgr.call_tool("echo", {"message": "hello"})
+        assert outcome == ToolOutcome(text="Echo: hello")
 
 
 async def test_call_add() -> None:
     async with MCPManager(BUNDLED_SERVER) as mgr:
-        raw = await mgr.call_tool("add", {"a": 2, "b": 3})
-        payload = json.loads(raw)
-        assert payload["result"] == "5"
+        outcome = await mgr.call_tool("add", {"a": 2, "b": 3})
+        assert outcome.text == "5" and not outcome.is_error
 
 
 async def test_openai_tool_schema() -> None:
@@ -208,13 +205,117 @@ def _manager_with_fake_tool() -> tuple[MCPManager, _RecordingSession]:
 
 async def test_call_tool_none_arguments_become_empty_dict() -> None:
     manager, session = _manager_with_fake_tool()
-    result = json.loads(await manager.call_tool("t", None))
-    assert result == {"result": "ok"}
+    result = await manager.call_tool("t", None)
+    assert result == ToolOutcome(text="ok")
     assert session.calls == [("t", {})]
 
 
 async def test_call_tool_non_object_arguments_is_error() -> None:
     manager, session = _manager_with_fake_tool()
-    result = json.loads(await manager.call_tool("t", [1, 2]))
-    assert "must be a JSON object" in result["error"]
+    result = await manager.call_tool("t", [1, 2])
+    assert result.is_error and "must be a JSON object" in result.text
     assert session.calls == []
+
+
+# --- tool outcomes over the real stdio round trip ---------------------------
+
+
+async def test_multiline_text_unwrapped() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        outcome = await mgr.call_tool("lines", {})
+        assert outcome == ToolOutcome(text='line "one"\nline two')
+
+
+async def test_is_error_result() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        outcome = await mgr.call_tool("fail", {})
+        assert outcome == ToolOutcome(text="it failed", is_error=True)
+
+
+async def test_unknown_tool_is_error_outcome() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        outcome = await mgr.call_tool("nope", {})
+        assert outcome.is_error and "Unknown MCP tool: nope" in outcome.text
+
+
+async def test_image_rendered_as_one_line() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        outcome = await mgr.call_tool("image", {})
+        assert outcome.text == "[image mime=image/png bytes=4]"
+
+
+async def test_resource_link_in_links_and_readable() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        mgr._resources.clear()  # readable only via the link
+        outcome = await mgr.call_tool("link", {})
+        assert outcome.text == (
+            "[resource_link] test://greeting (greeting) — the greeting"
+        )
+        assert [(link.uri, link.name, link.server_name) for link in outcome.links] == [
+            ("test://greeting", "greeting", "test")
+        ]
+        assert await mgr.read_resource("test://greeting") == (
+            "Hello from the test resource."
+        )
+
+
+async def test_server_instructions_stored() -> None:
+    async with MCPManager(BUNDLED_SERVER) as mgr:
+        assert mgr.get_instructions() == {"test": "Test server: call echo before add."}
+
+
+def test_content_text_non_text_blocks() -> None:
+    from mcp.types import (
+        AudioContent,
+        BlobResourceContents,
+        EmbeddedResource,
+        TextResourceContents,
+    )
+
+    from mcp_minion.mcp_client import _content_text
+
+    content = [
+        AudioContent(type="audio", data="AAAAAA==", mime_type="audio/wav"),
+        EmbeddedResource(
+            type="resource",
+            resource=BlobResourceContents(
+                uri="app://b", blob="AAAA", mime_type="application/zip"
+            ),
+        ),
+        EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(
+                uri="app://t", text="body", mime_type="text/plain"
+            ),
+        ),
+    ]
+    assert _content_text(content).splitlines() == [
+        "[audio mime=audio/wav bytes=4]",
+        "[blob uri=app://b mime=application/zip bytes=3]",
+        "[resource uri=app://t mime=text/plain]",
+        "body",
+    ]
+
+
+# --- server launch options ---------------------------------------------------
+
+
+async def test_cwd_and_env_forwarded_unchanged(monkeypatch, tmp_path) -> None:
+    import mcp_minion.mcp_client as client_mod
+
+    seen = []
+
+    def fake_stdio_client(params, **kwargs):
+        seen.append(params)
+        raise OSError("not spawning in this test")
+
+    monkeypatch.setattr(client_mod, "stdio_client", fake_stdio_client)
+    env = {"ONLY_THIS": "1"}
+    manager = MCPManager(
+        {"s": {"command": "srv", "args": ["-x"], "env": env, "cwd": str(tmp_path)}}
+    )
+    with pytest.raises(RuntimeError, match="failed to start"):
+        await manager.__aenter__()
+    assert seen[0].env == env
+    assert str(seen[0].cwd) == str(tmp_path)
+    assert seen[0].args == ["-x"]

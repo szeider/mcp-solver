@@ -4,17 +4,15 @@ import argparse
 import asyncio
 import contextlib
 import json
-import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from mcp_minion import __version__
 from mcp_minion.agent import Agent, AgentConfig
 from mcp_minion.artifacts import extract_last_submission
+from mcp_minion.env import find_api_key
 from mcp_minion.logging import RunLogger
 from mcp_minion.mcp_client import MCPManager
 from mcp_minion.tools import create_default_registry
@@ -79,21 +77,17 @@ def render_tool_call(name: str, arguments: dict) -> str:
     return "\n".join(lines)
 
 
-def render_tool_result(text: str) -> str:
-    """A tool result, unwrapped and truncated for the console.
+def render_tool_result(text: str, is_error: bool = False) -> str:
+    """A tool result (step-record text), shortened for the console.
 
-    Unwraps the client's ``{"result": ...}`` envelope; renders kernel
-    payloads (stdout/stderr/success) as labeled blocks; long plain text
-    (e.g. a modeling template) collapses to its first line plus a size
-    note. The complete text is always in the run_*.json log.
+    Error outcomes are marked; kernel payloads (stdout/stderr/success) are
+    labeled blocks; long plain text (e.g. a modeling template) collapses to
+    its first line plus a size note. The complete text is always in the
+    run_*.json log.
     """
-    inner = text
-    try:
-        envelope = json.loads(text)
-        if isinstance(envelope, dict) and "result" in envelope:
-            inner = str(envelope["result"])
-    except (json.JSONDecodeError, TypeError):
-        pass
+    inner = text if isinstance(text, str) else str(text)
+    if is_error:
+        return "Result: ERROR\n" + _indent(_truncate(inner.strip(), _STREAM_LIMIT))
 
     payload = None
     with contextlib.suppress(json.JSONDecodeError, TypeError):
@@ -131,10 +125,78 @@ def render_tool_result(text: str) -> str:
     return f"Result: {plain}" if "\n" not in plain else "Result:\n" + _indent(plain)
 
 
-def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, str]:
-    """Load config and prompt from a run folder.
+# Top-level keys of config.json (the nested format).
+CONFIG_KEYS = ("model", "agent", "mcpServers", "files", "packages")
+# model.* keys that go into the request's extra_body.
+EXTRA_BODY_KEYS = ("reasoning", "provider", "top_k")
 
-    Supports both old flat format and new nested format.
+
+def _config_error(message: str) -> None:
+    print(f"Error: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def build_agent_config(data: dict[str, Any]) -> AgentConfig:
+    """AgentConfig from a nested config.json (``model``/``agent`` objects).
+
+    ``model.name`` is the model; ``model.reasoning``, ``model.provider``,
+    ``model.top_k`` and the entries of an explicit ``model.extra_body``
+    object go into ``extra_body`` (the named keys win on a clash);
+    ``model.request_timeout`` becomes ``request_timeout``; every other
+    ``model.*`` key is passed to the API call as is (``api_params``).
+    A flat config (pre-0.3 format) or any unknown top-level key is an error.
+    """
+    unknown = sorted(set(data) - set(CONFIG_KEYS))
+    model_cfg = data.get("model", {})
+    agent_cfg = data.get("agent", {})
+    if unknown or not isinstance(model_cfg, dict) or not isinstance(agent_cfg, dict):
+        detail = (
+            f"unknown top-level keys {unknown}"
+            if unknown
+            else "'model' and 'agent' must be objects"
+        )
+        _config_error(
+            f"config.json is not in the nested format ({detail}). Use"
+            ' {"model": {"name": ..., "temperature": ..., "max_tokens": ...},'
+            ' "agent": {"max_steps": ..., "max_total_tokens": ...},'
+            ' "mcpServers": {...}, "files": {"system": ...}, "packages": [...]};'
+            " the flat keys modelstring/max_steps/temperature are no longer read."
+        )
+
+    model_cfg = dict(model_cfg)
+    model_name = model_cfg.pop("name", _DEFAULTS.model)
+    extra_body = model_cfg.pop("extra_body", None) or {}
+    if not isinstance(extra_body, dict):
+        _config_error("config.json: model.extra_body must be an object")
+    extra_body = dict(extra_body)
+    for key in EXTRA_BODY_KEYS:
+        if key in model_cfg:
+            extra_body[key] = model_cfg.pop(key)
+    request_timeout = model_cfg.pop("request_timeout", None)
+    max_result = agent_cfg.get("max_tool_result_chars", _DEFAULTS.max_tool_result_chars)
+    if (
+        isinstance(max_result, bool)
+        or not isinstance(max_result, int)
+        or max_result < 0
+    ):
+        _config_error(
+            "config.json: agent.max_tool_result_chars must be an integer >= 0"
+            f" (0 disables the cut), got {max_result!r}"
+        )
+
+    return AgentConfig(
+        model=model_name,
+        max_steps=agent_cfg.get("max_steps", _DEFAULTS.max_steps),
+        api_params=model_cfg,  # temperature, max_tokens, etc.
+        max_total_tokens=agent_cfg.get("max_total_tokens", _DEFAULTS.max_total_tokens),
+        max_tool_result_chars=max_result,
+        extra_body=extra_body or None,
+        request_timeout=request_timeout,
+    )
+
+
+def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, str]:
+    """Load config and prompt from a run folder (nested config format only).
 
     Args:
         folder: Path to the run folder containing config.json, project.md, and task.md
@@ -157,45 +219,14 @@ def load_run_folder(folder: Path) -> tuple[AgentConfig, dict[str, Any] | None, s
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON in {config_path}: {e}", file=sys.stderr)
         sys.exit(1)
+    if not isinstance(data, dict):
+        _config_error(f"{config_path} must hold a JSON object")
 
-    # Optional top-level keys shared by both formats.
+    config = build_agent_config(data)
+    mcp_servers = data.get("mcpServers") or None
     files_cfg = data.get("files") or {}
     packages = data.get("packages") or []
     system_rel = files_cfg.get("system")
-
-    # Detect format: new has nested "model" dict, old has flat "modelstring"
-    if "model" in data and isinstance(data["model"], dict):
-        # New format
-        model_cfg = data.get("model", {})
-        agent_cfg = data.get("agent", {})
-        mcp_servers = data.get("mcpServers")
-
-        # Extract model name, rest goes to api_params
-        model_name = model_cfg.pop("name", _DEFAULTS.model)
-        config = AgentConfig(
-            model=model_name,
-            max_steps=agent_cfg.get("max_steps", _DEFAULTS.max_steps),
-            api_params=model_cfg,  # temperature, max_tokens, etc.
-            max_total_tokens=agent_cfg.get(
-                "max_total_tokens", _DEFAULTS.max_total_tokens
-            ),
-        )
-    else:
-        # Old flat format (backward compat)
-        model = data.pop("modelstring", _DEFAULTS.model)
-        max_steps = data.pop("max_steps", _DEFAULTS.max_steps)
-        max_total_tokens = data.pop("max_total_tokens", _DEFAULTS.max_total_tokens)
-        # Keep shared/structural keys out of api_params — everything left in
-        # `data` goes verbatim into the API request.
-        for key in ("files", "packages", "mcpServers", "model", "agent"):
-            data.pop(key, None)
-        config = AgentConfig(
-            model=model,
-            max_steps=max_steps,
-            api_params=data,
-            max_total_tokens=max_total_tokens,
-        )
-        mcp_servers = None
 
     # Optional system prompt file (files.system), resolved relative to folder.
     if system_rel:
@@ -253,8 +284,8 @@ async def run_agent_async(
     # Create logger (saves to run folder)
     logger = None if args.no_log else RunLogger(log_dir=args.folder)
 
-    # Create tool registry with built-in tools
-    tools = create_default_registry()
+    # The arithmetic demo tools only when no MCP server is configured.
+    tools = None if mcp_servers else create_default_registry()
 
     # Start MCP servers if configured; their stderr (and their children's,
     # e.g. kernel processes) goes to a per-folder log, not the console.
@@ -304,7 +335,9 @@ async def run_agent_async(
                 if step.get("tool_calls"):
                     for tc in step["tool_calls"]:
                         print(render_tool_call(tc["name"], tc["arguments"]))
-                        print(render_tool_result(tc["result"]))
+                        print(
+                            render_tool_result(tc["result"], tc.get("is_error", False))
+                        )
             print("\n" + "=" * 40)
             print(f"Tool calls made: {result.tool_calls_made}")
             print("=" * 40)
@@ -353,17 +386,25 @@ Run Folder Structure:
   config.json   Model and agent configuration
                 - model.name: OpenRouter model ID (e.g., "google/gemini-3-flash-preview")
                 - model.temperature, model.max_tokens: API parameters
+                - model.reasoning, model.provider, model.top_k,
+                  model.extra_body: sent in the request body (extra_body)
+                - model.request_timeout: LLM request timeout in seconds
                 - agent.max_steps: Maximum reasoning steps (default: 10)
+                - agent.max_tool_result_chars: Longer tool results are cut
+                  (head + tail) for the model (default: 64000, 0 = never)
                 - agent.max_total_tokens: Per-run cap on cumulative
                   input+output tokens; the run stops after the step that
                   exceeds it (default: absent = unlimited)
-                - mcpServers: Optional MCP server configurations (a server
-                  that fails to start aborts the run)
+                - mcpServers: Optional MCP servers, each with command, args,
+                  env, cwd (a server that fails to start aborts the run;
+                  without servers the arithmetic demo tools are offered)
                 - files.system: Optional path to a system-prompt markdown file
                 - packages: Optional list of packages for python_exec kernels
   project.md    General instructions (optional, shared context)
   task.md       Specific task for this run (required)
   run_*.json    Log files (created automatically, gitignored)
+  submission.py Last accepted submit_code program (if any)
+  server.log    MCP servers' stderr (when servers are configured)
 
 Environment:
   OPENROUTER_API_KEY  Required. An already-set environment variable wins;
@@ -415,11 +456,8 @@ More info: https://github.com/szeider/mcp-solver""",
         print(f"Error: {args.folder} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    # Load environment variables (check run folder, then ~/.mcp-minion)
-    load_dotenv(args.folder / ".env")  # Run folder .env
-    load_dotenv(Path.home() / ".mcp-minion")  # Fallback to ~/.mcp-minion
-
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    # Environment first, then FOLDER/.env, then ~/.mcp-minion.
+    api_key = find_api_key(folder=args.folder)
     if not api_key:
         print("Error: OPENROUTER_API_KEY not found", file=sys.stderr)
         print(

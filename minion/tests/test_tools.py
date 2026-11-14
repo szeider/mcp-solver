@@ -1,9 +1,8 @@
 """Unit tests for tools module."""
 
-import json
-
 import pytest
 
+from mcp_minion import ToolOutcome
 from mcp_minion.tools import (
     ADD_TOOL,
     DIVIDE_TOOL,
@@ -58,25 +57,18 @@ class TestTool:
         assert "parameters" in result["function"]
 
     def test_execute_success(self) -> None:
-        result = ADD_TOOL.execute(a=2, b=3)
-        parsed = json.loads(result)
-        assert parsed == {"result": 5}
+        assert ADD_TOOL.execute(a=2, b=3) == ToolOutcome(text="5")
 
     def test_execute_error(self) -> None:
         result = DIVIDE_TOOL.execute(a=5, b=0)
-        parsed = json.loads(result)
-        assert "error" in parsed
-        assert "zero" in parsed["error"].lower()
+        assert result.is_error
+        assert "zero" in result.text.lower()
 
     def test_execute_multiply(self) -> None:
-        result = MULTIPLY_TOOL.execute(a=7, b=8)
-        parsed = json.loads(result)
-        assert parsed == {"result": 56}
+        assert MULTIPLY_TOOL.execute(a=7, b=8) == ToolOutcome(text="56")
 
     def test_execute_subtract(self) -> None:
-        result = SUBTRACT_TOOL.execute(a=10, b=4)
-        parsed = json.loads(result)
-        assert parsed == {"result": 6}
+        assert SUBTRACT_TOOL.execute(a=10, b=4) == ToolOutcome(text="6")
 
 
 class TestToolRegistry:
@@ -134,6 +126,13 @@ class TestCustomTool:
             function=greet,
         )
 
-        result = tool.execute(name="World")
-        parsed = json.loads(result)
-        assert parsed == {"result": "Hello, World!"}
+        # A string return value is the text as is (not JSON-encoded).
+        assert tool.execute(name="World") == ToolOutcome(text="Hello, World!")
+
+    def test_non_json_value_falls_back_to_str(self) -> None:
+        tool = Tool(name="s", description="", parameters={}, function=lambda: {1, 2})
+        assert tool.execute() == ToolOutcome(text="{1, 2}")
+
+    def test_dict_value_json_encoded(self) -> None:
+        tool = Tool(name="d", description="", parameters={}, function=lambda: {"a": 1})
+        assert tool.execute() == ToolOutcome(text='{"a": 1}')

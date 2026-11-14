@@ -20,10 +20,14 @@ import json
 import sys
 from pathlib import Path
 
-from mcp_solver.agent.cli import _local_checkout
-from mcp_solver.templates import SOLVERS
+from mcp_solver.agent.cli import resolve_model
+from mcp_solver.agent.engine import local_checkout
+from mcp_solver.templates import SOLVERS, get_template
 
 DEFAULT_MODEL = "openai/gpt-5.6-terra"
+
+# Floor for the agent's tool-result cap in generated run folders.
+MIN_TOOL_RESULT_CHARS = 64000
 
 # Prepended to every problem statement: the agent must use the requested
 # backend and finish with a submission. The backend-substitution clause
@@ -52,11 +56,54 @@ SOLVER_MARKERS: dict[str, list[str]] = {
 }
 
 
-def build_config(repo_root: Path, model: str = DEFAULT_MODEL) -> dict:
-    """The minion config.json contents for solving via mcp-solver-serve."""
+def model_block(model: str) -> dict:
+    """The config.json ``model`` object for *model*, resolved like the CLI.
+
+    *model* is an engine alias, a model .json file or a full OpenRouter ID
+    (see ``cli.resolve_model``; a full ID carries no settings). Sampling
+    parameters go in as is; ``reasoning``/``provider``/``top_k`` and
+    ``request_timeout`` use the keys of minion's run-folder format.
+    Raises ValueError for an unknown alias, and for a config with
+    ``base_url`` or ``api_key_env``, which run folders cannot express
+    (minion would pass them to the API call as request parameters).
+    """
+    settings = resolve_model(model)
+    if settings.base_url or settings.api_key_env:
+        raise ValueError(
+            f"model {model!r} sets base_url/api_key_env, which mcp-minion"
+            " run folders do not support; use an OpenRouter model"
+        )
+    block: dict = {"name": settings.model, **settings.api_params}
+    block.update(settings.extra_body)
+    if settings.request_timeout is not None:
+        block["request_timeout"] = settings.request_timeout
+    return block
+
+
+def tool_result_cap(solver: str) -> int:
+    """The ``agent.max_tool_result_chars`` for a run folder solving with *solver*.
+
+    On the server path select_backend returns the whole backend template as
+    one tool result (clingo: about 54,000 characters), so the cap is twice
+    the template length rounded up to the next thousand, and at least
+    MIN_TOOL_RESULT_CHARS, independent of minion's default.
+    """
+    doubled = 2 * len(get_template(solver))
+    return max(MIN_TOOL_RESULT_CHARS, -(-doubled // 1000) * 1000)
+
+
+def build_config(
+    repo_root: Path, model: str = DEFAULT_MODEL, solver: str | None = None
+) -> dict:
+    """The minion config.json contents for solving via mcp-solver-serve.
+
+    With *solver*, the tool-result cap is sized for that backend's template
+    (see tool_result_cap); without it, MIN_TOOL_RESULT_CHARS.
+    """
+    cap = tool_result_cap(solver) if solver else MIN_TOOL_RESULT_CHARS
     return {
-        "model": {"name": model, "temperature": 0, "max_tokens": 8192},
-        "agent": {"max_steps": 30},
+        "model": model_block(model),
+        "agent": {"max_steps": 30, "max_tool_result_chars": cap},
         "mcpServers": {
             "mcp-solver": {
                 "command": "uv",
@@ -86,7 +133,7 @@ def write_run_folder(
     the folder are left untouched.
     """
     dest.mkdir(parents=True, exist_ok=True)
-    config = build_config(repo_root, model)
+    config = build_config(repo_root, model, solver)
     (dest / "config.json").write_text(
         json.dumps(config, indent=2) + "\n", encoding="utf-8"
     )
@@ -116,11 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help="agent model, full OpenRouter ID (default: %(default)s)",
+        help="agent model: an engine alias, a model .json file, or a full"
+        " OpenRouter ID (default: %(default)s)",
     )
     args = parser.parse_args(argv)
 
-    root = _local_checkout()
+    root = local_checkout()
     if root is None:
         parser.error(
             "requires a source checkout of mcp-solver"
@@ -143,13 +191,16 @@ def main(argv: list[str] | None = None) -> int:
             f" available: {', '.join(available) or '(none)'}"
         )
 
-    folder = write_run_folder(
-        Path(args.dest).expanduser(),
-        args.solver,
-        problem_md.read_text(encoding="utf-8"),
-        Path(root),
-        model=args.model,
-    )
+    try:
+        folder = write_run_folder(
+            Path(args.dest).expanduser(),
+            args.solver,
+            problem_md.read_text(encoding="utf-8"),
+            Path(root),
+            model=args.model,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     print(f"run folder ready: {folder}")
     print(f"run it: uv run --project {root} --extra agent mcp-minion -v {folder}")
     return 0

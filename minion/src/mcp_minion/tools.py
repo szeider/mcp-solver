@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mcp_minion.mcp_client import ToolOutcome
+
 
 @dataclass
 class Tool:
@@ -26,13 +28,22 @@ class Tool:
             },
         }
 
-    def execute(self, **kwargs: Any) -> str:
-        """Execute the tool and return result as string."""
+    def execute(self, **kwargs: Any) -> ToolOutcome:
+        """Execute the tool; an exception becomes an error outcome.
+
+        A string return value is the outcome text as is; any other value is
+        JSON-encoded (falling back to ``str`` for non-JSON values).
+        """
         try:
             result = self.function(**kwargs)
-            return json.dumps({"result": result})
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return ToolOutcome(text=f"Tool '{self.name}' failed: {e}", is_error=True)
+        if isinstance(result, str):
+            return ToolOutcome(text=result)
+        try:
+            return ToolOutcome(text=json.dumps(result))
+        except (TypeError, ValueError):
+            return ToolOutcome(text=str(result))
 
 
 class ToolRegistry:

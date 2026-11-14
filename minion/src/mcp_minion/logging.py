@@ -75,6 +75,11 @@ class RunLogger:
         self._log_data["prompt"] = prompt
         self._write()
 
+    def log_system_prompt(self, system_prompt: str) -> None:
+        """Log the system prompt the model receives (once per run)."""
+        self._log_data["system_prompt"] = system_prompt
+        self._write()
+
     def log_step_start(self, step_num: int) -> None:
         """Log the start of a new step."""
         self._log_data["steps"].append(
@@ -139,8 +144,9 @@ class RunLogger:
         tool_args: dict[str, Any],
         tool_result: str,
         tool_call_id: str,
+        is_error: bool = False,
     ) -> None:
-        """Log a tool call with its input and output."""
+        """Log a tool call with its input and full (untruncated) output."""
         if self._log_data["steps"]:
             self._log_data["steps"][-1]["tool_calls"].append(
                 {
@@ -149,9 +155,33 @@ class RunLogger:
                     "name": tool_name,
                     "arguments": tool_args,
                     "result": tool_result,
+                    "is_error": is_error,
                 }
             )
             self._write()
+
+    def log_kernel_setup(
+        self,
+        arguments: dict[str, Any],
+        result: str,
+        is_error: bool,
+        fallback_from: str | None = None,
+    ) -> None:
+        """Log the automatic python_reset made before the first step.
+
+        ``fallback_from`` is the result of a first reset of a tracked kernel
+        the server no longer knew, after which a new kernel was started.
+        """
+        entry: dict[str, Any] = {
+            "timestamp": self._timestamp(),
+            "arguments": arguments,
+            "result": result,
+            "is_error": is_error,
+        }
+        if fallback_from is not None:
+            entry["fallback_from"] = fallback_from
+        self._log_data["kernel_setup"] = entry
+        self._write()
 
     def log_step_content(self, content: str | None) -> None:
         """Log the assistant's content for the current step."""

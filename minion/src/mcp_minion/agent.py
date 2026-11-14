@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import traceback
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 
 from mcp_minion.logging import RESERVED_REQUEST_KEYS, RunLogger
+from mcp_minion.mcp_client import ToolOutcome
 from mcp_minion.tools import ToolRegistry
 
 if TYPE_CHECKING:
@@ -32,6 +34,15 @@ TRUNCATION_NOTICE = (
     " Continue, and be more concise."
 )
 
+
+# Kernel-server tools (ipython_mcp from agentic-python-coder) that take a
+# kernel_id; the tracked kernel_id is injected into calls that lack one.
+KERNEL_TOOLS = frozenset(
+    ("python_exec", "python_reset", "python_status", "python_interrupt")
+)
+
+# Prefix of a tool message whose outcome is an error.
+ERROR_PREFIX = "ERROR: "
 
 _MISSING = object()
 
@@ -78,6 +89,32 @@ def _echo_arguments(raw: Any) -> str:
         return json.dumps(raw)
     except (TypeError, ValueError):
         return json.dumps(str(raw))
+
+
+def truncate_for_model(text: str, limit: int) -> str:
+    """Cut ``text`` to about ``limit`` characters: head, marker line, tail.
+
+    Roughly 3/4 of the budget goes to the head and 1/4 to the tail. Text
+    within the limit, and any text when ``limit`` <= 0, is returned as is.
+    """
+    if limit <= 0 or len(text) <= limit:
+        return text
+    head = limit * 3 // 4
+    tail = limit - head
+    cut = len(text) - head - tail
+    return f"{text[:head]}\n[... {cut} characters truncated ...]\n{text[-tail:]}"
+
+
+def merge_extra_body(user: dict[str, Any] | None) -> dict[str, Any]:
+    """The request's extra_body: user keys over ``{"usage": {"include": True}}``.
+
+    User keys win, except that ``usage.include`` stays on (OpenRouter usage
+    accounting, which reports the per-step cost).
+    """
+    body = dict(user or {})
+    usage = body.get("usage")
+    body["usage"] = {**(usage if isinstance(usage, dict) else {}), "include": True}
+    return body
 
 
 def _parse_tool_arguments(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
@@ -172,32 +209,88 @@ READ_RESOURCE_TOOL = {
 }
 
 
-def _extract_kernel_id(result: str) -> str | None:
-    """Pull a ``kernel_id`` out of a python_reset tool result, if present.
+def _reasoning_record(message: Any) -> dict[str, Any]:
+    """The reasoning fields an assistant message carries, for the records.
 
-    Supports both a flat payload ``{"kernel_id": "k1"}`` and the
-    double-encoded shape produced by :class:`MCPManager`, which wraps the
-    server's text output as ``{"result": "{\\"kernel_id\\": \\"k1\\"}"}``.
+    ``reasoning_details`` (a non-empty list, as OpenRouter returns it) and a
+    non-empty string ``reasoning`` are included unmodified when present.
     """
+    record: dict[str, Any] = {}
+    details = getattr(message, "reasoning_details", None)
+    if isinstance(details, list) and details:
+        record["reasoning_details"] = details
+    reasoning = getattr(message, "reasoning", None)
+    if isinstance(reasoning, str) and reasoning:
+        record["reasoning"] = reasoning
+    return record
+
+
+def _reasoning_replay(record: dict[str, Any]) -> dict[str, Any]:
+    """Reasoning to replay on the history message: the details list as is,
+    else the plain reasoning string, else nothing (no null keys)."""
+    if "reasoning_details" in record:
+        return {"reasoning_details": record["reasoning_details"]}
+    if "reasoning" in record:
+        return {"reasoning": record["reasoning"]}
+    return {}
+
+
+_DIST_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _package_key(entry: Any) -> str:
+    """Comparison key of a package spec: the normalized distribution name.
+
+    Extras and version specifiers are dropped and ``-``/``_``/``.`` runs are
+    treated alike, case-insensitively ("Python_SAT[pb]>=1" -> "python-sat").
+    Paths and URLs (anything with a slash or backslash, or starting with "."
+    or "~") are compared as plain strings.
+    """
+    text = str(entry).strip()
+    if "/" in text or "\\" in text or text.startswith((".", "~")):
+        return "raw:" + text
+    match = _DIST_NAME.match(text)
+    if match is None:
+        return "raw:" + text
+    return re.sub(r"[-_.]+", "-", match.group()).lower()
+
+
+def merge_packages(configured: list[Any], requested: list[Any]) -> list[Any]:
+    """The configured packages, then the requested ones they do not cover."""
+    merged = list(configured)
+    seen = {_package_key(p) for p in configured}
+    for entry in requested:
+        key = _package_key(entry)
+        if key not in seen:
+            seen.add(key)
+            merged.append(entry)
+    return merged
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    """``text`` parsed as a JSON object, or None."""
     try:
-        parsed = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError, RecursionError):
         return None
+    return parsed if isinstance(parsed, dict) else None
 
-    if not isinstance(parsed, dict):
+
+def _extract_kernel_id(outcome: ToolOutcome) -> str | None:
+    """The ``kernel_id`` of a successful python_reset outcome, if any."""
+    payload = _json_object(outcome.text)
+    if outcome.is_error or payload is None or payload.get("success") is False:
         return None
+    kernel_id = payload.get("kernel_id")
+    return kernel_id if isinstance(kernel_id, str) and kernel_id else None
 
-    inner = parsed.get("result")
-    if isinstance(inner, str) and inner:
-        try:
-            inner = json.loads(inner)
-        except (json.JSONDecodeError, TypeError):
-            inner = None
-    if isinstance(inner, dict) and inner.get("kernel_id"):
-        return inner["kernel_id"]
-    if parsed.get("kernel_id"):
-        return parsed["kernel_id"]
-    return None
+
+def _reset_failed(outcome: ToolOutcome) -> bool:
+    """True for an error outcome or a JSON object with ``success`` false."""
+    if outcome.is_error:
+        return True
+    payload = _json_object(outcome.text)
+    return payload is not None and payload.get("success") is False
 
 
 @dataclass
@@ -213,12 +306,22 @@ class AgentConfig:
     # Optional system-prompt body loaded from a run folder's files.system.
     # When set it replaces the built-in base prompt (see build_system_prompt).
     system_prompt: str | None = None
-    # Packages to preinstall in a python_exec kernel via an automatic
-    # python_reset before the first python_exec call.
+    # Packages for the kernel server: when set and a server offers
+    # python_reset, run_async calls python_reset with them before the first
+    # LLM call and ends the run if that fails.
     packages: list[str] = field(default_factory=list)
     # Hard cap on the cumulative input+output tokens of one run; 0 (the
     # default) means unlimited. Checked after each completed step.
     max_total_tokens: int = 0
+    # Provider-specific request fields (e.g. OpenRouter "reasoning",
+    # "provider", "top_k"), merged over {"usage": {"include": True}}; user
+    # keys win except that usage.include stays on.
+    extra_body: dict[str, Any] | None = None
+    # Per-request timeout in seconds for the LLM call (None: SDK default).
+    request_timeout: float | None = None
+    # Tool results longer than this are cut (head + tail) in the model's
+    # context; step records and the run log keep the full text. 0 disables.
+    max_tool_result_chars: int = 64000
 
 
 @dataclass
@@ -242,11 +345,13 @@ class AgentResult:
 
 
 class Agent:
-    """A ReAct agent that uses tools to solve problems."""
+    """A ReAct agent that uses tools to solve problems.
 
-    # Kept as a class attribute for backward compatibility; the canonical
-    # source is the module-level SYSTEM_PROMPT_BASE.
-    SYSTEM_PROMPT_BASE = SYSTEM_PROMPT_BASE
+    Client lifetime: if ``agent.client`` is set (injected by the caller),
+    every run uses it and never closes it; otherwise each run creates its own
+    ``AsyncOpenAI`` client in the running event loop and closes it when the
+    run ends, so one Agent can run several times.
+    """
 
     def __init__(
         self,
@@ -264,13 +369,13 @@ class Agent:
         # Optional progress hook, called with each step's step_info dict as
         # soon as the step completes (tool results included).
         self.on_step = on_step
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=self.config.base_url,
-        )
-        # Auto-tracked kernel state for python_exec / python_reset.
+        self._api_key = api_key
+        # Injected LLM client (any object with an async
+        # chat.completions.create); None: one AsyncOpenAI client per run.
+        self.client: Any = None
+        # Kernel tracked from python_reset results, injected into kernel
+        # tool calls that carry no kernel_id.
         self._kernel_id: str | None = None
-        self._reset_done: bool = False
 
     def _build_tool_sections(self) -> str:
         """Build tool documentation sections for the system prompt."""
@@ -279,18 +384,24 @@ class Agent:
 
         tools = self.mcp_manager.get_tools()
         resources = self.mcp_manager.get_resources()
-        if not tools and not resources:
+        instructions = self.mcp_manager.get_instructions()
+        if not tools and not resources and not instructions:
             return ""
 
-        # Group tools by server
+        # Group tools by server; a server with instructions but no tools
+        # still gets a section.
         servers: dict[str, list] = {}
         for tool in tools:
             servers.setdefault(tool.server_name, []).append(tool)
+        for server_name in instructions:
+            servers.setdefault(server_name, [])
 
         sections = ["You have access to the following tools:\n"]
 
         for server_name, server_tools in servers.items():
             sections.append(f"## {server_name}")
+            if instructions.get(server_name):
+                sections.append(f"Server instructions:\n{instructions[server_name]}\n")
             for tool in server_tools:
                 desc = (
                     tool.description.split("\n")[0]
@@ -316,7 +427,9 @@ class Agent:
 
         return "\n".join(sections) + "\n"
 
-    async def _create_with_retry(self, request_kwargs: dict[str, Any]) -> Any:
+    async def _create_with_retry(
+        self, client: Any, request_kwargs: dict[str, Any]
+    ) -> Any:
         """Call the completions API, retrying error responses.
 
         Raises LLMResponseError when retries are exhausted, so the run ends
@@ -328,7 +441,7 @@ class Agent:
             # and returns the raw text for a non-JSON content type (e.g. an
             # HTML error page); both are treated as error responses.
             try:
-                response = self.client.chat.completions.create(**request_kwargs)
+                response = await client.chat.completions.create(**request_kwargs)
             except json.JSONDecodeError as e:
                 detail = f"malformed JSON response: {e}"
             else:
@@ -364,14 +477,37 @@ class Agent:
 
     async def run_async(self, prompt: str) -> AgentResult:
         """Run the agent with the given prompt (async version)."""
+        client = self.client
+        owned = client is None
+        if owned:
+            client = AsyncOpenAI(api_key=self._api_key, base_url=self.config.base_url)
+        try:
+            return await self._run(prompt, client)
+        finally:
+            if owned:
+                await client.close()
+
+    async def _run(self, prompt: str, client: Any) -> AgentResult:
+        """One run with the given LLM client (see run_async)."""
         # Log configuration and prompt
         if self.logger:
             self.logger.log_config(asdict(self.config))
             self.logger.log_prompt(prompt)
 
+        # Kernel setup comes before any LLM call: a failure ends the run.
+        setup_error = await self._setup_kernel()
+        if setup_error:
+            if self.logger:
+                self.logger.log_error(setup_error)
+            return AgentResult(
+                answer=f"[Agent stopped: {setup_error}]", error=setup_error
+            )
+
         # Build system prompt with tool sections
         tool_sections = self._build_tool_sections()
         system_prompt = build_system_prompt(self.config.system_prompt, tool_sections)
+        if self.logger:
+            self.logger.log_system_prompt(system_prompt)
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -425,11 +561,13 @@ class Agent:
                     "model": self.config.model,
                     "messages": messages,
                     "extra_headers": extra_headers,
-                    # OpenRouter usage accounting: the response then carries
-                    # the actual cost (USD) in usage.cost.
-                    "extra_body": {"usage": {"include": True}},
+                    # OpenRouter usage accounting (always on): the response
+                    # then carries the actual cost (USD) in usage.cost.
+                    "extra_body": merge_extra_body(self.config.extra_body),
                     **safe_api_params,
                 }
+                if self.config.request_timeout is not None:
+                    request_kwargs["timeout"] = self.config.request_timeout
 
                 # Only include tools if available (avoid passing None)
                 if openai_tools:
@@ -441,7 +579,7 @@ class Agent:
                     self.logger.log_api_request(request_kwargs)
 
                 try:
-                    response = await self._create_with_retry(request_kwargs)
+                    response = await self._create_with_retry(client, request_kwargs)
                 except (OpenAIError, LLMResponseError) as e:
                     # Keep the steps so far: end the run with an error
                     # result instead of raising.
@@ -460,6 +598,10 @@ class Agent:
 
                 assistant_message = response.choices[0].message
                 finish_reason = response.choices[0].finish_reason
+                # Reasoning state, replayed unmodified on the history message
+                # (OpenRouter: reasoning blocks must match the model output).
+                reasoning = _reasoning_record(assistant_message)
+                replay = _reasoning_replay(reasoning)
 
                 # Accumulate token usage and cost (independent of logging).
                 step_cost = None
@@ -491,6 +633,7 @@ class Agent:
                             for tc in (assistant_message.tool_calls or [])
                         ],
                         "finish_reason": finish_reason,
+                        **reasoning,
                         "usage": {
                             "prompt_tokens": response.usage.prompt_tokens,
                             "completion_tokens": response.usage.completion_tokens,
@@ -515,6 +658,7 @@ class Agent:
                     "step": step_num + 1,
                     "content": assistant_message.content,
                     "tool_calls": None,
+                    **reasoning,
                 }
 
                 # Check if the model wants to use tools
@@ -539,6 +683,7 @@ class Agent:
                                 }
                                 for tc in assistant_message.tool_calls
                             ],
+                            **replay,
                         }
                     )
 
@@ -549,38 +694,40 @@ class Agent:
 
                         parsed_args, args_error = _parse_tool_arguments(tool_args_str)
                         if parsed_args is None:
-                            tool_result = json.dumps({"error": args_error})
+                            outcome = ToolOutcome(text=args_error, is_error=True)
                             tool_args = {"_raw": tool_args_str}
                         else:
                             tool_args = parsed_args
-                            tool_result = await self._execute_tool(tool_name, tool_args)
+                            outcome = await self._execute_tool(tool_name, tool_args)
 
                         tool_calls_made += 1
 
-                        # Log tool call
+                        # Log tool call (full text)
                         if self.logger:
                             self.logger.log_tool_call(
                                 tool_name=tool_name,
                                 tool_args=tool_args,
-                                tool_result=tool_result,
+                                tool_result=outcome.text,
                                 tool_call_id=tool_call.id,
+                                is_error=outcome.is_error,
                             )
 
-                        # Record tool call info
+                        # Record tool call info (full text)
                         step_info["tool_calls"].append(
                             {
                                 "name": tool_name,
                                 "arguments": tool_args,
-                                "result": tool_result,
+                                "result": outcome.text,
+                                "is_error": outcome.is_error,
                             }
                         )
 
-                        # Add tool result to message history
+                        # Add tool result to message history (bounded)
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
-                                "content": tool_result,
+                                "content": self._model_content(outcome),
                             }
                         )
 
@@ -593,6 +740,7 @@ class Agent:
                         {
                             "role": "assistant",
                             "content": assistant_message.content or "",
+                            **replay,
                         }
                     )
                     messages.append({"role": "user", "content": TRUNCATION_NOTICE})
@@ -686,68 +834,115 @@ class Agent:
                 self.logger.log_error(str(e), traceback.format_exc())
             raise
 
-    async def _execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> str:
-        """Execute a tool (built-in or MCP).
+    def _model_content(self, outcome: ToolOutcome) -> str:
+        """The tool message the model sees: bounded text, error-prefixed."""
+        text = truncate_for_model(outcome.text, self.config.max_tool_result_chars)
+        return ERROR_PREFIX + text if outcome.is_error else text
 
-        Handles automatic kernel setup for python_exec: on the first
-        python_exec call, if the config declares packages and no python_reset
-        has run yet, a python_reset (carrying those packages) is issued first
-        and any returned kernel_id is remembered and injected into later
-        python_exec calls.
+    async def _setup_kernel(self) -> str | None:
+        """Start the configured kernel before the first LLM call.
+
+        When ``config.packages`` is set and a server offers python_reset,
+        calls it with those packages and tracks the returned kernel_id.
+        Returns an error message if the reset failed, else None.
         """
-        # Auto kernel setup before the first python_exec.
-        if tool_name == "python_exec" and not self._reset_done:
-            self._reset_done = True  # attempt auto-reset at most once
-            if (
-                self.config.packages
-                and self.mcp_manager
-                and self.mcp_manager.has_tool("python_reset")
-            ):
-                reset_result = await self.mcp_manager.call_tool(
-                    "python_reset", {"packages": list(self.config.packages)}
-                )
-                self._kernel_id = _extract_kernel_id(reset_result)
-
-        # Inject the tracked kernel_id into python_exec if not already set.
+        if not (
+            self.config.packages
+            and self.mcp_manager
+            and self.mcp_manager.has_tool("python_reset")
+        ):
+            return None
+        packages = list(self.config.packages)
+        # A kernel tracked from an earlier run of this Agent is restarted with
+        # the packages rather than abandoned (the server caps live kernels).
+        arguments: dict[str, Any] = {"packages": packages}
+        if self._kernel_id:
+            arguments["kernel_id"] = self._kernel_id
+        outcome = await self.mcp_manager.call_tool("python_reset", dict(arguments))
+        fallback_from = None
         if (
-            tool_name == "python_exec"
+            "kernel_id" in arguments
+            and _reset_failed(outcome)
+            and "not found" in outcome.text.lower()
+        ):
+            # The server no longer knows the tracked kernel: start a new one.
+            fallback_from = outcome.text
+            self._kernel_id = None
+            arguments = {"packages": packages}
+            outcome = await self.mcp_manager.call_tool("python_reset", dict(arguments))
+        if self.logger:
+            self.logger.log_kernel_setup(
+                arguments, outcome.text, outcome.is_error, fallback_from
+            )
+        if _reset_failed(outcome):
+            return _one_line(
+                f"kernel setup failed: python_reset with packages {packages}"
+                f" returned an error: {outcome.text}"
+            )
+        self._kernel_id = _extract_kernel_id(outcome)
+        return None
+
+    async def _execute_tool(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> ToolOutcome:
+        """Execute a tool (MCP, built-in read_resource, or registry tool).
+
+        Kernel convenience: a python_reset with a non-empty ``packages`` list
+        gets the configured packages first (see ``merge_packages``); a kernel
+        tool call without a kernel_id gets the tracked one, so a python_reset issued by the model restarts the same
+        kernel (keeping its packages) instead of creating a new one; a
+        successful python_reset that returns another kernel_id switches the
+        tracked kernel.
+        """
+        is_mcp = self.mcp_manager is not None and self.mcp_manager.has_tool(tool_name)
+
+        if (
+            is_mcp
+            and tool_name in KERNEL_TOOLS
             and self._kernel_id
             and "kernel_id" not in tool_args
         ):
             tool_args["kernel_id"] = self._kernel_id
 
-        # Built-in resource access (only when no server claims the name).
+        # A model reset with its own package list must not drop the
+        # configured packages (extras, local helper packages).
         if (
-            tool_name == "read_resource"
-            and self.mcp_manager
-            and not self.mcp_manager.has_tool("read_resource")
+            is_mcp
+            and tool_name == "python_reset"
+            and self.config.packages
+            and isinstance(tool_args.get("packages"), list)
+            and tool_args["packages"]
         ):
+            tool_args["packages"] = merge_packages(
+                self.config.packages, tool_args["packages"]
+            )
+
+        if is_mcp:
+            outcome = await self.mcp_manager.call_tool(tool_name, tool_args)
+            if tool_name == "python_reset":
+                kernel_id = _extract_kernel_id(outcome)
+                if kernel_id:
+                    self._kernel_id = kernel_id
+            return outcome
+
+        # Built-in resource access (only when no server claims the name).
+        if tool_name == "read_resource" and self.mcp_manager is not None:
+            uri = tool_args.get("uri")
+            if not isinstance(uri, str) or not uri:
+                return ToolOutcome(
+                    text="read_resource requires a 'uri' string argument",
+                    is_error=True,
+                )
             try:
-                text = await self.mcp_manager.read_resource(tool_args["uri"])
+                text = await self.mcp_manager.read_resource(uri)
             except Exception as e:
-                return json.dumps({"error": f"read_resource failed: {e}"})
-            return json.dumps({"result": text})
+                return ToolOutcome(text=f"read_resource failed: {e}", is_error=True)
+            return ToolOutcome(text=text)
 
-        # Check MCP tools first
-        if self.mcp_manager and self.mcp_manager.has_tool(tool_name):
-            result = await self.mcp_manager.call_tool(tool_name, tool_args)
-        else:
-            # Check built-in tools
-            tool = self.tools.get(tool_name) if self.tools else None
-            if tool is not None:
-                try:
-                    result = tool.execute(**tool_args)
-                except Exception as e:
-                    result = json.dumps({"error": f"Tool '{tool_name}' failed: {e}"})
-            else:
-                result = json.dumps({"error": f"Unknown tool: {tool_name}"})
-
-        # An explicit python_reset also satisfies the "reset happened" guard
-        # and updates the tracked kernel_id.
-        if tool_name == "python_reset":
-            self._reset_done = True
-            kernel_id = _extract_kernel_id(result)
-            if kernel_id:
-                self._kernel_id = kernel_id
-
-        return result
+        tool = self.tools.get(tool_name) if self.tools else None
+        if tool is None:
+            return ToolOutcome(text=f"Unknown tool: {tool_name}", is_error=True)
+        try:
+            return tool.execute(**tool_args)
+        except Exception as e:
+            return ToolOutcome(text=f"Tool '{tool_name}' failed: {e}", is_error=True)

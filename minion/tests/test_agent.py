@@ -108,7 +108,7 @@ def _tool_call(name="add", arguments='{"a": 1, "b": 2}'):
 
 
 class FakeClient:
-    """Stands in for the OpenAI client; returns canned responses in order.
+    """Stands in for the AsyncOpenAI client; returns canned responses in order.
 
     An exception instance in the list is raised instead of returned.
     """
@@ -118,8 +118,9 @@ class FakeClient:
         self.requests: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
-    def _create(self, **kwargs):
-        self.requests.append(kwargs)
+    async def _create(self, **kwargs):
+        # Snapshot the messages: the agent keeps appending to the same list.
+        self.requests.append({**kwargs, "messages": list(kwargs.get("messages", []))})
         item = self._responses.pop(0)
         if isinstance(item, BaseException):
             raise item
@@ -283,6 +284,9 @@ class FakeResourceManager:
     def get_tools(self):
         return []
 
+    def get_instructions(self):
+        return {}
+
     def get_resources(self):
         from mcp_minion.mcp_client import MCPResourceInfo
 
@@ -302,21 +306,20 @@ class FakeResourceManager:
 
 
 async def test_read_resource_tool_routes_to_manager() -> None:
-    import json
+    from mcp_minion import ToolOutcome
 
     mcp = FakeResourceManager()
     agent = Agent(api_key="k", tools=None, mcp_manager=mcp)
     result = await agent._execute_tool("read_resource", {"uri": "app://guide"})
-    assert json.loads(result) == {"result": "guide text"}
+    assert result == ToolOutcome(text="guide text")
     assert mcp.read_uris == ["app://guide"]
 
 
 async def test_read_resource_missing_uri_is_error() -> None:
-    import json
-
     agent = Agent(api_key="k", tools=None, mcp_manager=FakeResourceManager())
     result = await agent._execute_tool("read_resource", {})
-    assert "error" in json.loads(result)
+    assert result.is_error
+    assert "uri" in result.text
 
 
 def test_tool_sections_list_resources() -> None:
@@ -491,7 +494,6 @@ def _recording_registry():
 
 @pytest.mark.parametrize("raw", ["", None, "  "])
 async def test_empty_tool_arguments_become_empty_dict(raw) -> None:
-    import json
 
     registry, seen = _recording_registry()
     agent = _make_agent(
@@ -506,7 +508,8 @@ async def test_empty_tool_arguments_become_empty_dict(raw) -> None:
     assert seen == [{}]
     call = result.steps[0]["tool_calls"][0]
     assert call["arguments"] == {}
-    assert json.loads(call["result"]) == {"result": "pong"}
+    assert call["result"] == "pong"
+    assert call["is_error"] is False
     # The echoed assistant message never carries null arguments.
     echoed = agent.client.requests[1]["messages"][2]["tool_calls"][0]
     assert echoed["function"]["arguments"] == "{}"
@@ -514,7 +517,6 @@ async def test_empty_tool_arguments_become_empty_dict(raw) -> None:
 
 @pytest.mark.parametrize("raw", ["[1, 2]", "42", '"text"', "null"])
 async def test_non_object_tool_arguments_are_error_result(raw) -> None:
-    import json
 
     registry, seen = _recording_registry()
     agent = _make_agent(
@@ -529,7 +531,8 @@ async def test_non_object_tool_arguments_are_error_result(raw) -> None:
     assert result.answer == "done"
     assert seen == []
     call = result.steps[0]["tool_calls"][0]
-    assert "must be a JSON object" in json.loads(call["result"])["error"]
+    assert "must be a JSON object" in call["result"]
+    assert call["is_error"] is True
     assert call["arguments"] == {"_raw": raw}
 
 
@@ -612,6 +615,446 @@ async def test_non_string_non_dict_tool_arguments_are_error_result(raw) -> None:
     assert result.answer == "done"
     assert seen == []
     call = result.steps[0]["tool_calls"][0]
-    assert "must be a JSON object" in json.loads(call["result"])["error"]
+    assert "must be a JSON object" in call["result"]
+    assert call["is_error"] is True
     echoed = agent.client.requests[1]["messages"][2]["tool_calls"][0]
     assert echoed["function"]["arguments"] == json.dumps(raw)
+
+
+# --- tool outcomes reach the model as plain text (item A) -------------------
+
+
+class FakeToolManager:
+    """MCP manager stub with fixed tool outcomes and optional instructions."""
+
+    def __init__(self, outcomes, instructions=None, tools=None):
+        self._outcomes = outcomes
+        self._instructions = instructions or {}
+        self._tool_infos = tools or []
+        self.calls: list[tuple[str, dict]] = []
+
+    def has_tool(self, name):
+        return name in self._outcomes
+
+    def get_tools(self):
+        return list(self._tool_infos)
+
+    def get_resources(self):
+        return []
+
+    def get_instructions(self):
+        return dict(self._instructions)
+
+    def get_openai_tools(self):
+        return [
+            {
+                "type": "function",
+                "function": {"name": n, "description": "", "parameters": {}},
+            }
+            for n in self._outcomes
+        ]
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, dict(arguments)))
+        return self._outcomes[name]
+
+
+def _agent_with_manager(manager, responses, config=None):
+    agent = Agent(
+        api_key="k", tools=None, config=config or AgentConfig(), mcp_manager=manager
+    )
+    agent.client = FakeClient(responses)
+    return agent
+
+
+async def test_multiline_tool_text_reaches_model_unescaped() -> None:
+    from mcp_minion import ToolOutcome
+
+    text = 'line "one"\nline two'
+    manager = FakeToolManager({"t": ToolOutcome(text=text)})
+    agent = _agent_with_manager(
+        manager,
+        [_response(tool_calls=[_tool_call(name="t", arguments="{}")]), _response("ok")],
+    )
+    result = await agent.run_async("hi")
+    tool_msg = agent.client.requests[1]["messages"][-1]
+    assert tool_msg["role"] == "tool"
+    assert tool_msg["content"] == text  # no JSON envelope, no escaping
+    call = result.steps[0]["tool_calls"][0]
+    assert call == {"name": "t", "arguments": {}, "result": text, "is_error": False}
+
+
+async def test_error_outcome_prefixed_for_model(tmp_path) -> None:
+    import json as json_mod
+
+    from mcp_minion import RunLogger, ToolOutcome
+
+    logger = RunLogger(log_dir=tmp_path)
+    manager = FakeToolManager({"t": ToolOutcome(text="it failed", is_error=True)})
+    agent = _agent_with_manager(
+        manager,
+        [_response(tool_calls=[_tool_call(name="t", arguments="{}")]), _response("ok")],
+    )
+    agent.logger = logger
+    result = await agent.run_async("hi")
+    assert agent.client.requests[1]["messages"][-1]["content"] == "ERROR: it failed"
+    call = result.steps[0]["tool_calls"][0]
+    assert call["result"] == "it failed" and call["is_error"] is True
+    logged = json_mod.loads(logger.log_path.read_text())["steps"][0]["tool_calls"][0]
+    assert logged["result"] == "it failed" and logged["is_error"] is True
+
+
+async def test_registry_tool_outcome_text() -> None:
+    from mcp_minion.tools import create_default_registry
+
+    agent = _make_agent([_response(tool_calls=[_tool_call()]), _response("done")])
+    agent.tools = create_default_registry()
+    result = await agent.run_async("hi")
+    assert result.steps[0]["tool_calls"][0]["result"] == "3"
+    assert agent.client.requests[1]["messages"][-1]["content"] == "3"
+
+
+async def test_unknown_tool_is_error_outcome() -> None:
+    agent = Agent(api_key="k", tools=None)
+    outcome = await agent._execute_tool("nope", {})
+    assert outcome.is_error and "Unknown tool: nope" in outcome.text
+
+
+# --- request options (item B) and async client (item G) ---------------------
+
+
+async def test_extra_body_merged_over_usage_include() -> None:
+    config = AgentConfig(
+        extra_body={
+            "reasoning": {"effort": "high"},
+            "usage": {"include": False, "other": 1},
+        },
+        request_timeout=42.0,
+    )
+    agent = _make_agent([_response(content="done")], config=config)
+    await agent.run_async("hi")
+    request = agent.client.requests[0]
+    assert request["extra_body"] == {
+        "reasoning": {"effort": "high"},
+        "usage": {"include": True, "other": 1},
+    }
+    assert request["timeout"] == 42.0
+
+
+async def test_default_request_has_usage_only_and_no_timeout() -> None:
+    agent = _make_agent([_response(content="done")])
+    await agent.run_async("hi")
+    request = agent.client.requests[0]
+    assert request["extra_body"] == {"usage": {"include": True}}
+    assert "timeout" not in request
+
+
+def test_merge_extra_body_does_not_mutate_input() -> None:
+    from mcp_minion.agent import merge_extra_body
+
+    user = {"usage": {"include": False}}
+    assert merge_extra_body(user) == {"usage": {"include": True}}
+    assert user == {"usage": {"include": False}}
+    assert merge_extra_body(None) == {"usage": {"include": True}}
+
+
+# --- per-run client lifetime (review R1) -------------------------------------
+
+
+def _chat_json(content="done"):
+    return {
+        "id": "r",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "m",
+        "choices": [
+            {
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": content},
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def recording_factory(monkeypatch):
+    """Replace AsyncOpenAI with real clients on an httpx mock transport.
+
+    Each created client is recorded; the handler answers each request with
+    the next item of ``factory.replies`` (a dict body, or an int status).
+    """
+    import httpx
+    from openai import AsyncOpenAI
+
+    import mcp_minion.agent as agent_mod
+
+    created = []
+    replies: list = []
+
+    def handler(request):
+        reply = replies.pop(0) if replies else _chat_json()
+        if isinstance(reply, int):
+            return httpx.Response(reply, json={"error": {"message": "bad"}})
+        return httpx.Response(200, json=reply)
+
+    def factory(**kwargs):
+        client = AsyncOpenAI(
+            **kwargs,
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(agent_mod, "AsyncOpenAI", factory)
+    return SimpleNamespace(created=created, replies=replies)
+
+
+def test_two_sync_runs_on_one_agent(recording_factory) -> None:
+    agent = Agent(api_key="k", tools=None)
+    assert agent.client is None
+    assert agent.run("one").answer == "done"
+    assert agent.run("two").answer == "done"
+    assert len(recording_factory.created) == 2
+    assert all(c.is_closed() for c in recording_factory.created)
+    assert agent.client is None
+
+
+def test_created_client_closed_after_error_run(recording_factory) -> None:
+    recording_factory.replies.append(400)
+    agent = Agent(api_key="k", tools=None)
+    result = agent.run("hi")
+    assert result.error is not None and "BadRequestError" in result.error
+    assert recording_factory.created[0].is_closed()
+
+
+def test_created_client_closed_after_exception(monkeypatch, recording_factory) -> None:
+    agent = Agent(api_key="k", tools=None)
+
+    async def boom(prompt, client):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(agent, "_run", boom)
+    with pytest.raises(RuntimeError):
+        agent.run("hi")
+    assert recording_factory.created[0].is_closed()
+
+
+def test_injected_client_used_and_not_closed(recording_factory) -> None:
+    closed = []
+    fake = FakeClient([_response(content="a"), _response(content="b")])
+
+    async def close():
+        closed.append(True)
+
+    fake.close = close
+    agent = Agent(api_key="k", tools=None)
+    agent.client = fake
+    assert agent.run("one").answer == "a"
+    assert agent.run("two").answer == "b"
+    assert closed == []
+    assert recording_factory.created == []
+
+
+# --- tool-result bound in the model context (item C) ------------------------
+
+
+def test_truncate_for_model_head_and_tail() -> None:
+    from mcp_minion.agent import truncate_for_model
+
+    text = "".join(chr(ord("a") + i % 26) for i in range(1000))
+    cut = truncate_for_model(text, 100)
+    assert cut.startswith(text[:75] + "\n[... 900 characters truncated ...]\n")
+    assert cut.endswith(text[-25:])
+    assert truncate_for_model(text, 0) == text
+    assert truncate_for_model(text, 1000) == text
+
+
+async def test_long_tool_result_cut_for_model_but_full_in_record() -> None:
+    from mcp_minion import ToolOutcome
+
+    text = "x" * 300 + "TAIL"
+    manager = FakeToolManager({"t": ToolOutcome(text=text, is_error=True)})
+    agent = _agent_with_manager(
+        manager,
+        [_response(tool_calls=[_tool_call(name="t", arguments="{}")]), _response("ok")],
+        config=AgentConfig(max_tool_result_chars=100),
+    )
+    result = await agent.run_async("hi")
+    content = agent.client.requests[1]["messages"][-1]["content"]
+    assert content.startswith("ERROR: " + "x" * 75 + "\n[... 204 characters truncated")
+    assert content.endswith("TAIL")
+    assert result.steps[0]["tool_calls"][0]["result"] == text
+
+
+# --- server instructions in the system prompt (item D) ----------------------
+
+
+def test_server_instructions_in_tool_sections() -> None:
+    from mcp_minion.mcp_client import MCPToolInfo
+
+    tool = MCPToolInfo(name="t", description="Do it", parameters={}, server_name="s1")
+    manager = FakeToolManager(
+        {}, instructions={"s1": "Call t first.", "s2": "Only notes."}, tools=[tool]
+    )
+    sections = Agent(
+        api_key="k", tools=None, mcp_manager=manager
+    )._build_tool_sections()
+    assert "## s1\nServer instructions:\nCall t first.\n" in sections
+    assert "- `t`: Do it" in sections
+    assert "## s2\nServer instructions:\nOnly notes." in sections
+
+
+def test_no_instructions_add_nothing() -> None:
+    from mcp_minion.mcp_client import MCPToolInfo
+
+    tool = MCPToolInfo(name="t", description="Do it", parameters={}, server_name="s1")
+    manager = FakeToolManager({}, tools=[tool])
+    sections = Agent(
+        api_key="k", tools=None, mcp_manager=manager
+    )._build_tool_sections()
+    assert "Server instructions" not in sections
+    assert (
+        Agent(
+            api_key="k", tools=None, mcp_manager=FakeToolManager({})
+        )._build_tool_sections()
+        == ""
+    )
+
+
+async def test_instructions_reach_system_prompt() -> None:
+    manager = FakeToolManager({}, instructions={"srv": "Be careful."})
+    agent = _agent_with_manager(manager, [_response(content="done")])
+    await agent.run_async("hi")
+    assert "Be careful." in agent.client.requests[0]["messages"][0]["content"]
+
+
+# --- reasoning replay (item M) -----------------------------------------------
+
+
+def _reasoning_response(details=None, reasoning=None, **kwargs):
+    response = _response(**kwargs)
+    message = response.choices[0].message
+    if details is not None:
+        message.reasoning_details = details
+    if reasoning is not None:
+        message.reasoning = reasoning
+    return response
+
+
+async def test_reasoning_details_replayed_unmodified(tmp_path) -> None:
+    import json as json_mod
+
+    from mcp_minion import RunLogger
+
+    details = [
+        {"type": "reasoning.encrypted", "data": "abc", "id": "r1", "format": "g"},
+        {"type": "reasoning.text", "text": "think", "signature": None, "index": 1},
+    ]
+    logger = RunLogger(log_dir=tmp_path)
+    agent = _make_agent(
+        [
+            _reasoning_response(
+                details=details, reasoning="think", tool_calls=[_tool_call()]
+            ),
+            _response(content="done"),
+        ],
+        logger=logger,
+    )
+    from mcp_minion.tools import create_default_registry
+
+    agent.tools = create_default_registry()
+    result = await agent.run_async("hi")
+    assistant = agent.client.requests[1]["messages"][2]
+    assert assistant["role"] == "assistant" and assistant["tool_calls"]
+    assert assistant["reasoning_details"] == details
+    assert assistant["reasoning_details"] is details  # same list, untouched
+    assert "reasoning" not in assistant  # details take precedence
+    assert result.steps[0]["reasoning_details"] == details
+    assert result.steps[0]["reasoning"] == "think"
+    logged = json_mod.loads(logger.log_path.read_text())["steps"][0]["api_response"]
+    assert logged["reasoning_details"] == details
+    assert logged["reasoning"] == "think"
+
+
+async def test_no_reasoning_adds_no_keys() -> None:
+    from mcp_minion.tools import create_default_registry
+
+    agent = _make_agent([_response(tool_calls=[_tool_call()]), _response("done")])
+    agent.tools = create_default_registry()
+    result = await agent.run_async("hi")
+    assistant = agent.client.requests[1]["messages"][2]
+    assert "reasoning_details" not in assistant and "reasoning" not in assistant
+    assert "reasoning_details" not in result.steps[0]
+    assert "reasoning" not in result.steps[0]
+    # The request-level reasoning parameter is not touched.
+    assert "reasoning" not in agent.client.requests[0]["extra_body"]
+
+
+async def test_plain_reasoning_replayed_on_truncated_continuation() -> None:
+    agent = _make_agent(
+        [
+            _reasoning_response(
+                reasoning="thinking...", content="cut", finish_reason="length"
+            ),
+            _response(content="done"),
+        ],
+        config=AgentConfig(max_steps=3),
+    )
+    result = await agent.run_async("hi")
+    continuation = agent.client.requests[1]["messages"][-2]
+    assert continuation == {
+        "role": "assistant",
+        "content": "cut",
+        "reasoning": "thinking...",
+    }
+    assert result.steps[0]["reasoning"] == "thinking..."
+
+
+# --- default tool-result bound and logged system prompt ---------------------
+
+
+def test_default_max_tool_result_chars() -> None:
+    assert AgentConfig().max_tool_result_chars == 64000
+
+
+async def test_backend_template_size_result_reaches_model_uncut() -> None:
+    from mcp_minion import ToolOutcome
+
+    text = "".join(f"line {i}\n" for i in range(7000))[:54262]
+    assert len(text) == 54262
+    manager = FakeToolManager({"select_backend": ToolOutcome(text=text)})
+    agent = _agent_with_manager(
+        manager,
+        [
+            _response(tool_calls=[_tool_call(name="select_backend", arguments="{}")]),
+            _response("ok"),
+        ],
+    )
+    await agent.run_async("hi")
+    assert agent.client.requests[1]["messages"][-1]["content"] == text
+
+
+async def test_system_prompt_logged_once(tmp_path) -> None:
+    import json as json_mod
+
+    from mcp_minion import RunLogger
+    from mcp_minion.agent import build_system_prompt
+    from mcp_minion.mcp_client import MCPToolInfo
+
+    tool = MCPToolInfo(name="t", description="Do it", parameters={}, server_name="srv")
+    manager = FakeToolManager(
+        {"t": None}, instructions={"srv": "Server rule: call t."}, tools=[tool]
+    )
+    logger = RunLogger(log_dir=tmp_path)
+    agent = _agent_with_manager(manager, [_response(content="done")])
+    agent.logger = logger
+    await agent.run_async("hi")
+
+    log = json_mod.loads(logger.log_path.read_text())
+    expected = build_system_prompt(None, agent._build_tool_sections())
+    assert log["system_prompt"] == expected
+    assert "Server rule: call t." in log["system_prompt"]
+    assert log["system_prompt"] == agent.client.requests[0]["messages"][0]["content"]
+    assert all("system_prompt" not in step for step in log["steps"])

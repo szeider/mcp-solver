@@ -1,11 +1,13 @@
 """Unit tests for the v4 mcp-solver CLI (no engine, no network)."""
 
+import json
 import sys
+from pathlib import Path
 
 import pytest
 
 import mcp_solver
-from mcp_solver.agent import cli
+from mcp_solver.agent import cli, engine
 
 # --- argument parsing: solver validation ---------------------------------
 
@@ -43,6 +45,7 @@ def test_defaults():
     assert args.quiet is False
     assert args.dev is None
     assert args.no_dev is False
+    assert args.token_limit == cli.DEFAULT_TOKEN_LIMIT == 2_000_000
 
 
 # --- task / problem exclusivity ------------------------------------------
@@ -104,7 +107,7 @@ def test_problem_path_is_directory_clean_error(tmp_path, capsys):
 
 def test_with_packages_pysat_pins_helpers(monkeypatch):
     # Outside a source checkout the helpers fall back to the PyPI pin.
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     pkgs = cli.build_with_packages("pysat")
     assert pkgs == [
         "python-sat[pb]",
@@ -115,7 +118,7 @@ def test_with_packages_pysat_pins_helpers(monkeypatch):
 def test_source_checkout_auto_detected():
     # The test suite runs from an editable install, so detection must fire
     # and point at the repo root.
-    checkout = cli._local_checkout()
+    checkout = engine.local_checkout()
     assert checkout is not None
     assert cli.helpers_package(checkout) == checkout
 
@@ -132,7 +135,7 @@ def test_source_checkout_auto_detected():
     ],
 )
 def test_with_packages_solver_libraries(solver, lib, monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     pkgs = cli.build_with_packages(solver)
     assert pkgs[0] == lib
     # helpers package is always injected, for every backend.
@@ -159,7 +162,7 @@ def _resolve(argv, monkeypatch, env=None):
 
 def test_no_dev_forces_pin_even_in_checkout(monkeypatch):
     # A checkout is detected, but --no-dev overrides it → published behavior.
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "--no-dev", "hi"], monkeypatch) is None
 
 
@@ -171,45 +174,46 @@ def test_dev_path_used_verbatim(monkeypatch):
 
 def test_dev_bare_auto_detects(monkeypatch):
     # Bare --dev (no path) placed last so it does not swallow the task token.
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "hi", "--dev"], monkeypatch) == "/repo"
 
 
-def test_dev_bare_errors_without_checkout(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+def test_dev_bare_errors_without_checkout(monkeypatch, capsys):
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     with pytest.raises(SystemExit):
         _resolve(["z3", "hi", "--dev"], monkeypatch)
+    assert "no source checkout" in capsys.readouterr().err
 
 
 def test_env_truthy_auto_detects(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "hi"], monkeypatch, env="1") == "/repo"
 
 
 def test_env_path_used(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "hi"], monkeypatch, env="/env/checkout") == "/env/checkout"
 
 
 def test_env_truthy_errors_without_checkout(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     with pytest.raises(SystemExit):
         _resolve(["z3", "hi"], monkeypatch, env="auto")
 
 
 def test_auto_default_in_checkout(monkeypatch):
     # Nothing set: fall back to the detected checkout.
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "hi"], monkeypatch) == "/repo"
 
 
 def test_auto_default_none_outside_checkout(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     assert _resolve(["z3", "hi"], monkeypatch) is None
 
 
 def test_arg_beats_env(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert (
         _resolve(["z3", "--dev", "/arg", "hi"], monkeypatch, env="/env/checkout")
         == "/arg"
@@ -217,7 +221,7 @@ def test_arg_beats_env(monkeypatch):
 
 
 def test_no_dev_beats_env(monkeypatch):
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "--no-dev", "hi"], monkeypatch, env="/env/checkout") is None
 
 
@@ -230,17 +234,24 @@ def test_dev_and_no_dev_mutually_exclusive():
 
 
 def test_raw_openrouter_id_passes_through():
-    model_id, params = cli.resolve_model("openai/gpt-5.6-terra")
-    assert model_id == "openai/gpt-5.6-terra"
-    assert params == {}
+    model = cli.resolve_model("openai/gpt-5.6-terra")
+    assert model == cli.ModelSettings(model="openai/gpt-5.6-terra")
 
 
 def test_alias_resolved_from_engine():
     # The default alias must resolve via the engine's bundled models/.
-    model_id, params = cli.resolve_model("gpt56terra")
-    assert model_id == "openai/gpt-5.6-terra"
+    model = cli.resolve_model("gpt56terra")
+    assert model.model == "openai/gpt-5.6-terra"
     # gpt56terra is a no-sampling-params model: only max_tokens forwarded.
-    assert set(params) <= {"max_tokens"}
+    assert set(model.api_params) <= {"max_tokens"}
+
+
+def test_bundled_alias_with_request_timeout():
+    # gemini31 carries request_timeout in the engine's bundled config.
+    model = cli.resolve_model("gemini31")
+    assert model.model.startswith("google/")
+    assert model.request_timeout is not None
+    assert "request_timeout" not in model.api_params
 
 
 def test_unknown_alias_raises():
@@ -248,16 +259,77 @@ def test_unknown_alias_raises():
         cli.resolve_model("no-such-alias")
 
 
-def test_model_params_no_sampling():
-    params = cli._model_params(
-        {"no_sampling_params": True, "max_tokens": 128, "temperature": 0}
+def test_model_settings_no_sampling():
+    model = cli.model_settings(
+        {
+            "path": "x/y",
+            "no_sampling_params": True,
+            "max_tokens": 128,
+            "temperature": 0,
+            "top_k": 5,
+            "provider": {"order": ["a"]},
+        }
     )
-    assert params == {"max_tokens": 128}
+    assert model.api_params == {"max_tokens": 128}
+    # top_k is a sampling parameter; provider applies to every model.
+    assert model.extra_body == {"provider": {"order": ["a"]}}
 
 
-def test_model_params_standard():
-    params = cli._model_params({"temperature": 0, "max_tokens": 64, "top_k": 5})
-    assert params == {"temperature": 0, "max_tokens": 64}
+def test_model_settings_standard():
+    model = cli.model_settings(
+        {"path": "x/y", "temperature": 0, "max_tokens": 64, "top_k": 5}
+    )
+    assert model.api_params == {"temperature": 0, "max_tokens": 64}
+    assert model.extra_body == {"top_k": 5}
+    assert model.request_timeout is None
+
+
+def _model_file(tmp_path: Path) -> Path:
+    path = tmp_path / "mymodel.json"
+    path.write_text(
+        json.dumps(
+            {
+                "path": "vendor/model-x",
+                "temperature": 0.2,
+                "max_tokens": 4096,
+                "reasoning": {"effort": "high"},
+                "request_timeout": 90,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_model_json_file_resolved(tmp_path):
+    model = cli.resolve_model(str(_model_file(tmp_path)))
+    assert model.model == "vendor/model-x"
+    assert model.api_params == {"temperature": 0.2, "max_tokens": 4096}
+    assert model.extra_body == {"reasoning": {"effort": "high"}}
+    assert model.request_timeout == 90
+
+
+def test_missing_model_json_file_raises(tmp_path):
+    with pytest.raises(ValueError, match="unknown model alias"):
+        cli.resolve_model(str(tmp_path / "nope.json"))
+
+
+# --- API key lookup --------------------------------------------------------
+
+
+def test_find_api_key_reads_engine_dotenv(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert cli.find_api_key() is None
+    (tmp_path / ".mcp-minion").write_text("OPENROUTER_API_KEY=sk-minion\n")
+    assert cli.find_api_key() == "sk-minion"
+    # The engine's file comes before ~/.mcp-minion, the environment first.
+    engine_env = tmp_path / ".config" / "coder" / ".env"
+    engine_env.parent.mkdir(parents=True)
+    engine_env.write_text("OPENROUTER_API_KEY=sk-engine\n")
+    assert cli.find_api_key() == "sk-engine"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-env")
+    assert cli.find_api_key() == "sk-env"
 
 
 # --- stats construction ----------------------------------------------------
@@ -281,6 +353,7 @@ def test_build_stats_shape():
     assert stats["tool_usage"] == {"python_exec": 2, "submit_code": 1}
     assert stats["execution_time_seconds"] == 1.5
     assert stats["step_limit_reached"] is False
+    assert stats["token_limit_reached"] is False
     assert stats["steps"] == 3
 
 
@@ -296,7 +369,8 @@ def _fake_solve_result(code="print('{}')"):
                 {
                     "name": "submit_code",
                     "arguments": {"code": code},
-                    "result": '{"result": "{\\"ok\\": true}"}',
+                    "result": '{"ok": true}',
+                    "is_error": False,
                 }
             ],
         },
@@ -321,7 +395,7 @@ def test_main_persists_submission_and_runs_it(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(cli, "solve", fake_solve)
     monkeypatch.setattr(cli, "run_program", fake_run_program)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(["z3", "--problem", str(problem), "--workdir", str(tmp_path), "-q"])
     assert rc == 0
@@ -338,7 +412,7 @@ def test_main_no_submission_returns_3(monkeypatch, tmp_path, capsys):
         return _fake_result([{"step": 1, "content": "gave up", "tool_calls": None}])
 
     monkeypatch.setattr(cli, "solve", fake_solve)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(["z3", "--problem", str(problem), "--workdir", str(tmp_path), "-q"])
     assert rc == 3
@@ -369,7 +443,7 @@ def test_main_agent_error_after_submission_runs_it_and_returns_4(
 
     monkeypatch.setattr(cli, "solve", fake_solve)
     monkeypatch.setattr(cli, "run_program", fake_run_program)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(
         [
@@ -404,7 +478,7 @@ def test_main_agent_error_after_submission_keeps_program_failure_code(
 
     monkeypatch.setattr(cli, "solve", fake_solve)
     monkeypatch.setattr(cli, "run_program", lambda program, with_packages: 7)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
     assert rc == 7
@@ -421,7 +495,7 @@ def test_main_agent_error_without_submission_returns_1(monkeypatch, tmp_path, ca
 
     monkeypatch.setattr(cli, "solve", fake_solve)
     monkeypatch.setattr(cli, "run_program", fail_run_program)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
     assert rc == 1
@@ -437,7 +511,7 @@ def test_main_unexpected_exception_one_line_returns_1(monkeypatch, tmp_path, cap
         )
 
     monkeypatch.setattr(cli, "solve", fake_solve)
-    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
 
     rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
     assert rc == 1
@@ -450,7 +524,7 @@ def test_main_unexpected_exception_one_line_returns_1(monkeypatch, tmp_path, cap
 
 
 def test_main_no_api_key_returns_1(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(cli, "find_api_key", lambda: None)
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: None)
     rc = cli.main(["z3", "hello", "--workdir", str(tmp_path)])
     assert rc == 1
     assert "OPENROUTER_API_KEY" in capsys.readouterr().err
@@ -465,7 +539,7 @@ def test_missing_engine_returns_1(monkeypatch, capsys):
     # A checkout is detected here, so dev mode is on and the fast-fail is
     # skipped; the run reaches the engine-import branch.
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
-    monkeypatch.setattr(cli, "_local_checkout", lambda: "/repo")
+    monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     monkeypatch.setitem(sys.modules, "agentic_python_coder", None)
     rc = cli.main(["z3", "hello"])
     assert rc == 1
@@ -480,7 +554,7 @@ def test_fast_fail_unpublishable_no_dev(monkeypatch, capsys):
     # No checkout, no env, and a pre-release version → fail before the engine.
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.setattr(mcp_solver, "__version__", "4.0.0a0")
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     rc = cli.main(["z3", "hello"])
     assert rc == 2
     assert "--dev" in capsys.readouterr().err
@@ -491,7 +565,7 @@ def test_no_fast_fail_for_published_version(monkeypatch, capsys):
     # proceeds (to the engine-import branch, which is absent here → rc 1).
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.setattr(mcp_solver, "__version__", "4.0.0")
-    monkeypatch.setattr(cli, "_local_checkout", lambda: None)
+    monkeypatch.setattr(engine, "local_checkout", lambda: None)
     monkeypatch.setitem(sys.modules, "agentic_python_coder", None)
     rc = cli.main(["z3", "hello"])
     assert rc == 1
@@ -512,3 +586,255 @@ def test_get_template_root_override(tmp_path):
     assert get_template("z3", root=str(tmp_path)) != "FAKE OVERRIDE"
     # No root → packaged resource.
     assert get_template("pysat") != "FAKE OVERRIDE"
+
+
+# --- AgentConfig wiring: model settings and token limit --------------------
+
+
+def test_main_wires_model_settings_and_token_limit(monkeypatch, tmp_path):
+    seen = {}
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        seen["config"] = config
+        return _fake_solve_result()
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", lambda program, with_packages: 0)
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
+
+    model_file = _model_file(tmp_path)
+    argv = ["z3", "hi", "--workdir", str(tmp_path), "-q", "--model", str(model_file)]
+    assert cli.main([*argv, "--token-limit", "5000"]) == 0
+    config = seen["config"]
+    assert config.model == "vendor/model-x"
+    assert config.api_params == {"temperature": 0.2, "max_tokens": 4096}
+    assert config.extra_body == {"reasoning": {"effort": "high"}}
+    assert config.request_timeout == 90
+    assert config.max_total_tokens == 5000
+
+    # Default limit, and 0 = no limit.
+    assert cli.main(argv) == 0
+    assert seen["config"].max_total_tokens == cli.DEFAULT_TOKEN_LIMIT
+    assert cli.main([*argv, "--token-limit", "0"]) == 0
+    assert seen["config"].max_total_tokens == 0
+
+
+def test_negative_token_limit_rejected(monkeypatch, tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main(["z3", "hi", "--workdir", str(tmp_path), "--token-limit", "-1"])
+
+
+def test_main_token_cap_saves_and_runs_last_submission(monkeypatch, tmp_path, capsys):
+    # The token cap ends the run like the step limit: the last accepted
+    # submission is saved and executed, and stats + stderr say why it ended.
+    stats_file = tmp_path / "stats.json"
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_solve_result("print('CAPPED')")
+        result.token_cap_reached = True
+        return result
+
+    ran = {}
+
+    def fake_run_program(program, with_packages):
+        ran["program"] = program
+        return 0
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", fake_run_program)
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
+
+    rc = cli.main(
+        [
+            "z3",
+            "hi",
+            "--workdir",
+            str(tmp_path),
+            "--token-limit",
+            "1000",
+            "--stats-json",
+            str(stats_file),
+            "-q",
+        ]
+    )
+    assert rc == 0
+    assert (tmp_path / "task_code.py").read_text(encoding="utf-8") == "print('CAPPED')"
+    assert ran["program"] == tmp_path / "task_code.py"
+    stats = json.loads(stats_file.read_text())
+    assert stats["token_limit_reached"] is True
+    assert stats["token_limit"] == 1000
+    assert "token limit (1,000 tokens)" in capsys.readouterr().err
+
+
+def test_main_skips_rejected_submission(monkeypatch, tmp_path):
+    # An error outcome of submit_code (e.g. the toolkit server's rejection)
+    # never becomes the persisted program.
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_solve_result("print('GOOD')")
+        result.steps.insert(
+            1,
+            {
+                "step": 2,
+                "content": None,
+                "tool_calls": [
+                    {
+                        "name": "submit_code",
+                        "arguments": {"code": "def f(:"},
+                        "result": "Syntax error at line 1",
+                        "is_error": True,
+                    }
+                ],
+            },
+        )
+        return result
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", lambda program, with_packages: 0)
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
+    assert cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"]) == 0
+    assert (tmp_path / "task_code.py").read_text(encoding="utf-8") == "print('GOOD')"
+
+
+def test_main_kernel_setup_failure_returns_1(monkeypatch, tmp_path, capsys):
+    # minion reports a failed eager python_reset as AgentResult.error.
+    async def fake_solve(task, api_key, config, logger, quiet):
+        return _fake_result(
+            [], error="kernel setup failed: python_reset with packages [...]"
+        )
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
+    assert cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"]) == 1
+    assert "kernel setup failed" in capsys.readouterr().err
+
+
+# --- re-execution environment ----------------------------------------------
+
+
+def test_run_program_uses_kernel_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-secret")
+    monkeypatch.setenv("UV_INDEX_URL", "https://example.invalid/simple")
+    seen = {}
+
+    class Done:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["env"] = kwargs.get("env")
+        return Done()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    program = tmp_path / "p.py"
+    assert cli.run_program(program, ["z3-solver"]) == 0
+    assert seen["cmd"][-2:] == ["python", str(program)]
+    assert seen["env"] == engine.kernel_env()
+    assert "OPENROUTER_API_KEY" not in seen["env"]
+    assert seen["env"]["UV_INDEX_URL"] == "https://example.invalid/simple"
+
+
+# --- custom endpoint: base_url and api_key_env -----------------------------
+
+
+def test_model_settings_endpoint_defaults():
+    model = cli.model_settings({"path": "x/y"})
+    assert model.base_url is None and model.api_key_env is None
+    assert model.key_var == "OPENROUTER_API_KEY"
+
+
+def test_main_custom_endpoint_uses_its_url_and_key(monkeypatch, tmp_path):
+    model_file = tmp_path / "local.json"
+    model_file.write_text(
+        json.dumps(
+            {
+                "path": "local/model",
+                "base_url": "http://localhost:8000/v1",
+                "api_key_env": "MY_ENDPOINT_KEY",
+            }
+        )
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)  # no dotenv files
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter")
+    monkeypatch.setenv("MY_ENDPOINT_KEY", "sk-local")
+    seen = {}
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        seen["api_key"] = api_key
+        seen["config"] = config
+        return _fake_solve_result()
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", lambda program, with_packages: 0)
+    argv = ["z3", "hi", "--workdir", str(tmp_path), "-q", "--model"]
+    assert cli.main([*argv, str(model_file)]) == 0
+    assert seen["config"].base_url == "http://localhost:8000/v1"
+    assert seen["api_key"] == "sk-local"
+
+    # Without base_url/api_key_env: OpenRouter and its key, as before.
+    assert cli.main([*argv, str(_model_file(tmp_path))]) == 0
+    assert seen["config"].base_url == "https://openrouter.ai/api/v1"
+    assert seen["api_key"] == "sk-openrouter"
+
+
+def test_main_custom_endpoint_missing_key_names_variable(monkeypatch, tmp_path, capsys):
+    model_file = tmp_path / "local.json"
+    model_file.write_text(
+        json.dumps({"path": "local/model", "api_key_env": "MY_ENDPOINT_KEY"})
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter")
+    monkeypatch.delenv("MY_ENDPOINT_KEY", raising=False)
+    rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "--model", str(model_file)])
+    assert rc == 1
+    assert "MY_ENDPOINT_KEY" in capsys.readouterr().err
+
+
+# --- base install without the [agent] extra --------------------------------
+
+_NO_AGENT_SCRIPT = """
+import sys
+
+BLOCKED = ("mcp", "mcp_minion", "agentic_python_coder")
+
+
+class Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return None
+
+
+sys.meta_path.insert(0, Block())
+from mcp_solver.agent import cli
+
+cli.build_parser()
+try:
+    cli.main(["--help"])
+except SystemExit as exc:
+    print("HELP-EXIT", exc.code)
+print("SOLVE-RC", cli.main(["z3", "hello", "--dev"]))
+"""
+
+
+def test_base_install_without_agent_extra(tmp_path):
+    # A fresh interpreter with mcp, mcp-minion and the engine unimportable
+    # (as in a base install): --help works and a solve attempt prints the
+    # install guidance instead of a traceback.
+    import os
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if k != "MCP_SOLVER_DEV"}
+    proc = subprocess.run(
+        [sys.executable, "-c", _NO_AGENT_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=tmp_path,
+        env=env,
+    )
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert "HELP-EXIT 0" in proc.stdout
+    assert "--token-limit" in proc.stdout
+    assert "SOLVE-RC 1" in proc.stdout
+    assert "the agent layer is not installed" in proc.stderr
+    assert "[agent]" in proc.stderr

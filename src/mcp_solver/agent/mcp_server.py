@@ -43,20 +43,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-try:  # mcp 2.x
-    from mcp.server.mcpserver import MCPServer as FastMCP
-    from mcp.server.mcpserver.exceptions import ResourceError, ToolError
-except ImportError:  # mcp 1.x
-    from mcp.server.fastmcp import FastMCP
-    from mcp.server.fastmcp.exceptions import ResourceError, ToolError
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
 
-import mcp_solver
-from mcp_solver.agent.cli import (
-    _is_unpublishable,
-    _local_checkout,
-    build_with_packages,
-)
+from mcp_solver.agent import engine
+from mcp_solver.agent.cli import build_with_packages
 from mcp_solver.templates import SOLVERS, get_template
 
 SELECT_BACKEND_DESCRIPTION = """\
@@ -122,7 +114,7 @@ _engine = None
 # The solving kernel: created by the first select_backend, recycled by later
 # ones. Bare python_exec/python_interrupt calls are routed here; a manual
 # python_reset that creates or resets a kernel retargets the routing.
-# FastMCP dispatches tool calls concurrently, so every read-await-write of
+# The server dispatches tool calls concurrently, so every read-await-write of
 # _kernel_id happens under this lock.
 _kernel_id: str | None = None
 _kernel_lock = asyncio.Lock()
@@ -219,36 +211,19 @@ def _episode_snapshot() -> dict | None:
 
 
 def _dev_path() -> str | None:
-    """Dev-mode source checkout for helpers/templates (env or auto-detect)."""
-    env = os.environ.get("MCP_SOLVER_DEV")
-    if env:
-        if env.lower() in ("1", "true", "auto"):
-            return _local_checkout()
-        return env
-    return _local_checkout()
+    """Dev-mode source checkout for helpers/templates (env or auto-detect).
+
+    Raises DevModeError when MCP_SOLVER_DEV asks for auto-detection and no
+    checkout exists (the same error the CLI reports).
+    """
+    return engine.resolve_dev_path()
 
 
 @asynccontextmanager
-async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
+async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     """Hold one engine (ipython_mcp) connection for the server's lifetime."""
     global _engine, _kernel_id
-    from mcp_minion import MCPManager
-
-    manager = MCPManager(
-        {
-            "ipython": {
-                "command": sys.executable,
-                "args": ["-m", "agentic_python_coder.mcp_server"],
-            }
-        }
-    )
-    await manager.__aenter__()
-    if not manager.has_tool("submit_code"):
-        await manager.__aexit__(None, None, None)
-        raise RuntimeError(
-            "the ipython_mcp engine is unavailable or lacks submit_code;"
-            " install agentic-python-coder >=3.4.3 in this environment"
-        )
+    manager = await engine.start_engine()
     _engine = manager
     try:
         yield
@@ -259,7 +234,7 @@ async def _lifespan(server: FastMCP) -> AsyncIterator[None]:
         await manager.__aexit__(None, None, None)
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "mcp-solver",
     instructions=(
         "Constraint-solving toolkit: call select_backend(solver) first, then"
@@ -271,25 +246,20 @@ mcp = FastMCP(
 
 
 async def _engine_call(name: str, arguments: dict) -> str:
-    """Proxy one tool call to the engine; unwrap the client's JSON envelope.
+    """Proxy one tool call to the engine; return the engine tool's text.
 
-    The envelope's ``error`` key covers client-level failures (engine down,
-    timeout). Engine-level outcomes — including failed executions — arrive
-    inside ``result`` as the engine tool's own JSON text and pass through to
-    the host untouched.
+    An error outcome (an MCP ``isError`` result, or a client-level failure
+    such as engine down or timeout) becomes a ToolError, i.e. an error
+    result for the host. Engine-level outcomes reported as normal results,
+    including failed executions (``"success": false``), pass through to the
+    host untouched.
     """
     if _engine is None:
         raise ToolError("engine not connected (server starting or shut down)")
-    raw = await _engine.call_tool(name, arguments)
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ToolError(f"engine returned a malformed envelope: {e}") from None
-    if not isinstance(payload, dict):
-        raise ToolError("engine returned a malformed envelope (not a JSON object)")
-    if "error" in payload:
-        raise ToolError(str(payload["error"]))
-    return str(payload.get("result", ""))
+    outcome = await _engine.call_tool(name, arguments)
+    if outcome.is_error:
+        raise ToolError(outcome.text or f"engine tool {name!r} failed")
+    return outcome.text
 
 
 def _parse_engine_json(text: str) -> dict:
@@ -312,7 +282,11 @@ def template_resource(solver: str) -> str:
     """The full modeling instructions for a backend."""
     if solver not in SOLVERS:
         raise ResourceError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
-    return get_template(solver, root=_dev_path())
+    try:
+        root = _dev_path()
+    except engine.DevModeError as e:
+        raise ResourceError(str(e)) from None
+    return get_template(solver, root=root)
 
 
 @mcp.resource("mcp-solver://submissions/{submission_id}", mime_type="text/x-python")
@@ -330,13 +304,11 @@ async def select_backend(solver: str) -> str:
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
 
-    dev = _dev_path()
-    if dev is None and _is_unpublishable(mcp_solver.__version__):
-        raise ToolError(
-            f"mcp-solver {mcp_solver.__version__} is not a published release"
-            " and no source checkout was found; set MCP_SOLVER_DEV to a"
-            " checkout path"
-        )
+    try:
+        dev = _dev_path()
+        engine.require_publishable(dev)
+    except (engine.DevModeError, engine.UnpublishedVersionError) as e:
+        raise ToolError(str(e)) from None
     packages = build_with_packages(solver, dev)
 
     # Recycle the existing solving kernel; fresh kernel on first call or
@@ -455,7 +427,8 @@ async def submit_code(code: str) -> CallToolResult:
 
     Call ONCE at the end, only after executing the program via python_exec
     and passing your verification. The code is syntax-checked; on success it
-    is stored and linked as a resource (the server keeps the last 50).
+    is stored and linked as a resource (the server keeps the last 50). A
+    rejected program comes back as an error result with the reason.
     """
     # Count the attempt BEFORE _episode_count syncs the .open snapshot, so a
     # failed submission (which never syncs again) is not lost on a host kill.
@@ -465,8 +438,12 @@ async def submit_code(code: str) -> CallToolResult:
     result_text = await _engine_call("submit_code", {"code": code})
     verdict = _parse_engine_json(result_text)
 
-    content: list = [TextContent(type="text", text=result_text)]
-    if verdict.get("ok"):
+    accepted = bool(verdict.get("ok"))
+    # A rejection ({"ok": false, "error": ...} from the engine) is an error
+    # result, so every host sees it as a failed call.
+    text = result_text if accepted else str(verdict.get("error") or result_text)
+    content: list = [TextContent(type="text", text=text)]
+    if accepted:
         if _episode is not None:
             _episode["submit_ok"] += 1
             _episode["code_bytes"] = len(code.encode())
@@ -481,7 +458,7 @@ async def submit_code(code: str) -> CallToolResult:
                 uri=f"mcp-solver://submissions/{submission_id}",
                 name=f"submission_{submission_id[:8]}.py",
                 description="The accepted solver program (compile-checked).",
-                mimeType="text/x-python",
+                mime_type="text/x-python",
                 size=len(code.encode()),
             )
         )
@@ -491,7 +468,8 @@ async def submit_code(code: str) -> CallToolResult:
         structured["stats"] = stats
     return CallToolResult(
         content=content,
-        structuredContent=structured or None,
+        structured_content=structured or None,
+        is_error=not accepted,
     )
 
 

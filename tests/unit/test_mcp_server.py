@@ -1,17 +1,18 @@
 """Unit tests for the v4.1 toolkit MCP server (no LLM, no network).
 
-The round-trip tests drive the real FastMCP server over an in-memory client
+The round-trip tests drive the real MCPServer over an in-memory client
 session; the engine (ipython_mcp) is replaced by a fake MCPManager that
 mimics its public contract: flat-JSON tool results (``success``/``kernel_id``
-for kernel tools, ``ok`` for submit_code) inside the client's
-``{"result"|"error"}`` envelope.
+for kernel tools, ``ok`` for submit_code) returned as ``ToolOutcome`` text.
 """
 
 import json
 
 import pytest
-from mcp_minion.mcp_client import _field
+from mcp.client import Client
+from mcp_minion import ToolOutcome
 
+from mcp_solver.agent import engine as engine_mod
 from mcp_solver.agent import mcp_server
 
 BACKENDS = ("pysat", "maxsat", "z3", "cpmpy", "clingo", "didp")
@@ -45,7 +46,7 @@ class FakeEngine:
 
     async def call_tool(self, name, arguments):
         self.calls.append((name, dict(arguments)))
-        return json.dumps({"result": json.dumps(self._respond(name, arguments))})
+        return ToolOutcome(text=json.dumps(self._respond(name, arguments)))
 
     def _respond(self, name, args):
         if name == "python_reset":
@@ -98,14 +99,8 @@ def engine(monkeypatch):
 
 
 def _session():
-    try:  # mcp 2.x: in-process client
-        from mcp.client import Client
-
-        return Client(mcp_server.mcp)
-    except ImportError:  # mcp 1.x
-        from mcp.shared.memory import create_connected_server_and_client_session
-
-        return create_connected_server_and_client_session(mcp_server.mcp._mcp_server)
+    """In-process client session (runs the server lifespan)."""
+    return Client(mcp_server.mcp)
 
 
 def _engine_payload(result) -> dict:
@@ -159,34 +154,40 @@ async def test_engine_call_without_engine(monkeypatch):
         await mcp_server._engine_call("python_exec", {"code": "1"})
 
 
-async def test_engine_call_surfaces_client_error(monkeypatch):
+async def test_engine_call_surfaces_error_outcome(monkeypatch):
     class Broken:
         async def call_tool(self, name, arguments):
-            return json.dumps({"error": "Tool 'python_exec' timed out"})
+            return ToolOutcome(text="Tool 'python_exec' timed out", is_error=True)
 
     monkeypatch.setattr(mcp_server, "_engine", Broken())
-    with pytest.raises(Exception, match="timed out"):
+    with pytest.raises(mcp_server.ToolError, match="timed out"):
         await mcp_server._engine_call("python_exec", {"code": "1"})
 
 
-async def test_engine_call_rejects_malformed_envelope(monkeypatch):
-    class Broken:
+async def test_engine_call_passes_text_through(monkeypatch):
+    # Non-JSON text and engine-level failures (success false) are not
+    # errors at this layer: the host receives the engine's text unchanged.
+    class Plain:
         async def call_tool(self, name, arguments):
-            return "not json at all"
+            return ToolOutcome(text='{"success": false, "error": "boom"}')
 
-    monkeypatch.setattr(mcp_server, "_engine", Broken())
-    with pytest.raises(Exception, match="malformed envelope"):
-        await mcp_server._engine_call("python_exec", {"code": "1"})
+    monkeypatch.setattr(mcp_server, "_engine", Plain())
+    text = await mcp_server._engine_call("python_exec", {"code": "1"})
+    assert text == '{"success": false, "error": "boom"}'
 
 
-async def test_engine_call_rejects_non_object_envelope(monkeypatch):
-    class Broken:
-        async def call_tool(self, name, arguments):
-            return json.dumps([1, 2, 3])
+async def test_lifespan_fails_on_engine_without_submit_code(monkeypatch):
+    import mcp_minion
 
-    monkeypatch.setattr(mcp_server, "_engine", Broken())
-    with pytest.raises(Exception, match="malformed envelope"):
-        await mcp_server._engine_call("python_exec", {"code": "1"})
+    class OldEngine(FakeEngine):
+        def has_tool(self, name):
+            return name != "submit_code"
+
+    monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: OldEngine())
+    with pytest.raises(engine_mod.EngineError, match="submit_code") as info:
+        async with _session():
+            pass
+    assert engine_mod.MIN_ENGINE_VERSION in str(info.value)
 
 
 # --- full in-memory round trip ----------------------------------------------
@@ -209,8 +210,8 @@ async def test_toolkit_round_trip(engine):
         # template is the payload; structuredContent would hide it in
         # clients that prefer it over text).
         result = await session.call_tool("select_backend", {"solver": "z3"})
-        assert not _field(result, "is_error")
-        assert _field(result, "structured_content") is None
+        assert not result.is_error
+        assert result.structured_content is None
         text = result.content[0].text
         assert "fresh solving kernel" in text
         assert "submit_code" in text
@@ -250,7 +251,7 @@ async def test_toolkit_round_trip(engine):
 async def test_select_backend_rejects_unknown_solver(engine):
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "gurobi"})
-        assert _field(result, "is_error")
+        assert result.is_error
         assert "unknown solver" in result.content[0].text
 
 
@@ -260,23 +261,27 @@ async def test_select_backend_fails_closed_on_malformed_reset(engine):
     engine.break_reset = True
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "z3"})
-        assert _field(result, "is_error")
+        assert result.is_error
         assert "kernel setup" in result.content[0].text
     assert mcp_server._kernel_id is None
 
 
 async def test_submit_code_round_trip(engine):
     async with _session() as session:
-        # Syntax errors are rejected: no resource_link, ok=false rides along.
+        # Syntax errors are rejected as an error result carrying the engine's
+        # reason; no resource_link, ok=false rides along.
         result = await session.call_tool("submit_code", {"code": "def f(:"})
-        assert not _field(result, "is_error")
-        assert _field(result, "structured_content")["ok"] is False
+        assert result.is_error
+        assert result.content[0].text.startswith("Syntax error at line 1")
+        assert result.structured_content["ok"] is False
         assert all(c.type != "resource_link" for c in result.content)
 
         # A valid program is stored and linked as a fetchable resource.
         program = "print('{\"answer\": 42}')"
         result = await session.call_tool("submit_code", {"code": program})
-        assert _field(result, "structured_content") == {"ok": True}
+        assert not result.is_error
+        assert json.loads(result.content[0].text) == {"ok": True}
+        assert result.structured_content == {"ok": True}
         links = [c for c in result.content if c.type == "resource_link"]
         assert len(links) == 1
         assert links[0].size == len(program.encode())
@@ -289,7 +294,7 @@ async def test_submission_store_is_bounded(engine, monkeypatch):
     async with _session() as session:
         for i in range(3):
             result = await session.call_tool("submit_code", {"code": f"print({i})"})
-            assert _field(result, "structured_content") == {"ok": True}
+            assert result.structured_content == {"ok": True}
     assert len(mcp_server._submissions) == 2
     assert list(mcp_server._submissions.values()) == ["print(1)", "print(2)"]
 
@@ -300,7 +305,7 @@ async def test_submit_stats_ride_along(engine):
         await session.call_tool("python_exec", {"code": "1"})
         await session.call_tool("python_exec", {"code": "2"})
         result = await session.call_tool("submit_code", {"code": "print(1)"})
-        sc = _field(result, "structured_content")
+        sc = result.structured_content
         assert sc["ok"] is True
         assert sc["stats"]["exec_calls"] == 2
         assert sc["stats"]["exec_failures"] == 0
@@ -370,7 +375,39 @@ async def test_manual_reset_retargets_routing(engine):
 
 async def test_resource_error_text_reaches_client(engine):
     # mcp>=2.1 hides the text of a plain exception raised in a resource;
-    # ResourceError keeps it visible on both mcp 1.x and 2.x.
+    # ResourceError keeps it visible.
     async with _session() as session:
         with pytest.raises(Exception, match="unknown solver 'gurobi'"):
             await session.read_resource("mcp-solver://template/gurobi")
+
+
+# --- dev mode: same error as the CLI ------------------------------------------
+
+
+async def test_select_backend_dev_env_without_checkout_errors(engine, monkeypatch):
+    # MCP_SOLVER_DEV=1 without a checkout is an error (formerly ignored).
+    monkeypatch.setenv("MCP_SOLVER_DEV", "1")
+    monkeypatch.setattr(engine_mod, "local_checkout", lambda: None)
+    async with _session() as session:
+        result = await session.call_tool("select_backend", {"solver": "z3"})
+        assert result.is_error
+        assert "no source checkout" in result.content[0].text
+    assert engine.calls == []
+
+
+def test_template_resource_dev_env_without_checkout_errors(monkeypatch):
+    monkeypatch.setenv("MCP_SOLVER_DEV", "auto")
+    monkeypatch.setattr(engine_mod, "local_checkout", lambda: None)
+    with pytest.raises(mcp_server.ResourceError, match="no source checkout"):
+        mcp_server.template_resource("z3")
+
+
+async def test_select_backend_unpublished_version_errors(engine, monkeypatch):
+    import mcp_solver
+
+    monkeypatch.setattr(mcp_solver, "__version__", "4.0.0a0")
+    monkeypatch.setattr(engine_mod, "local_checkout", lambda: None)
+    async with _session() as session:
+        result = await session.call_tool("select_backend", {"solver": "z3"})
+        assert result.is_error
+        assert "not a published release" in result.content[0].text

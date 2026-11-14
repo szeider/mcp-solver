@@ -1,5 +1,62 @@
 # Changelog
 
+### [4.3.0] - 2026-11-14
+
+- **Behavior Change:** Requires the MCP Python SDK 2.x (`mcp>=2,<3`; 1.x is no
+  longer supported), agentic-python-coder 3.5.0 and mcp-minion 0.3.0.
+- **Behavior Change:** `mcp-solver` caps a run at 2,000,000 total (input +
+  output) tokens by default, checked after each step; `--token-limit N`
+  changes the cap (`0` = no limit). A run stopped by the cap without an
+  accepted submission exits with code 3; the stats JSON reports
+  `token_limit_reached` and `token_limit`. `mcp-solver-bench --token-limit`
+  passes the value to each solve.
+- **Behavior Change:** New exit code 4: the agent stopped early with an error
+  (for example an LLM API failure) after an accepted submission. That
+  submission is saved and re-executed, and exit 4 replaces 0 when it runs
+  cleanly, since it may not be the agent's final, verified program. Such an
+  error before any accepted submission, a failed kernel setup, or an
+  exception during the solve exits with 1 and a one-line message instead of
+  a traceback.
+- **Behavior Change:** The engine, its kernels and the CLI's re-execution of
+  the submitted program (in `mcp-solver` and `mcp-solver-serve`) get a
+  filtered environment: the mcp library's default whitelist (`PATH`, `HOME`,
+  ...), locale, temp-dir, proxy, CA-bundle and native-build variables, and
+  variables starting with `UV_`, `CODER_`, `MCP_SOLVER_`, `XDG_` or `LC_`
+  unless the name contains `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or
+  `CREDENTIAL` (`UV_ENV_FILE` is dropped too). Other variables no longer
+  reach the kernel. This keeps API keys out of model-written code; it is
+  hygiene, not a sandbox.
+- **Behavior Change:** `submit_code` on the toolkit server returns an MCP
+  error result (`isError`) carrying the engine's reason for a rejected
+  program, instead of a normal result with `{"ok": false, ...}`.
+- **New Feature:** `--model` accepts a model config file
+  (`--model my_model.json`) in the engine's format, and aliases resolve
+  through the engine's `load_model_config`, so a local `<alias>.json`
+  overrides a bundled one. A model config may set `base_url` and
+  `api_key_env` (another OpenAI-compatible endpoint and the variable that
+  holds its key). Its `reasoning`, `provider`, `top_k` and `request_timeout`
+  settings are now sent; before they were dropped.
+- **Behavior Change:** `mcp-solver-runfolder --model` resolves aliases and
+  model files like the CLI. A full OpenRouter ID gets no sampling settings
+  (it used to get `temperature 0` and `max_tokens 8192`), a model with
+  `base_url` or `api_key_env` is rejected, and the generated config sets
+  `agent.max_tool_result_chars` to at least twice the backend template's
+  length (minimum 64,000).
+- **Improvement:** `mcp-solver-bench` runs each solve with its own run
+  directory as working directory (path arguments made absolute), saves the
+  solve's stderr to `cli_stderr.txt` there, and copies its last 20 lines
+  into the result row (`stderr_tail`) of a failed or invalid run.
+- **Improvement:** The CLI and the toolkit server check that the engine
+  offers all five tools they use (`python_exec`, `python_reset`,
+  `python_status`, `python_interrupt`, `submit_code`) and name the missing
+  ones together with the required engine version.
+- **Fix:** The pysat and maxsat kernels install `python-sat[pb]` instead of
+  `python-sat` and `pypblib`. The `[pb]` extra installs pindakaas, without
+  which every `pysat.pb.PBEnc` encoding call raises.
+- **Fix:** In dev mode, newly started kernels pick up edits to the helper
+  sources (the uv build cache is keyed on `src/**/*.py`, not only on
+  `pyproject.toml`).
+
 ### [4.2.0] - 2026-11-13
 
 - **Major Change:** Published on PyPI as `agentic-mcp-solver`, since the name

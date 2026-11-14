@@ -4,6 +4,10 @@ import json
 
 from mcp_minion.artifacts import extract_last_submission
 
+# The tests up to TestNewShape use the OLD record shape (mcp-minion <= 0.2:
+# result is a {"result": ...}/{"error": ...} envelope, no is_error key), which
+# extract_last_submission still reads so that old run logs extract.
+
 
 def _ok(payload: str = "done") -> str:
     return json.dumps({"result": payload})
@@ -94,7 +98,7 @@ _SUBMIT_REJECTED = json.dumps(
 )
 
 
-class TestRejectedSubmissions:
+class TestRejectedSubmissionsOldShape:
     def test_good_then_rejected_returns_good(self) -> None:
         steps = [
             {"tool_calls": [_call("submit_code", "good", _SUBMIT_OK)]},
@@ -129,3 +133,110 @@ class TestRejectedSubmissions:
             "result": {"result": {"ok": False, "error": "x"}},
         }
         assert extract_last_submission([{"tool_calls": [call]}]) is None
+
+
+def _new(code: str, text: str, is_error: bool = False) -> dict:
+    return {
+        "name": "submit_code",
+        "arguments": {"code": code},
+        "result": text,
+        "is_error": is_error,
+    }
+
+
+class TestNewShape:
+    """Current records: result is the plain text, is_error a bool."""
+
+    def test_accepted_plain_text(self) -> None:
+        steps = [{"tool_calls": [_new("v1", "accepted")]}]
+        assert extract_last_submission(steps) == "v1"
+
+    def test_ok_true_accepted(self) -> None:
+        steps = [{"tool_calls": [_new("v1", json.dumps({"ok": True}))]}]
+        assert extract_last_submission(steps) == "v1"
+
+    def test_is_error_skipped(self) -> None:
+        steps = [
+            {"tool_calls": [_new("good", '{"ok": true}')]},
+            {"tool_calls": [_new("bad", "Tool 'submit_code' timed out", True)]},
+        ]
+        assert extract_last_submission(steps) == "good"
+
+    def test_ok_false_skipped(self) -> None:
+        rejected = json.dumps({"ok": False, "error": "Syntax error"})
+        steps = [
+            {"tool_calls": [_new("good", '{"ok": true}')]},
+            {"tool_calls": [_new("def (:", rejected)]},
+        ]
+        assert extract_last_submission(steps) == "good"
+
+    def test_error_key_in_text_is_not_an_envelope(self) -> None:
+        # In the new shape only is_error and ok:false reject; a text that
+        # happens to be {"error": ...} is the server's own payload.
+        steps = [{"tool_calls": [_new("v", json.dumps({"error": None, "ok": True}))]}]
+        assert extract_last_submission(steps) == "v"
+
+    def test_old_and_new_shapes_mixed(self) -> None:
+        steps = [
+            {"tool_calls": [_call("submit_code", "old", _SUBMIT_OK)]},
+            {"tool_calls": [_new("new", '{"ok": true}')]},
+            {"tool_calls": [_call("submit_code", "old-bad", _SUBMIT_REJECTED)]},
+        ]
+        assert extract_last_submission(steps) == "new"
+
+    def test_from_agent_step_records(self) -> None:
+        import asyncio
+        from types import SimpleNamespace
+
+        from mcp_minion import Agent, ToolOutcome
+
+        class Manager:
+            def has_tool(self, name):
+                return name == "submit_code"
+
+            def get_tools(self):
+                return []
+
+            def get_resources(self):
+                return []
+
+            def get_instructions(self):
+                return {}
+
+            def get_openai_tools(self):
+                return [{"type": "function", "function": {"name": "submit_code"}}]
+
+            async def call_tool(self, name, arguments):
+                ok = "def" not in arguments["code"]
+                return ToolOutcome(text=json.dumps({"ok": ok}))
+
+        def response(content=None, code=None):
+            calls = None
+            if code is not None:
+                calls = [
+                    SimpleNamespace(
+                        id="c",
+                        function=SimpleNamespace(
+                            name="submit_code", arguments=json.dumps({"code": code})
+                        ),
+                    )
+                ]
+            msg = SimpleNamespace(content=content, tool_calls=calls)
+            return SimpleNamespace(
+                id="r",
+                model="m",
+                choices=[SimpleNamespace(message=msg, finish_reason="stop")],
+                usage=None,
+            )
+
+        queue = [response(code="print(1)"), response(code="def ("), response("done")]
+
+        async def create(**kwargs):
+            return queue.pop(0)
+
+        agent = Agent(api_key="k", tools=None, mcp_manager=Manager())
+        agent.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        result = asyncio.run(agent.run_async("go"))
+        assert extract_last_submission(result.steps) == "print(1)"

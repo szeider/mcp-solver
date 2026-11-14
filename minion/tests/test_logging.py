@@ -72,6 +72,15 @@ class TestRunLogger:
             assert tool_calls[0]["name"] == "add"
             assert tool_calls[0]["arguments"] == {"a": 2, "b": 3}
             assert tool_calls[0]["result"] == '{"result": 5}'
+            assert tool_calls[0]["is_error"] is False
+
+    def test_log_tool_call_error_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = RunLogger(log_dir=Path(tmpdir))
+            logger.log_step_start(1)
+            logger.log_tool_call("t", {}, "boom", "c1", is_error=True)
+            data = json.loads(logger.log_path.read_text())
+            assert data["steps"][0]["tool_calls"][0]["is_error"] is True
 
     def test_log_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

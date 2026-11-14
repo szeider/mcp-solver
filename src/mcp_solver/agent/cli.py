@@ -13,10 +13,11 @@ its solution (JSON) to stdout.
 Exit status:
     0    the submitted program ran and exited 0
     1    setup or agent failure (agent layer missing, no API key, engine
-         error, an exception from the solve, or an agent error before any
-         submission)
+         error, kernel setup failure, an exception from the solve, or an
+         agent error before any submission)
     2    usage error, or an unpublished version with dev mode off
-    3    the agent finished without a successful ``submit_code``
+    3    the agent finished without a successful ``submit_code`` (also when
+         the step limit or the token limit ended the run first)
     4    the agent stopped early with an error (e.g. an LLM API failure)
          after an accepted submission; that submission was saved and ran
          with exit 0, but it may not be the agent's final, verified program
@@ -28,14 +29,15 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import mcp_solver
+from mcp_solver.agent import engine
 from mcp_solver.templates import SOLVERS, get_template
 
 # Re-execute the submitted program under the same interpreter version that
@@ -45,6 +47,12 @@ PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 # Exit code for a run the agent ended early with an error after an accepted
 # submission (see the module docstring for all exit codes).
 EXIT_AGENT_ERROR_WITH_SUBMISSION = 4
+
+# Default cap on the total (input + output) tokens of one run.
+DEFAULT_TOKEN_LIMIT = 2_000_000
+
+# API key variable unless a model config names another (api_key_env).
+DEFAULT_KEY_VAR = "OPENROUTER_API_KEY"
 
 # Solver libraries injected into the solve-time kernel, per backend.
 # The [pb] extra installs pindakaas, which backs pysat.pb.PBEnc
@@ -62,62 +70,19 @@ SOLVER_PACKAGES: dict[str, list[str]] = {
 }
 
 
-def _local_checkout() -> str | None:
-    """Return the repo root when mcp_solver runs from a source checkout.
-
-    An editable install resolves ``mcp_solver`` to ``<root>/src/mcp_solver``;
-    a regular install resolves it inside site-packages, where the checkout
-    markers are absent.
-    """
-    root = Path(mcp_solver.__file__).resolve().parents[2]
-    if (root / "pyproject.toml").is_file() and (root / "src" / "mcp_solver").is_dir():
-        return str(root)
-    return None
-
-
-def _is_unpublishable(version: str) -> bool:
-    """Return True when *version* looks like a pre-release/dev build.
-
-    Published releases are plain numeric (e.g. ``4.0.0``). Anything else —
-    an alphabetic marker (``a``/``b``/``rc``/``dev`` per PEP 440) or a local
-    segment (``4.0.0+1``) — is not on PyPI, so a PyPI pin to it would fail.
-    """
-    return re.fullmatch(r"\d+(\.\d+)*", version) is None
-
-
 def resolve_dev_path(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> str | None:
     """Return the effective dev-mode path (a source checkout root) or None.
 
-    Dev mode means "everything Python-related comes from the local repo":
-    the injected helper library and the solver templates. Resolution order:
-
-    1. ``--no-dev`` → None (published behavior), overrides everything.
-    2. ``--dev PATH`` → that path.
-    3. ``--dev`` (no path) → auto-detected checkout, or a parser error.
-    4. ``$MCP_SOLVER_DEV`` set to ``1``/``true``/``auto`` → auto-detect
-       (error if none); any other non-empty value → treat as a path.
-    5. Nothing set → auto-default to a detected checkout (may be None).
+    Applies ``engine.resolve_dev_path`` to ``--dev``/``--no-dev`` (see there
+    for the resolution order); a dev-mode request without a checkout is a
+    parser error.
     """
-    if args.no_dev:
-        return None
-    if args.dev is not None:
-        if args.dev == "auto":
-            checkout = _local_checkout()
-            if checkout is None:
-                parser.error("no source checkout detected; pass --dev PATH")
-            return checkout
-        return args.dev
-    env = os.environ.get("MCP_SOLVER_DEV")
-    if env:
-        if env.lower() in ("1", "true", "auto"):
-            checkout = _local_checkout()
-            if checkout is None:
-                parser.error("no source checkout detected; pass --dev PATH")
-            return checkout
-        return env
-    return _local_checkout()
+    try:
+        return engine.resolve_dev_path(args.dev, args.no_dev)
+    except engine.DevModeError as exc:
+        parser.error(str(exc))
 
 
 def helpers_package(dev_path: str | None = None) -> str:
@@ -141,77 +106,112 @@ def build_with_packages(solver: str, dev_path: str | None = None) -> list[str]:
     return [*SOLVER_PACKAGES[solver], helpers_package(dev_path)]
 
 
-def _model_params(config: dict[str, Any]) -> dict[str, Any]:
-    """Translate a model-alias config dict into OpenRouter API parameters.
+# Sampling parameters forwarded from a model config (unless the model is
+# flagged no_sampling_params, which forwards only max_tokens).
+_SAMPLING_KEYS = (
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+)
 
-    Mirrors the engine's rules: models flagged ``no_sampling_params`` accept
-    only ``max_tokens``; otherwise the standard sampling knobs pass through.
-    (``top_k``/``provider``/``reasoning`` need ``extra_body``, which the
-    minion agent reserves, so they are not forwarded.)
+
+@dataclass
+class ModelSettings:
+    """A resolved model: the OpenRouter ID and the request settings.
+
+    ``api_params`` go into the completions call as is, ``extra_body`` into
+    the request body (OpenRouter ``reasoning``/``provider``/``top_k``),
+    ``request_timeout`` (seconds) is the per-request timeout. ``base_url``
+    (None: OpenRouter) is an OpenAI-compatible endpoint and ``api_key_env``
+    (None: OPENROUTER_API_KEY) names the variable holding its key, as in
+    the engine's model configs.
     """
-    params: dict[str, Any] = {}
-    if config.get("no_sampling_params"):
-        if "max_tokens" in config:
-            params["max_tokens"] = config["max_tokens"]
-        return params
-    for key in (
-        "temperature",
-        "max_tokens",
-        "top_p",
-        "frequency_penalty",
-        "presence_penalty",
-    ):
+
+    model: str
+    api_params: dict[str, Any] = field(default_factory=dict)
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    request_timeout: float | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+
+    @property
+    def key_var(self) -> str:
+        """The environment variable name to look up the API key under."""
+        return self.api_key_env or DEFAULT_KEY_VAR
+
+
+def model_settings(config: dict[str, Any]) -> ModelSettings:
+    """Map an engine model config (``load_model_config``) to ModelSettings.
+
+    Follows the engine's own translation: ``no_sampling_params`` models get
+    only ``max_tokens`` (and no ``top_k``); ``provider`` and ``reasoning``
+    apply to every model; ``base_url`` and ``api_key_env`` select another
+    OpenAI-compatible endpoint and its key variable.
+    """
+    no_sampling = bool(config.get("no_sampling_params"))
+    keys = ("max_tokens",) if no_sampling else _SAMPLING_KEYS
+    api_params = {k: config[k] for k in keys if k in config}
+    extra_body: dict[str, Any] = {}
+    if not no_sampling and "top_k" in config:
+        extra_body["top_k"] = config["top_k"]
+    for key in ("provider", "reasoning"):
         if key in config:
-            params[key] = config[key]
-    return params
+            extra_body[key] = config[key]
+    return ModelSettings(
+        model=config["path"],
+        api_params=api_params,
+        extra_body=extra_body,
+        request_timeout=config.get("request_timeout"),
+        base_url=config.get("base_url") or None,
+        api_key_env=config.get("api_key_env") or None,
+    )
 
 
-def resolve_model(name: str) -> tuple[str, dict[str, Any]]:
-    """Resolve a model name to ``(openrouter_id, api_params)``.
+def resolve_model(name: str) -> ModelSettings:
+    """Resolve a model name to ModelSettings.
 
-    A name containing ``/`` is already an OpenRouter model ID and passes
-    through unchanged. Anything else is an alias looked up in the engine's
-    bundled ``models/<name>.json`` (e.g. ``gpt56terra``).
+    A name ending in ``.json`` is a model config file; any other name
+    containing ``/`` is an OpenRouter model ID and passes through without
+    settings; anything else is an alias resolved by the engine's
+    ``load_model_config`` (``./<name>.json``, then the bundled
+    ``models/<name>.json``, e.g. ``gpt56terra``).
 
-    Raises ValueError for an unknown alias.
+    Raises ValueError for an unknown alias or an invalid config file.
     """
-    if "/" in name:
-        return name, {}
-    from importlib.resources import files
-
+    if "/" in name and not name.endswith(".json"):
+        return ModelSettings(model=name)
     try:
-        text = (files("agentic_python_coder") / "models" / f"{name}.json").read_text(
-            encoding="utf-8"
-        )
-    except (ModuleNotFoundError, FileNotFoundError) as exc:
+        from agentic_python_coder import load_model_config
+    except ImportError as exc:
         raise ValueError(
             f"unknown model alias {name!r}; pass a full OpenRouter ID"
             " (e.g. openai/gpt-5.6-terra) or install the engine for aliases"
         ) from exc
-    config = json.loads(text)
-    return config["path"], _model_params(config)
+    try:
+        config = load_model_config(name)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"unknown model alias {name!r}; pass a full OpenRouter ID"
+            f" (e.g. openai/gpt-5.6-terra) or a model .json file ({exc})"
+        ) from exc
+    return model_settings(config)
 
 
-def find_api_key() -> str | None:
-    """Return the OpenRouter API key, or None.
+def find_api_key(env_var: str = DEFAULT_KEY_VAR) -> str | None:
+    """Return the API key held in *env_var*, or None.
 
-    Checked in order: the environment, then the dotenv files used by the
-    engine (``~/.config/coder/.env``) and by mcp-minion (``~/.mcp-minion``).
+    ``mcp_minion.find_api_key`` with the engine's dotenv file: checked in
+    order are the environment, ``~/.config/coder/.env`` (engine) and
+    ``~/.mcp-minion``. The files are read, not loaded into the environment.
     """
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key
-    from dotenv import dotenv_values
+    from mcp_minion import find_api_key as minion_find_api_key
 
-    for dotfile in (
-        Path.home() / ".config" / "coder" / ".env",
-        Path.home() / ".mcp-minion",
-    ):
-        if dotfile.is_file():
-            key = dotenv_values(dotfile).get("OPENROUTER_API_KEY")
-            if key:
-                return key
-    return None
+    return minion_find_api_key(
+        env_var=env_var,
+        extra_dotenv=(Path.home() / ".config" / "coder" / ".env",),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -238,7 +238,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default="gpt56terra",
-        help="agent model name (default: %(default)s)",
+        help="agent model: an engine alias, a model .json file, or a full"
+        " OpenRouter ID (default: %(default)s)",
     )
     parser.add_argument(
         "--workdir",
@@ -252,6 +253,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=30,
         metavar="N",
         help="maximum agent steps before stopping (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--token-limit",
+        type=int,
+        default=DEFAULT_TOKEN_LIMIT,
+        metavar="N",
+        help="maximum total (input + output) tokens of the run, checked after"
+        " each step; 0 means no limit (default: %(default)s)",
     )
     parser.add_argument(
         "-q",
@@ -304,12 +313,15 @@ def resolve_task(
     return task_text, "task"
 
 
-def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
+def build_stats(
+    result: Any, elapsed: float, model_id: str, token_limit: int = 0
+) -> dict:
     """Summarise an AgentResult as the stats dict consumed by the harness.
 
     Keeps the key shape of the old engine stats (``token_consumption``,
     ``tool_usage``, ``execution_time_seconds``, ``step_limit_reached``) so
-    downstream consumers need no changes.
+    downstream consumers need no changes; ``token_limit_reached`` and
+    ``token_limit`` (0 = none) report the per-run token cap.
     """
     tool_usage: dict[str, int] = {}
     for step in result.steps:
@@ -328,6 +340,8 @@ def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
         "steps": len(result.steps),
         "tool_calls_made": result.tool_calls_made,
         "step_limit_reached": result.max_steps_reached,
+        "token_limit_reached": bool(getattr(result, "token_cap_reached", False)),
+        "token_limit": token_limit,
         "model": model_id,
     }
 
@@ -335,7 +349,14 @@ def build_stats(result: Any, elapsed: float, model_id: str) -> dict:
 def _progress(step_info: dict) -> None:
     """Print a one-line progress note for a completed agent step."""
     calls = step_info.get("tool_calls") or []
-    detail = ", ".join(c.get("name", "?") for c in calls) if calls else "final answer"
+    detail = (
+        ", ".join(
+            c.get("name", "?") + (" (error)" if c.get("is_error") else "")
+            for c in calls
+        )
+        if calls
+        else "final answer"
+    )
     print(f"mcp-solver: step {step_info['step']}: {detail}", file=sys.stderr)
 
 
@@ -346,23 +367,15 @@ async def solve(
     logger: Any,
     quiet: bool,
 ) -> Any:
-    """Run one solve: minion agent over the engine's ipython_mcp server."""
-    from mcp_minion import Agent, MCPManager
+    """Run one solve: minion agent over the engine's ipython_mcp server.
 
-    servers = {
-        "ipython": {
-            "command": sys.executable,
-            "args": ["-m", "agentic_python_coder.mcp_server"],
-        }
-    }
-    manager = MCPManager(servers)
-    await manager.__aenter__()
+    Raises engine.EngineError (a RuntimeError) when the engine lacks a
+    needed tool.
+    """
+    from mcp_minion import Agent
+
+    manager = await engine.start_engine()
     try:
-        if not manager.has_tool("submit_code"):
-            raise RuntimeError(
-                "the ipython_mcp server does not provide submit_code;"
-                " upgrade agentic-python-coder to >=3.4.0"
-            )
         agent = Agent(
             api_key=api_key,
             tools=None,
@@ -388,20 +401,29 @@ def print_stats(stats: dict) -> None:
         f" {elapsed:.1f}s",
         file=sys.stderr,
     )
+    if stats.get("token_limit_reached"):
+        print(
+            f"mcp-solver: the run stopped at the token limit"
+            f" ({stats.get('token_limit', 0):,} tokens).",
+            file=sys.stderr,
+        )
+    elif stats.get("step_limit_reached"):
+        print("mcp-solver: the run stopped at the step limit.", file=sys.stderr)
 
 
 def run_program(program: Path, with_packages: list[str]) -> int:
     """Execute the saved program in a uv kernel; return its exit code.
 
-    The program's stdout (the solution JSON) is inherited so it becomes
-    this command's stdout.
+    The program runs under ``engine.kernel_env()``, the environment the
+    agent's kernel had (API keys withheld). Its stdout (the solution JSON)
+    is inherited so it becomes this command's stdout.
     """
     cmd = ["uv", "run", "--no-project", "--python", PYTHON_VERSION]
     for pkg in with_packages:
         cmd += ["--with", pkg]
     cmd += ["python", str(program)]
     try:
-        return subprocess.run(cmd).returncode
+        return subprocess.run(cmd, env=engine.kernel_env()).returncode
     except FileNotFoundError:
         print(
             "mcp-solver: 'uv' not found on PATH; it is required to run the"
@@ -427,16 +449,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     task, task_basename = resolve_task(args, parser)
+    if args.token_limit < 0:
+        parser.error("--token-limit must be >= 0 (0 means no limit)")
     dev_path = resolve_dev_path(args, parser)
 
-    if dev_path is None and _is_unpublishable(mcp_solver.__version__):
-        print(
-            f"mcp-solver: installed version {mcp_solver.__version__} is not a"
-            " published release and dev mode is off.\n"
-            "Run from a source checkout, or pass --dev PATH (or --dev in a"
-            " checkout) to take helpers and templates from the local repo.",
-            file=sys.stderr,
-        )
+    try:
+        engine.require_publishable(dev_path)
+    except engine.UnpublishedVersionError as exc:
+        print(f"mcp-solver: {exc}", file=sys.stderr)
         return 2
 
     with_packages = build_with_packages(args.solver, dev_path)
@@ -460,18 +480,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        model_id, api_params = resolve_model(args.model)
+        model = resolve_model(args.model)
     except ValueError as exc:
         parser.error(str(exc))
 
-    api_key = find_api_key()
+    api_key = find_api_key(model.key_var)
     if api_key is None:
-        print(
-            "mcp-solver: no OpenRouter API key found.\n"
-            "Set OPENROUTER_API_KEY or put it in ~/.config/coder/.env"
-            " (see INSTALL.md).",
-            file=sys.stderr,
-        )
+        if model.api_key_env:
+            message = (
+                f"mcp-solver: no API key found in {model.api_key_env}"
+                " (named by api_key_env in the model config).\n"
+                f"Set {model.api_key_env} or put it in ~/.config/coder/.env."
+            )
+        else:
+            message = (
+                "mcp-solver: no OpenRouter API key found.\n"
+                "Set OPENROUTER_API_KEY or put it in ~/.config/coder/.env"
+                " (see INSTALL.md)."
+            )
+        print(message, file=sys.stderr)
         return 1
 
     workdir = Path(args.workdir or os.getcwd()).resolve()
@@ -479,10 +506,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from mcp_minion import AgentConfig, RunLogger, extract_last_submission
 
+    endpoint = {"base_url": model.base_url} if model.base_url else {}
     config = AgentConfig(
-        model=model_id,
+        **endpoint,
+        model=model.model,
         max_steps=args.step_limit,
-        api_params=api_params,
+        api_params=model.api_params,
+        extra_body=model.extra_body or None,
+        request_timeout=model.request_timeout,
+        max_total_tokens=args.token_limit,
         system_prompt=project_prompt,
         packages=with_packages,
     )
@@ -502,7 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     elapsed = time.monotonic() - start
 
-    stats = build_stats(result, elapsed, model_id)
+    stats = build_stats(result, elapsed, model.model, args.token_limit)
     print_stats(stats)
     if args.stats_json:
         try:
@@ -513,9 +545,10 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    # Set by mcp-minion when the agent stopped early (e.g. an LLM API
-    # failure); getattr keeps older minions without the field working.
-    agent_error = getattr(result, "error", None)
+    # Set by mcp-minion when the agent stopped early: an LLM API failure, or
+    # a failed kernel setup (python_reset with the solver packages) before
+    # the first step. A step or token limit is not an error.
+    agent_error = result.error
     code = extract_last_submission(result.steps)
     if code is None:
         if agent_error:

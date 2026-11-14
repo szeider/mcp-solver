@@ -2,8 +2,6 @@
 
 import asyncio
 import contextlib
-import json
-import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -19,31 +17,56 @@ DEFAULT_TOOL_TIMEOUT = 300.0
 TIMEOUT_MARGIN = 30.0
 
 
-def _field(obj: Any, name: str) -> Any:
-    """Read a protocol-type field under mcp 2.x (snake_case) or 1.x (camelCase)."""
-    if hasattr(obj, name):
-        return getattr(obj, name)
-    head, *rest = name.split("_")
-    return getattr(obj, head + "".join(w.title() for w in rest), None)
+def _b64_size(data: Any) -> int:
+    """Decoded size in bytes of a base64 string (without decoding it)."""
+    if not isinstance(data, str):
+        return 0
+    data = data.strip()
+    return max(0, len(data) * 3 // 4 - (len(data) - len(data.rstrip("="))))
+
+
+def _resource_contents_text(contents: Any) -> str:
+    """Text of one resource-contents item; a blob becomes a one-line note."""
+    text = getattr(contents, "text", None)
+    if isinstance(text, str):
+        return text
+    uri = getattr(contents, "uri", "?")
+    mime = getattr(contents, "mime_type", None) or "?"
+    return f"[blob uri={uri} mime={mime} bytes={_b64_size(getattr(contents, 'blob', None))}]"
 
 
 def _content_text(content: Any) -> str:
-    """Join the text of MCP content items (used for results and errors alike).
+    """Render MCP content blocks as text (results and errors alike).
 
-    ``resource_link`` items are rendered as a fetchable reference so the model
-    can follow them with the read_resource tool (Tier 2 of a
-    successive-revelation server).
+    Text blocks pass through unchanged. ``resource_link`` blocks become a
+    fetchable reference line the model can follow with read_resource (Tier 2
+    of a successive-revelation server). Binary blocks (image, audio, blob)
+    become one short line each, never base64 or an object repr. An embedded
+    text resource is a header line followed by its text.
     """
     parts = []
     for item in content:
-        if getattr(item, "type", None) == "resource_link":
+        kind = getattr(item, "type", None)
+        if kind == "text":
+            parts.append(item.text)
+        elif kind == "resource_link":
             desc = getattr(item, "description", None)
             suffix = f" — {desc}" if desc else ""
             parts.append(f"[resource_link] {item.uri} ({item.name}){suffix}")
-        elif hasattr(item, "text"):
-            parts.append(item.text)
+        elif kind in ("image", "audio"):
+            mime = getattr(item, "mime_type", None) or "?"
+            size = _b64_size(getattr(item, "data", None))
+            parts.append(f"[{kind} mime={mime} bytes={size}]")
+        elif kind == "resource":
+            res = getattr(item, "resource", None)
+            if isinstance(getattr(res, "text", None), str):
+                mime = getattr(res, "mime_type", None) or "?"
+                uri = getattr(res, "uri", "?")
+                parts.append(f"[resource uri={uri} mime={mime}]\n{res.text}")
+            else:
+                parts.append(_resource_contents_text(res))
         else:
-            parts.append(str(item))
+            parts.append(f"[{kind or type(item).__name__} content]")
     return "\n".join(parts)
 
 
@@ -59,13 +82,32 @@ class MCPToolInfo:
 
 @dataclass
 class MCPResourceInfo:
-    """Information about an MCP resource."""
+    """Information about an MCP resource (announced, or a resource_link)."""
 
     uri: str
     name: str
     description: str
     mime_type: str | None
     server_name: str
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    """The result of one tool call, as text for a text-only model interface.
+
+    ``text`` is the rendered content (see ``_content_text``); ``is_error`` is
+    set for MCP ``isError`` results and for client-side failures (unknown
+    tool, bad arguments, timeout, transport error); ``links`` lists the
+    resource_links of a successful MCP result, which read_resource accepts.
+    """
+
+    text: str
+    is_error: bool = False
+    links: tuple[MCPResourceInfo, ...] = ()
+
+
+def _error(text: str) -> ToolOutcome:
+    return ToolOutcome(text=text, is_error=True)
 
 
 class MCPManager:
@@ -81,7 +123,9 @@ class MCPManager:
 
         Args:
             servers_config: Dict mapping server names to their config.
-                Each config has: command, args (optional), env (optional)
+                Each config has ``command`` and optionally ``args``, ``env``
+                (merged by the mcp library over its default environment
+                whitelist) and ``cwd`` (the server's working directory).
             tool_timeout: Default client-side timeout (seconds) for a single
                 tool call. If a call's arguments carry a numeric ``timeout``
                 (e.g. python_exec), the effective timeout is at least that
@@ -96,6 +140,8 @@ class MCPManager:
         self._sessions: dict[str, ClientSession] = {}
         self._tools: dict[str, MCPToolInfo] = {}  # tool_name -> MCPToolInfo
         self._resources: list[MCPResourceInfo] = []
+        # server name -> non-empty instructions from its initialize result.
+        self._instructions: dict[str, str] = {}
         # uri -> server that produced it as a resource_link in a tool result.
         self._link_origins: dict[str, str] = {}
         self._exit_stack: AsyncExitStack | None = None
@@ -134,6 +180,7 @@ class MCPManager:
         self._sessions.clear()
         self._tools.clear()
         self._resources.clear()
+        self._instructions.clear()
         self._link_origins.clear()
 
     async def __aexit__(
@@ -148,13 +195,13 @@ class MCPManager:
 
     async def _start_server(self, server_name: str, cfg: dict[str, Any]) -> None:
         """Start a single MCP server and discover its tools."""
-        # Merge custom env with system env (custom takes precedence)
-        server_env = {**os.environ, **cfg["env"]} if cfg.get("env") else None
-
+        # A configured env is forwarded unchanged; the mcp library merges it
+        # over its default environment whitelist (PATH, HOME, ...).
         params = StdioServerParameters(
             command=cfg["command"],
-            args=cfg.get("args", []),
-            env=server_env,
+            args=cfg.get("args") or [],
+            env=cfg.get("env") or None,
+            cwd=cfg.get("cwd") or None,
         )
 
         # Enter stdio_client context; errlog (when set) receives the whole
@@ -176,6 +223,7 @@ class MCPManager:
         # be used afterwards, so tool/resource discovery is capability-gated.
         init_result = await asyncio.wait_for(session.initialize(), timeout=INIT_TIMEOUT)
         capabilities = init_result.capabilities
+        instructions = (init_result.instructions or "").strip()
 
         # Stage the server's tools first (consuming cursor pagination); commit
         # session and tools together only once every collision check has
@@ -201,16 +249,18 @@ class MCPManager:
                 staged[tool.name] = MCPToolInfo(
                     name=tool.name,
                     description=tool.description or "",
-                    parameters=_field(tool, "input_schema")
+                    parameters=tool.input_schema
                     or {"type": "object", "properties": {}},
                     server_name=server_name,
                 )
-            cursor = _field(tools_result, "next_cursor")
+            cursor = tools_result.next_cursor
             if not cursor:
                 break
 
         self._sessions[server_name] = session
         self._tools.update(staged)
+        if instructions:
+            self._instructions[server_name] = instructions
 
         # Discover announced resources (optional capability, paginated).
         if capabilities.resources is None:
@@ -227,17 +277,24 @@ class MCPManager:
                         uri=str(res.uri),
                         name=res.name or str(res.uri),
                         description=res.description or "",
-                        mime_type=_field(res, "mime_type"),
+                        mime_type=res.mime_type,
                         server_name=server_name,
                     )
                 )
-            cursor = _field(res_result, "next_cursor")
+            cursor = res_result.next_cursor
             if not cursor:
                 break
 
     def get_resources(self) -> list[MCPResourceInfo]:
         """Get all announced MCP resources."""
         return list(self._resources)
+
+    def get_instructions(self) -> dict[str, str]:
+        """Server name -> instructions from its initialize result.
+
+        Servers that sent no (or only blank) instructions are absent.
+        """
+        return dict(self._instructions)
 
     async def read_resource(self, uri: str) -> str:
         """Read a resource by URI and return its text content.
@@ -262,67 +319,70 @@ class MCPManager:
         result = await asyncio.wait_for(
             session.read_resource(uri), timeout=RESOURCE_TIMEOUT
         )
-        parts = []
-        for item in result.contents:
-            if hasattr(item, "text"):
-                parts.append(item.text)
-            else:
-                parts.append(str(item))
-        return "\n".join(parts)
+        return "\n".join(_resource_contents_text(item) for item in result.contents)
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None) -> str:
-        """Call a tool and return the result as a JSON string.
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any] | None
+    ) -> ToolOutcome:
+        """Call a tool and return its outcome.
+
+        Never raises for tool-level problems: an MCP ``isError`` result and
+        client-side failures (unknown tool, non-object arguments, server not
+        connected, timeout, transport error) come back with ``is_error`` set.
 
         Args:
             name: Tool name
             arguments: Tool arguments (None counts as no arguments)
-
-        Returns:
-            JSON string with result or error
         """
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
-            return json.dumps(
-                {
-                    "error": f"Tool '{name}' arguments must be a JSON object,"
-                    f" got {type(arguments).__name__}"
-                }
+            return _error(
+                f"Tool '{name}' arguments must be a JSON object,"
+                f" got {type(arguments).__name__}"
             )
 
         tool_info = self._tools.get(name)
         if not tool_info:
-            return json.dumps({"error": f"Unknown MCP tool: {name}"})
+            return _error(f"Unknown MCP tool: {name}")
 
         session = self._sessions.get(tool_info.server_name)
         if not session:
-            return json.dumps(
-                {"error": f"MCP server '{tool_info.server_name}' not connected"}
-            )
+            return _error(f"MCP server '{tool_info.server_name}' not connected")
 
         try:
             result = await asyncio.wait_for(
                 session.call_tool(name, arguments),
                 timeout=self._effective_timeout(arguments),
             )
-
-            if _field(result, "is_error"):
-                return json.dumps({"error": _content_text(result.content)})
-
-            # Remember which server produced each resource_link so later
-            # read_resource calls route to the origin server only. Error
-            # results are excluded: a link echoed inside an error payload
-            # must not widen the readable set.
-            for item in result.content:
-                if getattr(item, "type", None) == "resource_link":
-                    self._link_origins[str(item.uri)] = tool_info.server_name
-
-            return json.dumps({"result": _content_text(result.content)})
-
         except TimeoutError:
-            return json.dumps({"error": f"Tool '{name}' timed out"})
+            return _error(f"Tool '{name}' timed out")
         except Exception as e:
-            return json.dumps({"error": f"Tool '{name}' failed: {e}"})
+            return _error(f"Tool '{name}' failed: {e}")
+
+        text = _content_text(result.content)
+        if result.is_error:
+            return _error(text)
+
+        # Remember which server produced each resource_link so later
+        # read_resource calls route to the origin server only. Error results
+        # are excluded: a link echoed inside an error payload must not widen
+        # the readable set.
+        links = []
+        for item in result.content:
+            if getattr(item, "type", None) == "resource_link":
+                uri = str(item.uri)
+                self._link_origins[uri] = tool_info.server_name
+                links.append(
+                    MCPResourceInfo(
+                        uri=uri,
+                        name=getattr(item, "name", None) or uri,
+                        description=getattr(item, "description", None) or "",
+                        mime_type=getattr(item, "mime_type", None),
+                        server_name=tool_info.server_name,
+                    )
+                )
+        return ToolOutcome(text=text, links=tuple(links))
 
     def _effective_timeout(self, arguments: dict[str, Any] | None) -> float:
         """Client-side timeout for one tool call.
