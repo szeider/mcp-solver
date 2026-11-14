@@ -39,8 +39,10 @@ packages, `preference_penalty` is 4 if fewer than 3 packages are chosen (else
 0), and `objective_value` equals `total_value - preference_penalty`. The
 selection must satisfy all dependencies and maximize `objective_value`.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "selected_packages": ["Core", "UI", "Auth", "API", "Analytics"], "total_value": 26, "preference_penalty": 0, "objective_value": 26}
+{"satisfiable": true, "selected_packages": ["Analytics"], "total_value": 0, "preference_penalty": 0, "objective_value": 0}
 ```
 
 If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

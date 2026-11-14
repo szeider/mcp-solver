@@ -9,7 +9,7 @@ one).
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (the puzzle has a unique solution).
+- `satisfiable` (boolean): `true` if the puzzle has a solution.
 - `assignment` (list of 4 objects): one per desk, each with:
   - `desk` (integer 1-4)
   - `name` (string): one of `Emily`, `Anna`, `Ben`, `Liam`.
@@ -19,16 +19,16 @@ Return a single JSON object on stdout with this schema:
 
 Names, subjects, and foods are compared case-insensitively.
 
-Expected (unique) solution:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
   "assignment": [
-    {"desk": 1, "name": "Emily", "subject": "Literature", "food": "Pizza"},
-    {"desk": 2, "name": "Ben", "subject": "Chemistry", "food": "Pasta"},
-    {"desk": 3, "name": "Anna", "subject": "Biology", "food": "apples"},
-    {"desk": 4, "name": "Liam", "subject": "Physics", "food": "ice cream"}
+    {"desk": 1, "name": "Ben", "subject": "Physics", "food": "Pasta"},
+    {"desk": 2, "name": "Ben", "subject": "Physics", "food": "Pasta"},
+    {"desk": 3, "name": "Ben", "subject": "Physics", "food": "Pasta"},
+    {"desk": 4, "name": "Ben", "subject": "Physics", "food": "Pasta"}
   ]
 }
 ```

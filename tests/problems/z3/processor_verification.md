@@ -38,18 +38,16 @@ Return a single JSON object on stdout with this schema:
   Additional fields (`final_registers`, `final_memory`, `zero_flags`,
   `evidence`) are optional and ignored by validation.
 
-The property does **not** hold: R3 ends up as the low bit of
-`memory[R0] XOR R0`, which is not the bit-count parity of R0. The expected
-verdict is therefore `property_holds: false` with a valid counterexample.
+If the property holds, the output is `{"property_holds": true}`.
 
-Example:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "property_holds": false,
   "counterexample": {
-    "initial_registers": {"R0": 253, "R1": 0, "R2": 0, "R3": 0},
-    "initial_memory": [1, 1, 1, 1, 1, 1, 1, 1]
+    "initial_registers": {"R0": 0, "R1": 0, "R2": 0, "R3": 0},
+    "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0]
   }
 }
 ```

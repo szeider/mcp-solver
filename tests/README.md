@@ -48,3 +48,10 @@ tests/problems/pysat/
 
 A `test.md` file (if present) is treated as a smoke problem and skipped by the
 harness.
+
+Rule for problem texts: every ```` ```json ```` example is a shape-only dummy
+whose values fail validation, introduced by the line "Example (this is a dummy
+showing the shape only, **not** the real answer):", and no sentence states the
+answer, the optimum, or the verdict (satisfiable or not, property holds or
+not). `tests/unit/test_problems.py` pipes every json block of every problem
+into its validator and fails if one is accepted.

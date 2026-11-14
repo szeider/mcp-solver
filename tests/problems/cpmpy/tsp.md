@@ -17,21 +17,19 @@ A saleswoman based in Vienna needs to plan her upcoming tour through Austria, vi
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (a tour always exists).
+- `satisfiable` (boolean): `true` if a tour exists.
 - `tour` (list of 9 integers): a permutation of the city numbers `1..9`
   giving the visiting order. The route is a closed cycle, so it returns from
   the last city back to the first. Any rotation or reversal that achieves the
   optimal length is accepted.
 - `total_distance` (integer): the total length of the closed tour in km.
 
-The optimal tour length is 1564 km.
-
-Example:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
-  "tour": [1, 2, 4, 7, 9, 8, 6, 5, 3],
-  "total_distance": 1564
+  "tour": [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  "total_distance": 0
 }
 ```

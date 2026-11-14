@@ -4,7 +4,7 @@
 
 Consider a 5×5 grid of points with coordinates (i,j) where i,j ∈ {0,1,2,3,4}. This gives us 25 possible positions arranged in a square grid pattern.
 
-**Task:** Verify that it is possible to place exactly 10 points on this 5×5 grid such that no three of the selected points are collinear (lie on the same straight line).
+**Task:** Decide whether it is possible to place exactly 10 points on this 5×5 grid such that no three of the selected points are collinear (lie on the same straight line).
 
 ## Constraints
 
@@ -14,9 +14,9 @@ Consider a 5×5 grid of points with coordinates (i,j) where i,j ∈ {0,1,2,3,4}.
 
 ## What to Verify
 
-1. **Existence:** Find a configuration of 10 points on the 5×5 grid that satisfies the no-three-in-line constraint
+1. **Existence:** Find a configuration of 10 points on the 5×5 grid that satisfies the no-three-in-line constraint, if one exists
 2. **Completeness:** Check all possible lines that could pass through three or more points in your configuration to confirm none contain three selected points
-3. **Optimality:** Verify that 10 is indeed the maximum number of points that can be placed (optional)
+3. **Optimality:** Check whether 10 is the maximum number of points that can be placed (optional)
 
 ## Example Grid Layout
 
@@ -53,8 +53,10 @@ Return a single JSON object. On success, `satisfiable` is `true` and `points`
 is a list of exactly 10 distinct `[x, y]` pairs with `x, y ∈ {0, 1, 2, 3, 4}`
 such that no three of the points are collinear.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "points": [[0, 0], [0, 1], [1, 0], [1, 3], [2, 3], [2, 4], [3, 1], [3, 2], [4, 2], [4, 4]]}
+{"satisfiable": true, "points": [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1]]}
 ```
 
 If no such configuration exists: `{"satisfiable": false}`.

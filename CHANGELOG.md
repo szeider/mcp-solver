@@ -18,6 +18,14 @@
   `select_backend`).
 - **Improvement:** The pysat, maxsat and z3 templates no longer use the
   helpers (`IDPool` with `CardEnc`/`PBEnc` and `vpool=`, plain z3 idioms).
+- **Improvement:** All six templates state three shared rules alike: an
+  example output in the problem fixes the output format, and its values count
+  as a solution only if the problem says so (formerly pysat, maxsat and z3
+  called the example ground truth, and clingo called its values
+  illustrative); each `python_exec` call stops after 30 seconds by default
+  and takes a `timeout` of at most 300 seconds; the problem's Output Format
+  decides the no-solution answer, with the template's form as fallback. A
+  unit test checks the first two in every template.
 - **Fix:** The clingo template is repaired (dead v3 content removed, snippets
   and claims checked against clingo 5.8.3) and under 50,000 characters, so
   Claude Code passes the whole `select_backend` result to the host instead of
@@ -38,6 +46,19 @@
   kernel, the new code is not run and the reply says so and points to
   `python_reset`. Previously the new call was reported as timed out although
   it never ran.
+- **Behavior Change:** `mcp-solver-bench` counts a run as valid only if the
+  validator accepts the solution and the persisted program imports the
+  backend's solver library (`pysat` for pysat and maxsat, `z3`, `cpmpy`,
+  `clingo`, `didppy`), decided on the syntax tree, so a mention in a comment
+  or string does not count. A validating run without the import is reported
+  as not valid; result rows have the new boolean field `solver_imported`.
+- **Fix:** The benchmark problems no longer give away their answers. In 25 of
+  the 30 problems the example output was accepted by the validator, often as
+  the optimum, so a program printing it as a constant passed; 11 problems
+  also stated the answer, optimum or verdict in prose. Examples are now
+  shape-only dummies that fail validation, the problems with a yes/no verdict
+  describe both output forms, and a unit test checks every example against
+  its validator.
 
 ### [4.3.0] - 2026-11-14
 

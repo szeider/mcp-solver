@@ -53,8 +53,10 @@ Return a single JSON object. On success, `satisfiable` is `true`,
 cover every edge, include at least one Core server, and minimize
 `soft_penalty`.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "selected_servers": ["Core1", "Core2", "Web1", "Web2", "DB1", "Edge1"], "total_cost": 14, "total_monitoring_value": 45, "all_edges_covered": true, "soft_penalty": 14}
+{"satisfiable": true, "selected_servers": ["Edge1"], "total_cost": 0, "total_monitoring_value": 0, "all_edges_covered": false, "soft_penalty": 0}
 ```
 
 If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

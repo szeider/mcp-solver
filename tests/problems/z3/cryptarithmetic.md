@@ -23,16 +23,14 @@ Return a single JSON object on stdout with this schema:
 - `SEND`, `MORE`, `MONEY` (integers): the numeric values of the three words
   under the assignment. Optional; validated if present.
 
-The puzzle has a unique solution.
-
-Example:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
-  "assignment": {"S": 9, "E": 5, "N": 6, "D": 7, "M": 1, "O": 0, "R": 8, "Y": 2},
-  "SEND": 9567,
-  "MORE": 1085,
-  "MONEY": 10652
+  "assignment": {"S": 0, "E": 0, "N": 0, "D": 0, "M": 0, "O": 0, "R": 0, "Y": 0},
+  "SEND": 0,
+  "MORE": 0,
+  "MONEY": 0
 }
 ```

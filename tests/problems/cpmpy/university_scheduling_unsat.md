@@ -32,19 +32,37 @@ A university needs to schedule 10 courses across 5 time slots and 4 rooms. Each 
 
 A valid schedule assigns each course to exactly one time slot and one room while satisfying all of the above constraints.
 
-Show that no valid schedule exists.
+Find a valid schedule, or show that no valid schedule exists.
 
 ## Output Format
+
+Time slots are numbered 1-5 and rooms 1-4.
 
 Return a single JSON object on stdout with this schema:
 
 - `satisfiable` (boolean): `true` if a valid schedule exists, `false`
   otherwise.
+- `schedule` (list of 10 objects): one per course, each with `course` (string,
+  the course code, e.g. `CS101`), `time_slot` (integer 1-5) and `room`
+  (integer 1-4). Required when `satisfiable` is `true`; omit it when it is
+  `false`, so the output is then `{"satisfiable": false}`.
 
-PH101 and BI101 both require the only lab with special equipment (Room 4),
-and constraint 3 forces them into the same time slot — colliding with
-constraint 1, so no valid schedule exists. The expected answer is:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": false}
+{
+  "satisfiable": true,
+  "schedule": [
+    {"course": "CS101", "time_slot": 1, "room": 1},
+    {"course": "CS201", "time_slot": 1, "room": 1},
+    {"course": "MA101", "time_slot": 1, "room": 1},
+    {"course": "PH101", "time_slot": 1, "room": 1},
+    {"course": "EN101", "time_slot": 1, "room": 1},
+    {"course": "BI101", "time_slot": 1, "room": 1},
+    {"course": "HI101", "time_slot": 1, "room": 1},
+    {"course": "EC101", "time_slot": 1, "room": 1},
+    {"course": "PS101", "time_slot": 1, "room": 1},
+    {"course": "AR101", "time_slot": 1, "room": 1}
+  ]
+}
 ```

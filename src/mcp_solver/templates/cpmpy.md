@@ -67,6 +67,7 @@ else:
 - If the narrative mentions optional variants or extensions of the problem ("one extension is...", "another version..."), solve the base problem as specified by the input data and the Output format block — do not output an extended variant unless the output spec explicitly requires it
 - Derive every output array's dimensions from parameters stated in the problem and from the axis names in the format spec: `result[a][b]` means outer axis `a` and inner axis `b` — never swap axes or substitute a different quantity
 - Check array dimensions and value ranges match the spec before submitting
+- For UNSAT, output the format's UNSAT form (or `{"error": "No solution"}` if none is specified)
 
 ## Verification Requirement (MANDATORY)
 
@@ -100,6 +101,7 @@ CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
    model2 += objective < best_value  # or > for maximize
    assert not model2.solve(), "Solution is not optimal"
    ```
+5. **Example outputs**: an example output in the problem statement fixes the output format (keys, nesting, types). Its values count as a solution only if the problem says so. If the problem presents the example as a valid or expected solution, run it through `verify()`: if it fails, your model or verifier is wrong, not the example. If the problem marks it as a dummy or says nothing about its validity, do not copy its values and do not test against them.
 
 ### If the model reports no solution
 

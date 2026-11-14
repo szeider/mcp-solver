@@ -35,8 +35,10 @@ Return a single JSON object. On success, `satisfiable` is `true`,
 boolean. The assignment must satisfy the hard constraints and achieve the
 minimum possible total penalty.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "assignment": {"Task A": "Alice", "Task B": "Bob"}, "total_penalty": 0, "constraints_satisfied": true}
+{"satisfiable": true, "assignment": {"Task A": "Alice", "Task B": "Alice"}, "total_penalty": 999, "constraints_satisfied": false}
 ```
 
 If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

@@ -6,11 +6,12 @@ Return a single JSON object on stdout with this schema:
 
 - `satisfiable` (boolean): `true` if the program has an answer set, `false`
   otherwise.
+- `lost` and `delivered` (booleans): the package's status in the answer set.
+  Required when `satisfiable` is `true`; omit both when it is `false`, so the
+  output is then `{"satisfiable": false}`.
 
-The package is asserted to be both lost and delivered, while an integrity
-constraint forbids being both at once, so the program has no answer set. The
-expected answer is:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": false}
+{"satisfiable": true, "lost": true, "delivered": true}
 ```

@@ -8,8 +8,10 @@ character strings over `1`-`9`, `A`-`G`). Every row, column, and 4×4 box
 contains each of the 16 symbols exactly once, and every filled clue in the
 puzzle is preserved.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "solution": [["1", "D", "4", "7", "B", "2", "A", "E", "6", "9", "8", "F", "3", "C", "G", "5"], ["...15 more rows..."]]}
+{"satisfiable": true, "solution": [["1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1"], ["...15 more rows..."]]}
 ```
 
 If the puzzle has no solution: `{"satisfiable": false}`.

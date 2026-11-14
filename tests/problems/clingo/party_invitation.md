@@ -8,14 +8,15 @@
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (the program has an answer set).
+- `satisfiable` (boolean): `true` if the program has an answer set, `false`
+  otherwise.
 - `invited` (list of strings): the lowercase names of the people invited in
   the answer set. Order does not matter.
 
-Nothing tells us Alice is not coming, so Alice is invited by default; Bob is
-invited only if Alice is not, so Bob is out; Carol needs both Alice and Bob,
-so Carol is out. Expected result:
+Nothing tells us that Alice is not coming.
+
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": true, "invited": ["alice"]}
+{"satisfiable": true, "invited": ["bob", "carol"]}
 ```

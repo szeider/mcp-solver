@@ -13,8 +13,10 @@ Return a single JSON object. On success, `satisfiable` is `true` and
 "Bookshelf", "Dining Table", "Desk") to one of the four rooms ("Living Room",
 "Bedroom", "Study", "Dining Room").
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "arrangement": {"Sofa": "Living Room", "TV": "Living Room", "Bookshelf": "Study", "Dining Table": "Dining Room", "Desk": "Study"}}
+{"satisfiable": true, "arrangement": {"Sofa": "Bedroom", "TV": "Bedroom", "Bookshelf": "Bedroom", "Dining Table": "Bedroom", "Desk": "Bedroom"}}
 ```
 
 If no arrangement exists: `{"satisfiable": false}`.

@@ -32,8 +32,10 @@ Return a single JSON object. On success, `satisfiable` is `true`,
 when both Bench and Desk are chosen. The selection must respect the budget and
 the Analyzer→Computer dependency, and maximize total value.
 
+Example (this is a dummy showing the shape only, **not** the real answer):
+
 ```json
-{"satisfiable": true, "equipment_selected": ["Analyzer", "Computer", "Desk"], "total_cost": 7000, "total_value": 18}
+{"satisfiable": true, "equipment_selected": ["Analyzer"], "total_cost": 0, "total_value": 0}
 ```
 
 If the hard constraints are unsatisfiable: `{"satisfiable": false}`.

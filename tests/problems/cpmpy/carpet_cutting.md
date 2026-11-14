@@ -29,7 +29,7 @@ orientation or rotated 90 degrees.
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (a packing always exists).
+- `satisfiable` (boolean): `true` if a packing exists.
 - `roll_length_used` (integer): the length of roll consumed, i.e. the maximum
   `y + height` over all pieces.
 - `placements` (list of 4 objects): one per piece, each with:
@@ -39,19 +39,17 @@ Return a single JSON object on stdout with this schema:
   - `width`, `height` (integers): placed dimensions; `{width, height}` must
     equal the piece's `{a, b}` (rotation allowed).
 
-The optimal (minimum) roll length is 18 ft.
-
-Example:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
-  "roll_length_used": 18,
+  "roll_length_used": 0,
   "placements": [
     {"piece": 1, "x": 0, "y": 0, "width": 6, "height": 8},
-    {"piece": 2, "x": 8, "y": 7, "width": 4, "height": 5},
-    {"piece": 3, "x": 6, "y": 0, "width": 5, "height": 7},
-    {"piece": 4, "x": 0, "y": 8, "width": 8, "height": 10}
+    {"piece": 2, "x": 0, "y": 0, "width": 4, "height": 5},
+    {"piece": 3, "x": 0, "y": 0, "width": 5, "height": 7},
+    {"piece": 4, "x": 0, "y": 0, "width": 8, "height": 10}
   ]
 }
 ```

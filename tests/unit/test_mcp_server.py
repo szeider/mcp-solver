@@ -8,6 +8,7 @@ for kernel tools, ``ok`` for submit_code) returned as ``ToolOutcome`` text.
 
 import asyncio
 import json
+import re
 
 import pytest
 from mcp.client import Client
@@ -147,6 +148,37 @@ def test_select_backend_result_within_budget():
     # note; 500 characters cover the note.
     for solver in BACKENDS:
         assert len(mcp_server.get_template(solver)) + 500 <= 49_000, solver
+
+
+EXAMPLE_RULE_MARKER = "fixes the output format"
+
+
+def _template_rules_problems(text: str) -> list[str]:
+    """Return the shared rules a template fails: the python_exec time limit
+    (30 s default, 300 s maximum, in one sentence) and the example rule."""
+    flat = " ".join(text.split())
+    problems = []
+    if not any(
+        "python_exec" in s
+        and "timeout" in s
+        and re.search(r"(?<!\d)30(?!\d)", s)
+        and re.search(r"(?<!\d)300(?!\d)", s)
+        for s in re.split(r"(?<=\.)\s+", flat)
+    ):
+        problems.append("time limit")
+    if EXAMPLE_RULE_MARKER not in flat:
+        problems.append("example rule")
+    return problems
+
+
+def test_templates_share_time_limit_and_example_rule():
+    # Rules that are not backend-specific must read the same in all six
+    # templates: python_exec stops after 30 s by default and takes a timeout of
+    # at most 300 s (mcp_server._MAX_EXEC_TIMEOUT), and an example output fixes
+    # the format; its values count only if the problem says they are valid.
+    assert mcp_server._MAX_EXEC_TIMEOUT == 300
+    for solver in BACKENDS:
+        assert _template_rules_problems(mcp_server.get_template(solver)) == [], solver
 
 
 def test_guide_and_description_mention_every_backend():

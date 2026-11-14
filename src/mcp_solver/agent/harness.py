@@ -5,10 +5,13 @@ concurrent solves in one process), its JSON solution is piped into the
 problem's ``*_ground_truth.py`` validator, and one result row per run is
 appended to ``results.jsonl`` in the output directory. Each subprocess runs
 with its own run directory as working directory, so the kernels and
-re-executed programs of parallel runs do not share one.
+re-executed programs of parallel runs do not share one. A run counts as valid
+only if the validator accepts the solution and the persisted program imports
+its backend's solver library.
 """
 
 import argparse
+import ast
 import contextlib
 import json
 import os
@@ -37,6 +40,18 @@ KILL_GRACE = 5
 # Seconds a CLI gets after SIGTERM (to kill its re-executed program) before
 # its process group gets SIGKILL.
 TERM_GRACE = 3
+
+# Top-level module of each backend's solver library. A submitted program must
+# import it; this rejects a constant-printing program without such an import
+# (it does not establish that the solver was used).
+SOLVER_MODULES: dict[str, str] = {
+    "pysat": "pysat",
+    "maxsat": "pysat",
+    "z3": "z3",
+    "cpmpy": "cpmpy",
+    "clingo": "clingo",
+    "didp": "didppy",
+}
 
 # CLI processes running now. In their own sessions they no longer receive the
 # terminal's Ctrl-C, so main() stops them on KeyboardInterrupt or SIGTERM;
@@ -120,6 +135,30 @@ def _stop_all() -> None:
 
 def _interrupt_on_sigterm(signum: int, frame: object) -> None:
     raise KeyboardInterrupt
+
+
+def imports_solver_library(code: str, solver: str) -> bool:
+    """True if *code* imports *solver*'s library (``import X``, ``import X.y``
+    or ``from X[.y] import ...`` anywhere in the program).
+
+    Decided on the syntax tree, so a mention in a comment or a string does
+    not count; code that does not parse counts as no import.
+    """
+    module = SOLVER_MODULES[solver]
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module]
+        else:
+            continue
+        if any(name == module or name.startswith(module + ".") for name in names):
+            return True
+    return False
 
 
 def discover(problems_root: Path, solvers: list[str]) -> list[tuple[str, Path]]:
@@ -244,6 +283,7 @@ def run_one(
             row["token_limit_reached"] = True
 
     _validate(row, problem_md)
+    _check_solver_usage(row, solver, workdir / f"{problem_md.stem}_code.py")
     if row["exit_code"] != 0 or row.get("valid") is False:
         row["stderr_tail"] = "\n".join(stderr.splitlines()[-STDERR_TAIL_LINES:])
     return row
@@ -285,6 +325,23 @@ def _validate(row: dict, problem_md: Path) -> None:
         else:
             row["valid"] = False
             row["message"] = f"validator produced no verdict: {check.stderr[:200]}"
+
+
+def _check_solver_usage(row: dict, solver: str, program: Path) -> None:
+    """Set ``solver_imported`` in *row*; a valid row whose persisted program
+    does not import the backend's solver library becomes not valid."""
+    try:
+        code = program.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        code = ""
+    row["solver_imported"] = imports_solver_library(code, solver)
+    if row.get("valid") and not row["solver_imported"]:
+        row["valid"] = False
+        row["message"] = (
+            f"the solution validates, but the submitted program {program.name}"
+            f" does not import {SOLVER_MODULES[solver]} (the {solver} backend's"
+            f" solver library); validator said: {row.get('message', '')}"
+        )
 
 
 def print_summary(rows: list[dict]) -> None:

@@ -16,8 +16,10 @@ Return a single JSON object on stdout with this schema:
 - `array` (list of 8 integers): the array, in ascending order. Required when
   `satisfiable` is `true`.
 
-Example (any array meeting all five conditions is accepted):
+Any array meeting all five conditions is accepted.
+
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": true, "array": [3, 5, 5, 5, 5, 7, 15, 15]}
+{"satisfiable": true, "array": [1, 1, 1, 1, 1, 1, 1, 1]}
 ```

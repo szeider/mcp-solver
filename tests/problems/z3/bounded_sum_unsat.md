@@ -18,8 +18,10 @@ Return a single JSON object on stdout with this schema:
 - `assignment` (object): maps `a, b, c, d, e` to integer values. Required
   only when `satisfiable` is `true`.
 
-This instance is unsatisfiable, so the expected answer is:
+If no such assignment exists, the output is `{"satisfiable": false}`.
+
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": false}
+{"satisfiable": true, "assignment": {"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}
 ```

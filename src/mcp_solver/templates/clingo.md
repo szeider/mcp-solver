@@ -16,7 +16,7 @@ Produce a solution using Answer Set Programming (ASP) that correctly models and 
 - Generate ONLY executable Python code using clingo
 - Use clear, meaningful predicate names (e.g., `assigned(task1, worker2)` not `p(1,2)`)
 - Extract solutions from answer sets and format as JSON
-- Handle UNSAT cases gracefully with error JSON: `{"error": "No solution exists", "reason": "..."}`
+- For UNSAT, output the format's UNSAT form (or `{"error": "No solution exists"}` if none is specified)
 
 ### 1.4 Final Checklist
 Before completing your solution, verify:
@@ -75,13 +75,12 @@ All data must come from two places only:
 
 #### Hierarchy of Truth: Data Tables vs. Example Outputs
 
-**CRITICAL RULE**: When a problem specification contains both data tables/lists AND example outputs, the **data tables are the single, immutable source of truth**. Example outputs demonstrate the required **format** only - their **values** are illustrative.
+**CRITICAL RULE**: When a problem specification contains both data tables/lists AND example outputs, the **data tables are the single, immutable source of truth**. An example output in the problem statement fixes the output format (keys, nesting, types). Its values count as a solution only if the problem says so. If the problem presents the example as a valid or expected solution, run it through verify(): if it fails, your model or verifier is wrong, not the example. If the problem marks it as a dummy or says nothing about its validity, do not copy its values and do not test against them.
 
 **NEVER modify, invent, or transfer data to match an example output.** Your model must solve the problem defined by the data tables, even if the example's values appear inconsistent.
 
 **Why This Matters:**
-- Example outputs may contain typos or be slightly out of sync with primary data
-- Example values are often from a different instance or simplified scenario
+- Example values not stated to be valid may be dummies, typos or from another instance
 - Modifying data to match examples violates the Closed World Principle
 
 **Common Mistake and Correction:**
@@ -95,7 +94,7 @@ All data must come from two places only:
 1. **Primary data tables/lists** (highest priority)
 2. **Explicit problem constraints**
 3. **Example output structure** (format guidance only)
-4. **Example output values** (ignore if inconsistent)
+4. **Example output values** (a solution only if the problem says so)
 
 #### C. Structure of Rules and Facts
 * Every statement (fact or rule) **MUST** end with a period (`.`).

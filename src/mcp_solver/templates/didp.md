@@ -204,6 +204,8 @@ negative-profit item never forces its way into an upper bound).
 - Transition names are for YOUR bookkeeping: decode `solution.transitions`
   into the plain data the format asks for (indices, orders, assignments) —
   never output raw transition names unless the spec asks for them
+- If infeasible, output the format's UNSAT form (or
+  `{"error": "No solution exists"}` if none is specified)
 
 ## Verification Requirement (MANDATORY)
 
@@ -246,6 +248,13 @@ submitting, you MUST:
      model without pruning declarations needs no cross-check beyond the
      replay in step 2 — the solver's optimality proof is exact for the
      model as stated; your remaining risk is the state audit.
+5. **Example outputs**: an example output in the problem statement fixes the
+   output format (keys, nesting, types). Its values count as a solution only
+   if the problem says so. If the problem presents the example as a valid or
+   expected solution, run it through `verify()`: if it fails, your model or
+   verifier is wrong, not the example. If the problem marks it as a dummy or
+   says nothing about its validity, do not copy its values and do not test
+   against them.
 
 ### If the model reports infeasible
 

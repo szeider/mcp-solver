@@ -17,10 +17,6 @@ The goal is to:
 - Maximize the number of satisfied preferences, i.e. the number of shifts whose
   assigned employee lists that shift as a preferred shift.
 
-Because anna can work at most two shifts, at least one of her three preferences
-must go unsatisfied, so not all preferences can be met and a genuine trade-off
-is required.
-
 Model and solve the previous problem using answer set programming (ASP),
 optimizing for the maximum number of satisfied preferences.
 
@@ -40,16 +36,12 @@ employees, with no employee working more than two shifts (so one employee works
 two shifts and the other works one). Among all assignments satisfying the hard
 constraints, the returned one must maximize `satisfied_preferences`.
 
-Example (this is the unique optimum):
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
-  "assignment": {"morning": "ben", "afternoon": "anna", "evening": "anna"},
-  "satisfied_preferences": 3
+  "assignment": {"morning": "anna", "afternoon": "anna", "evening": "anna"},
+  "satisfied_preferences": 0
 }
 ```
-
-Here ben works his preferred morning shift, and anna works the afternoon and
-evening (two of her three preferred shifts); only anna's morning preference is
-left unsatisfied, giving three satisfied preferences, which is the maximum.

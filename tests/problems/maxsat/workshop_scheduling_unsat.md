@@ -32,15 +32,15 @@ Find a schedule that satisfies all constraints and maximizes employee satisfacti
 
 ## Output Format
 
-Return a single JSON object with a boolean `satisfiable` field. The hard
-constraints force all three workshops into the Morning slot while forbidding
-any two workshops from sharing a slot, which is impossible with only two
-slots. The expected answer is therefore:
+Return a single JSON object with a boolean `satisfiable` field.
+
+- If a schedule satisfying the hard constraints exists: `satisfiable` is
+  `true` and `schedule` maps each of `"Workshop A"`, `"Workshop B"`,
+  `"Workshop C"` to `"Morning"` or `"Afternoon"`.
+- If no such schedule exists: `{"satisfiable": false}`.
+
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": false}
+{"satisfiable": true, "schedule": {"Workshop A": "Afternoon", "Workshop B": "Afternoon", "Workshop C": "Afternoon"}}
 ```
-
-If instead a schedule is claimed, report it as
-`{"satisfiable": true, "schedule": {"Workshop A": "Morning", "Workshop B": "Morning", "Workshop C": "Morning"}}`,
-mapping each workshop to `"Morning"` or `"Afternoon"`.

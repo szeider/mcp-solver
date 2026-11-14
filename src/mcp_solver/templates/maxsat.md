@@ -145,6 +145,8 @@ weights to the underlying variables again.
 - Encoders return an object: add its `.clauses` with `wcnf.extend(...)`,
   don't append the object or the list as one clause.
 - Building the WCNF without instantiating RC2 solves nothing.
+- Each `python_exec` call stops after 30 seconds by default; for longer
+  solver runs pass its `timeout` argument (at most 300 seconds).
 - Do NOT print anything except the final JSON in the submitted program.
 
 ## Output Format Rules
@@ -153,8 +155,10 @@ weights to the underlying variables again.
 - Report the objective in the problem's terms (e.g. total value achieved),
   not just RC2's internal `cost`, and state which soft constraints were
   violated when that is useful.
-- For UNSAT, output the format's UNSAT form (or `{"satisfiable": false}`),
-  with a short explanation of the conflicting constraints.
+- For UNSAT, output the format's UNSAT form (or `{"satisfiable": false}` if
+  none is specified),
+  with a short explanation of the conflicting constraints if the format
+  permits one.
 
 ## Verification Requirement (MANDATORY)
 
@@ -170,11 +174,13 @@ independent of the encoding:
      VIOLATED soft clauses directly from the decoded solution — it must
      equal `solver.cost` (for a pure maximize-encoding this is the identity
      `objective_achieved + solver.cost == total_possible_value`).
-3. **Test any provided example against your model**: if the problem
-   statement includes a concrete example solution, check it satisfies your
-   hard constraints and that your objective accounting prices it correctly.
-   The example is ground truth about the intended problem — if it fails,
-   your model is wrong, never the example.
+3. **Example outputs**: an example output in the problem statement fixes the
+   output format (keys, nesting, types). Its values count as a solution only
+   if the problem says so. If the problem presents the example as a valid or
+   expected solution, run it through `verify()` and check that your objective
+   accounting prices it correctly: if it fails, your model or verifier is
+   wrong, not the example. If the problem marks it as a dummy or says nothing
+   about its validity, do not copy its values and do not test against them.
 4. **Sanity-check optimality direction**: perturb one obvious decision by
    hand (e.g. add the highest-value unselected item, dropping what blocks
    it) and confirm the objective does not improve while respecting hard

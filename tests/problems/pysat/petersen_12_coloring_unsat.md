@@ -4,16 +4,17 @@ Check whether the Petersen graph (5-cycle + pentagram + perfect matching) has an
 
 ## Output Format
 
-Return a single JSON object with a boolean `satisfiable` field. The Petersen
-graph has L(2,1)-labeling number 9 (its labels must span 10 distinct values,
-0..9), so no L(2,1) coloring exists with only 9 colors, and the expected
-answer is:
+Return a single JSON object with a boolean `satisfiable` field. The 9 colors
+are the labels `0..8`.
+
+- If such a coloring exists: `satisfiable` is `true` and `coloring` maps each
+  vertex to its label, `{"satisfiable": true, "coloring": {"0": label, ..., "9": label}}`,
+  where the keys are the vertices `0`..`9` (outer 5-cycle 0-4, inner pentagram
+  5-9, spokes `i`-`i+5`) and each label lies in `0..8`.
+- If no such coloring exists: `{"satisfiable": false}`.
+
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
-{"satisfiable": false}
+{"satisfiable": true, "coloring": {"0": 0, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0, "7": 0, "8": 0, "9": 0}}
 ```
-
-If instead a coloring is claimed, report it as
-`{"satisfiable": true, "coloring": {"0": label, ..., "9": label}}`, where the
-keys are the vertices `0`..`9` (outer 5-cycle 0-4, inner pentagram 5-9, spokes
-`i`-`i+5`) and each label lies in `0..8`.

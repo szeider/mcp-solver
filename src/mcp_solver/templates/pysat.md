@@ -125,6 +125,8 @@ formula.extend(PBEnc.atmost(lits=cells[:3], weights=[3, 2, 4], bound=5,
 - Do NOT print anything except the final JSON in the submitted program.
 - Solvers: `Glucose3` is the default; `Cadical153` is a good alternative for
   harder instances (`from pysat.solvers import Cadical153`).
+- Each `python_exec` call stops after 30 seconds by default; for longer
+  solver runs pass its `timeout` argument (at most 300 seconds).
 
 ## Output Format Rules
 
@@ -163,11 +165,13 @@ swapped indices). Before submitting, you MUST:
    transposed answer — and for problems with given input data (clues, edges),
    check against a separately transcribed copy of the data, not the encoder's
    variable.
-3. **Test any provided example against your model**: if the problem statement
-   includes a concrete example solution, run it through `verify()` and check
-   it satisfies your constraints. The example is ground truth about the
-   intended problem — if it fails, your model or verifier is wrong, never the
-   example; do not dismiss it as "just illustrating the format".
+3. **Example outputs**: an example output in the problem statement fixes the
+   output format (keys, nesting, types). Its values count as a solution only
+   if the problem says so. If the problem presents the example as a valid or
+   expected solution, run it through `verify()`: if it fails, your model or
+   verifier is wrong, not the example. If the problem marks it as a dummy or
+   says nothing about its validity, do not copy its values and do not test
+   against them.
 4. **Execute the verification** via python_exec and confirm it passes.
    `verify()` belongs to this exploration phase; the final submitted program
    need not include it (and if it does, it must not print anything besides

@@ -183,6 +183,84 @@ def test_run_one_success_writes_stderr_without_tail(tmp_path, monkeypatch):
     assert "stderr_tail" not in row
 
 
+# --- solver-usage check -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "solver, code",
+    [
+        ("z3", "import z3\nprint(z3.Solver())"),
+        ("z3", "from z3 import Int, Solver"),
+        ("cpmpy", "import cpmpy as cp"),
+        ("clingo", "def f():\n    import clingo.control\n"),
+        ("didp", "import didppy as dp"),
+        ("pysat", "from pysat.solvers import Cadical153"),
+        ("maxsat", "from pysat.solvers import Cadical153"),
+        ("maxsat", "from pysat.examples.rc2 import RC2"),
+    ],
+)
+def test_imports_solver_library_accepts_imports(solver, code):
+    assert harness.imports_solver_library(code, solver)
+
+
+@pytest.mark.parametrize(
+    "solver, code",
+    [
+        ("z3", "# import z3\nprint('{\"satisfiable\": true}')"),
+        ("z3", "s = 'import z3'\nprint(s)"),
+        ("z3", "import z3extra"),
+        ("pysat", '"""from pysat.solvers import Cadical153"""'),
+        ("maxsat", "import json  # solved with pysat RC2"),
+        ("didp", "import z3"),
+        ("cpmpy", "from . import cpmpy"),
+        ("clingo", "import clingo("),  # does not parse
+    ],
+)
+def test_imports_solver_library_rejects_mentions(solver, code):
+    assert not harness.imports_solver_library(code, solver)
+
+
+def _run_with_program(tmp_path, monkeypatch, code):
+    """run_one with a CLI that writes *code* as the persisted program and a
+    validator that accepts any output."""
+
+    class Proc:
+        returncode, stdout, stderr = 0, '{"satisfiable": true}', ""
+
+    def fake_run(cmd, timeout, cwd):
+        if code is not None:
+            (cwd / "puzzle_code.py").write_text(code)
+        return Proc()
+
+    monkeypatch.setattr(harness, "run_cli", fake_run)
+    (tmp_path / "puzzle_ground_truth.py").write_text(
+        "import json; print(json.dumps({'valid': True, 'message': 'ok'}))"
+    )
+    return _run(tmp_path, monkeypatch)[0]
+
+
+def test_run_one_valid_with_solver_import(tmp_path, monkeypatch):
+    row = _run_with_program(tmp_path, monkeypatch, "from z3 import Solver\n")
+    assert row["valid"] is True
+    assert row["solver_imported"] is True
+    assert row["message"] == "ok"
+
+
+def test_run_one_validating_run_without_import_is_not_valid(tmp_path, monkeypatch):
+    code = "# z3 would be overkill\nprint('{\"satisfiable\": true}')\n"
+    row = _run_with_program(tmp_path, monkeypatch, code)
+    assert row["valid"] is False
+    assert row["solver_imported"] is False
+    assert "does not import z3" in row["message"]
+    assert "stderr_tail" in row
+
+
+def test_run_one_without_program_is_not_valid(tmp_path, monkeypatch):
+    row = _run_with_program(tmp_path, monkeypatch, None)
+    assert row["valid"] is False
+    assert row["solver_imported"] is False
+
+
 # --- timeouts kill the whole process tree ----------------------------------
 
 # Starts a sleeping grandchild, records both pids, then sleeps itself.

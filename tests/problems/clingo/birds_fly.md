@@ -32,7 +32,8 @@ For each of the following entities — Tweety, Opus, Woody, and Polly — determ
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (the program has an answer set).
+- `satisfiable` (boolean): `true` if the program has an answer set, `false`
+  otherwise.
 - `entities` (object): keys are the lowercase entity names `tweety`, `opus`,
   `woody`, `polly`. Each value is an object with:
   - `can_fly` (boolean)
@@ -42,16 +43,16 @@ Return a single JSON object on stdout with this schema:
     `"default"` (default bird-flies rule), `"exception"` (penguin or injured
     exception blocks flight), or `"fact"` (flight stated directly).
 
-Expected result:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
   "entities": {
-    "tweety": {"can_fly": true, "mobile": true, "has_feathers": true, "fly_reasoning": "default"},
-    "opus": {"can_fly": false, "mobile": false, "has_feathers": true, "fly_reasoning": "exception"},
-    "woody": {"can_fly": false, "mobile": false, "has_feathers": true, "fly_reasoning": "exception"},
-    "polly": {"can_fly": true, "mobile": true, "has_feathers": false, "fly_reasoning": "fact"}
+    "tweety": {"can_fly": false, "mobile": false, "has_feathers": false, "fly_reasoning": "fact"},
+    "opus": {"can_fly": false, "mobile": false, "has_feathers": false, "fly_reasoning": "fact"},
+    "woody": {"can_fly": false, "mobile": false, "has_feathers": false, "fly_reasoning": "fact"},
+    "polly": {"can_fly": false, "mobile": false, "has_feathers": false, "fly_reasoning": "fact"}
   }
 }
 ```

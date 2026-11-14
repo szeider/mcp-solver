@@ -28,7 +28,7 @@ slot.
 
 Return a single JSON object on stdout with this schema:
 
-- `satisfiable` (boolean): `true` (a feasible schedule exists).
+- `satisfiable` (boolean): `true` if a feasible schedule exists.
 - `preferences_violated` (integer): the number of soft preferences violated by
   the schedule (0 or 1 here).
 - `schedule` (list of 10 objects): one per course, each with:
@@ -36,25 +36,23 @@ Return a single JSON object on stdout with this schema:
   - `time_slot` (integer 1-5)
   - `room` (integer 1-4)
 
-The optimal schedule violates 0 preferences.
-
-Example:
+Example (this is a dummy showing the shape only, **not** the real answer):
 
 ```json
 {
   "satisfiable": true,
-  "preferences_violated": 0,
+  "preferences_violated": 999,
   "schedule": [
-    {"course": "CS101", "time_slot": 4, "room": 1},
+    {"course": "CS101", "time_slot": 1, "room": 1},
     {"course": "CS201", "time_slot": 1, "room": 1},
-    {"course": "MA101", "time_slot": 1, "room": 3},
-    {"course": "PH101", "time_slot": 1, "room": 4},
-    {"course": "EN101", "time_slot": 5, "room": 3},
-    {"course": "BI101", "time_slot": 5, "room": 4},
-    {"course": "HI101", "time_slot": 3, "room": 4},
-    {"course": "EC101", "time_slot": 2, "room": 2},
-    {"course": "PS101", "time_slot": 4, "room": 4},
-    {"course": "AR101", "time_slot": 2, "room": 1}
+    {"course": "MA101", "time_slot": 1, "room": 1},
+    {"course": "PH101", "time_slot": 1, "room": 1},
+    {"course": "EN101", "time_slot": 1, "room": 1},
+    {"course": "BI101", "time_slot": 1, "room": 1},
+    {"course": "HI101", "time_slot": 1, "room": 1},
+    {"course": "EC101", "time_slot": 1, "room": 1},
+    {"course": "PS101", "time_slot": 1, "room": 1},
+    {"course": "AR101", "time_slot": 1, "room": 1}
   ]
 }
 ```
