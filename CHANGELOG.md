@@ -1,5 +1,30 @@
 # Changelog
 
+### [4.4.0] - 2026-11-14
+
+- **Major Change:** The helper library `mcp_solver.helpers` (modules for
+  pysat, maxsat and z3) is removed; it had known defects, among them
+  auxiliary-variable collisions that could give a wrong UNSAT. Programs
+  submitted under earlier versions that import `mcp_solver.helpers` fail with
+  `ModuleNotFoundError`. Migration: name variables through
+  `pysat.formula.IDPool` and pass `vpool=` to `CardEnc`/`PBEnc`; for z3, use
+  plain z3 idioms.
+- **Behavior Change:** Solve kernels and the CLI's re-execution install only
+  the backend's solver libraries; they no longer install this distribution
+  (formerly the checkout in dev mode, else `agentic-mcp-solver==<version>`
+  from PyPI). Dev mode (`--dev`, `MCP_SOLVER_DEV`) now only reads the
+  templates from a checkout, and an unpublished version without dev mode is
+  no longer an error (formerly exit 2 in the CLI and a tool error in
+  `select_backend`).
+- **Improvement:** The pysat, maxsat and z3 templates no longer use the
+  helpers (`IDPool` with `CardEnc`/`PBEnc` and `vpool=`, plain z3 idioms).
+- **Fix:** The clingo template is repaired (dead v3 content removed, snippets
+  and claims checked against clingo 5.8.3) and under 50,000 characters, so
+  Claude Code passes the whole `select_backend` result to the host instead of
+  a 2 KB preview; a unit test checks the size for every backend.
+- **Fix:** The snippets and library claims of all templates were checked by
+  execution and repaired where wrong.
+
 ### [4.3.0] - 2026-11-14
 
 - **Behavior Change:** Requires the MCP Python SDK 2.x (`mcp>=2,<3`; 1.x is no

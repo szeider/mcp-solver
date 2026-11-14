@@ -227,7 +227,7 @@ async def test_toolkit_round_trip(engine):
         assert "z3" in text.lower()  # the template made it into the result
         name, args = engine.calls[0]
         assert name == "python_reset" and "kernel_id" not in args
-        assert args["packages"][0] == "z3-solver"
+        assert args["packages"] == ["z3-solver"]
 
         # Bare python_exec is routed to the solving kernel...
         result = await session.call_tool("python_exec", {"code": "print(1)"})
@@ -245,7 +245,7 @@ async def test_toolkit_round_trip(engine):
         assert "recycled" in text
         name, args = engine.calls[-1]
         assert name == "python_reset" and args["kernel_id"] == "k1"
-        assert args["packages"][0] == "python-sat[pb]"
+        assert args["packages"] == ["python-sat[pb]"]
 
         # A stale kernel falls back to a fresh one, and routing follows.
         engine.kernels.clear()
@@ -411,12 +411,15 @@ def test_template_resource_dev_env_without_checkout_errors(monkeypatch):
         mcp_server.template_resource("z3")
 
 
-async def test_select_backend_unpublished_version_errors(engine, monkeypatch):
+async def test_select_backend_unpublished_version_without_checkout(engine, monkeypatch):
+    # Kernels get only the solver library, so a version that is not on PyPI
+    # needs no dev mode (formerly an error).
     import mcp_solver
 
+    monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.setattr(mcp_solver, "__version__", "4.0.0a0")
     monkeypatch.setattr(engine_mod, "local_checkout", lambda: None)
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "z3"})
-        assert result.is_error
-        assert "not a published release" in result.content[0].text
+        assert not result.is_error
+    assert engine.calls[0][1]["packages"] == ["z3-solver"]

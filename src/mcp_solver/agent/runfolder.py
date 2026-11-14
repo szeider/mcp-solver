@@ -84,7 +84,7 @@ def tool_result_cap(solver: str) -> int:
     """The ``agent.max_tool_result_chars`` for a run folder solving with *solver*.
 
     On the server path select_backend returns the whole backend template as
-    one tool result (clingo: about 54,000 characters), so the cap is twice
+    one tool result (clingo is the longest), so the cap is twice
     the template length rounded up to the next thousand, and at least
     MIN_TOOL_RESULT_CHARS, independent of minion's default.
     """

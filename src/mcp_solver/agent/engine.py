@@ -9,15 +9,13 @@ server over stdio through ``mcp_minion.MCPManager``. This module owns
   (:func:`require_engine`, with the minimum engine version defined once),
 - the environment for the engine, its kernels and the CLI's re-execution of
   the submitted program (:func:`kernel_env`),
-- dev-mode resolution (helpers and templates from a source checkout) and the
-  unpublished-version check (:func:`resolve_dev_path`,
-  :func:`require_publishable`).
+- dev-mode resolution (templates from a source checkout,
+  :func:`resolve_dev_path`).
 """
 
 from __future__ import annotations
 
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -99,10 +97,6 @@ class DevModeError(ValueError):
     """Dev mode was requested but no source checkout can be found."""
 
 
-class UnpublishedVersionError(RuntimeError):
-    """The installed version is not on PyPI and dev mode is off."""
-
-
 # --- engine server -----------------------------------------------------------
 
 
@@ -181,7 +175,7 @@ async def start_engine(errlog: Any = None) -> Any:
     return manager
 
 
-# --- dev mode and published versions -----------------------------------------
+# --- dev mode -----------------------------------------------------------------
 
 
 def local_checkout() -> str | None:
@@ -195,17 +189,6 @@ def local_checkout() -> str | None:
     if (root / "pyproject.toml").is_file() and (root / "src" / "mcp_solver").is_dir():
         return str(root)
     return None
-
-
-def is_unpublishable(version: str) -> bool:
-    """Return True when *version* looks like a pre-release/dev build.
-
-    Published releases are plain numeric (e.g. ``4.0.0``). Anything else
-    (an alphabetic marker such as ``a``/``b``/``rc``/``dev`` per PEP 440, or
-    a local segment such as ``4.0.0+1``) is not on PyPI, so a PyPI pin to it
-    would fail.
-    """
-    return re.fullmatch(r"\d+(\.\d+)*", version) is None
 
 
 def _auto_checkout(source: str) -> str:
@@ -222,10 +205,10 @@ def _auto_checkout(source: str) -> str:
 def resolve_dev_path(dev: str | None = None, no_dev: bool = False) -> str | None:
     """Return the effective dev-mode path (a source checkout root) or None.
 
-    Dev mode means that the injected helper library and the solver templates
-    come from a local checkout. Resolution order:
+    Dev mode means that the solver templates come from a local checkout.
+    Resolution order:
 
-    1. *no_dev* → None (published behavior), overrides everything.
+    1. *no_dev* → None (packaged templates), overrides everything.
     2. *dev* is a path → that path; ``"auto"`` → the detected checkout.
     3. ``$MCP_SOLVER_DEV`` set to ``1``/``true``/``auto`` → the detected
        checkout; any other non-empty value → treated as a path.
@@ -245,19 +228,3 @@ def resolve_dev_path(dev: str | None = None, no_dev: bool = False) -> str | None
             return _auto_checkout(f"{_DEV_ENV}={env}")
         return env
     return local_checkout()
-
-
-def require_publishable(dev_path: str | None) -> None:
-    """Raise UnpublishedVersionError for an unpublished version without dev mode.
-
-    Without dev mode the kernel helpers are pinned to the installed version
-    on PyPI, which fails for a version that was never published.
-    """
-    version = mcp_solver.__version__
-    if dev_path is None and is_unpublishable(version):
-        raise UnpublishedVersionError(
-            f"installed version {version} is not a published release and dev"
-            " mode is off. Run from a source checkout, or take helpers and"
-            " templates from a local repo: pass --dev PATH (CLI) or set"
-            f" {_DEV_ENV} to a checkout path (server)."
-        )

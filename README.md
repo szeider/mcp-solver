@@ -24,9 +24,8 @@ solving itself — the server is a solver toolkit; it runs no LLM and needs
 no API key:
 
 - **`select_backend(solver)`** sets up a persistent IPython kernel with the
-  backend's solver library and helper functions, and returns the modeling
-  instructions for that backend. Calling it again recycles the kernel for
-  the next problem.
+  backend's solver library and returns the modeling instructions for that
+  backend. Calling it again recycles the kernel for the next problem.
 - **Kernel tools** (`python_exec`, `python_reset`, `python_status`,
   `python_interrupt`) let the host write, run, and verify a real solver
   program; bare `python_exec` calls are routed to the solving kernel
@@ -136,12 +135,12 @@ directory.
 | `--workdir DIR`  | Working directory for the run (default: current dir)   |
 | `--step-limit N` | Maximum agent steps before stopping (default: 30)      |
 | `-q`, `--quiet`  | Suppress per-step progress output                      |
-| `--dev [PATH]`   | Dev mode: take helpers and templates from a local checkout (bare `--dev` auto-detects; auto-on inside a checkout; also `MCP_SOLVER_DEV`) |
-| `--no-dev`       | Disable dev mode; use the published (PyPI-pinned) helpers |
+| `--dev [PATH]`   | Dev mode: take templates from a local checkout (bare `--dev` auto-detects; auto-on inside a checkout; also `MCP_SOLVER_DEV`) |
+| `--no-dev`       | Disable dev mode; use the packaged templates           |
 | `--stats-json FILE` | Write the run statistics to `FILE` as JSON          |
 
-From an editable clone, the CLI runs in **dev mode**: helpers and templates
-come from the source checkout (auto-detected), with one provenance line on
+From an editable clone, the CLI runs in **dev mode**: templates come from
+the source checkout (auto-detected), with one provenance line on
 stderr.
 
 ### mcp-minion
@@ -178,15 +177,14 @@ scheduling, and packing.
 
 ## How it works
 
-The base `mcp-solver` package is a dependency-free **solver helper library**
-(`mcp_solver.helpers.{pysat,maxsat,z3}`; the CPMpy, Clingo, and DIDP
-backends need no helper module). It is never pip-installed into your
-environment; instead it is injected into each solve-time kernel via
-`uv run --with mcp-solver==<version>`, alongside the backend's solver library.
-This keeps the host environment clean and each solve reproducible.
+Each solve runs in an ephemeral kernel that `uv run --with` sets up with the
+backend's solver library only (python-sat, z3-solver, cpmpy, clingo, or
+didppy); this package is not installed there, and nothing is pip-installed
+into your environment. This keeps the host environment clean and each solve
+reproducible.
 
 Each backend ships a **project template**: a markdown prompt (package data)
-with the encoding conventions, output format, and helper API for that
+with the encoding conventions, output format, and library idioms for that
 solver. The template goes to whoever solves: an MCP host receives it from
 `select_backend`; the CLI hands it to its mcp-minion agent as the system
 prompt. Either way, the solving LLM drives the write → execute → verify

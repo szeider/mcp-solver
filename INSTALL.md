@@ -47,8 +47,8 @@ python3.13 --version
 ### uv
 
 [uv](https://docs.astral.sh/uv/) is a hard runtime requirement, not just a
-convenience: solver libraries and the MCP Solver helper library are supplied at
-solve time via `uv run --with`, never pip-installed into your environment.
+convenience: solver libraries are supplied at solve time via `uv run --with`,
+never pip-installed into your environment.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -84,8 +84,8 @@ echo 'OPENROUTER_API_KEY="sk-or-v1-..."' > ~/.config/coder/.env
 
 The `[agent]` extra pulls in `mcp-minion` (the agent loop) and
 `agentic-python-coder` (the IPython kernel MCP server and model aliases); the
-bare `agentic-mcp-solver` package is only the dependency-free helper library and
-cannot solve anything on its own.
+bare `agentic-mcp-solver` package has no dependencies and cannot solve anything
+on its own.
 
 ```bash
 git clone https://github.com/szeider/mcp-solver.git
@@ -97,10 +97,10 @@ uv pip install -e ".[agent,test]"     # + benchmark harness and unit tests
 ```
 
 An editable install runs in **dev mode**: the CLI auto-detects the source
-checkout and takes both the helper library and the solver templates straight
-from it (printing one provenance line to stderr), so nothing extra is needed to
-run a solve. Use `--dev PATH` (or `MCP_SOLVER_DEV`) to point at a checkout
-explicitly, or `--no-dev` to force the published (PyPI-pinned) helpers.
+checkout and takes the solver templates straight from it (printing one
+provenance line to stderr), so nothing extra is needed to run a solve. Use
+`--dev PATH` (or `MCP_SOLVER_DEV`) to point at a checkout explicitly, or
+`--no-dev` to force the packaged templates.
 
 ### From PyPI
 
@@ -122,8 +122,8 @@ The individual extras are:
 
 The checkout is fully self-sufficient — development and testing never wait on
 a PyPI release. Everything resolves locally: `mcp-minion` comes from the
-`minion/` workspace member, and dev mode injects the helper library and
-templates straight from the checkout (auto-detected; also available
+`minion/` workspace member, and dev mode reads the templates straight from
+the checkout (auto-detected; also available
 explicitly as `--dev PATH` or `MCP_SOLVER_DEV=/path`).
 
 Run the CLI or the benchmark harness from anywhere by pointing `uv` at the
@@ -148,8 +148,8 @@ with this configuration:
 }
 ```
 
-This is the supported development path alongside the PyPI release: `--dev`
-always wins over the PyPI pin.
+This is the supported development path alongside the PyPI release: `--dev PATH`
+selects the templates from that checkout.
 
 ---
 

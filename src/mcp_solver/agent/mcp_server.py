@@ -3,8 +3,8 @@
 The HOST does the solving. Claude Desktop, Claude Code, or mcp-minion (the
 batchable open-source host substitute) connects here and writes, runs, and
 verifies solver programs itself against a persistent IPython kernel. The
-server contributes the solver value: backend selection, solver packages and
-helpers injected into the kernel, the modeling instructions (templates), and
+server contributes the solver value: backend selection, solver packages
+injected into the kernel, the modeling instructions (templates), and
 the compile-gated ``submit_code`` finish line. It calls no LLM and needs no
 API key.
 
@@ -55,9 +55,9 @@ SELECT_BACKEND_DESCRIPTION = """\
 Start solving a constraint problem: call this FIRST, once per problem.
 
 Sets up a persistent IPython kernel preloaded with the backend's solver
-library and helper functions, and returns the modeling instructions for that
-backend. Calling it again recycles the kernel for a new problem (previous
-session state is cleared).
+library, and returns the modeling instructions for that backend. Calling it
+again recycles the kernel for a new problem (previous session state is
+cleared).
 
 Backends:
 - pysat: Boolean satisfiability — feasibility, combinatorial search
@@ -211,7 +211,7 @@ def _episode_snapshot() -> dict | None:
 
 
 def _dev_path() -> str | None:
-    """Dev-mode source checkout for helpers/templates (env or auto-detect).
+    """Dev-mode source checkout for templates (env or auto-detect).
 
     Raises DevModeError when MCP_SOLVER_DEV asks for auto-detection and no
     checkout exists (the same error the CLI reports).
@@ -306,10 +306,9 @@ async def select_backend(solver: str) -> str:
 
     try:
         dev = _dev_path()
-        engine.require_publishable(dev)
-    except (engine.DevModeError, engine.UnpublishedVersionError) as e:
+    except engine.DevModeError as e:
         raise ToolError(str(e)) from None
-    packages = build_with_packages(solver, dev)
+    packages = build_with_packages(solver)
 
     # Recycle the existing solving kernel; fresh kernel on first call or
     # when the stored one is gone (engine reports success=false for it).

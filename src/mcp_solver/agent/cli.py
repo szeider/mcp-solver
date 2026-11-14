@@ -15,7 +15,7 @@ Exit status:
     1    setup or agent failure (agent layer missing, no API key, engine
          error, kernel setup failure, an exception from the solve, or an
          agent error before any submission)
-    2    usage error, or an unpublished version with dev mode off
+    2    usage error
     3    the agent finished without a successful ``submit_code`` (also when
          the step limit or the token limit ended the run first)
     4    the agent stopped early with an error (e.g. an LLM API failure)
@@ -54,7 +54,8 @@ DEFAULT_TOKEN_LIMIT = 2_000_000
 # API key variable unless a model config names another (api_key_env).
 DEFAULT_KEY_VAR = "OPENROUTER_API_KEY"
 
-# Solver libraries injected into the solve-time kernel, per backend.
+# Solver libraries injected into the solve-time kernel and the re-execution,
+# per backend; nothing else is installed there.
 # The [pb] extra installs pindakaas, which backs pysat.pb.PBEnc
 # (pseudo-Boolean encodings: budgets, capacities); without it every PBEnc
 # encoding call raises "Package 'pindakaas' is unavailable".
@@ -85,25 +86,13 @@ def resolve_dev_path(
         parser.error(str(exc))
 
 
-def helpers_package(dev_path: str | None = None) -> str:
-    """Return the ``--with`` spec for the mcp-solver helper library.
+def build_with_packages(solver: str) -> list[str]:
+    """Return the ``--with`` package set for a solver run.
 
-    In dev mode (*dev_path* given) the helpers come from that local
-    checkout; otherwise from a PyPI pin to the installed version.
+    Only the backend's solver libraries; the kernel does not install this
+    distribution.
     """
-    if dev_path:
-        return dev_path
-    return f"{mcp_solver.DIST_NAME}=={mcp_solver.__version__}"
-
-
-def build_with_packages(solver: str, dev_path: str | None = None) -> list[str]:
-    """Assemble the ``--with`` package set for a solver run.
-
-    The solver library comes first, then the mcp-solver helpers. Only the
-    pysat/maxsat/z3 templates reference the helpers, but they are injected
-    for every backend for uniformity.
-    """
-    return [*SOLVER_PACKAGES[solver], helpers_package(dev_path)]
+    return list(SOLVER_PACKAGES[solver])
 
 
 # Sampling parameters forwarded from a model config (unless the model is
@@ -275,13 +264,13 @@ def build_parser() -> argparse.ArgumentParser:
         const="auto",
         default=None,
         metavar="PATH",
-        help="dev mode: take helpers and templates from a local checkout"
+        help="dev mode: take templates from a local checkout"
         " (bare --dev auto-detects a source checkout; auto-on inside one)",
     )
     dev_group.add_argument(
         "--no-dev",
         action="store_true",
-        help="disable dev mode; use the published (PyPI-pinned) helpers",
+        help="disable dev mode; use the packaged templates",
     )
     parser.add_argument(
         "--stats-json",
@@ -453,16 +442,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--token-limit must be >= 0 (0 means no limit)")
     dev_path = resolve_dev_path(args, parser)
 
-    try:
-        engine.require_publishable(dev_path)
-    except engine.UnpublishedVersionError as exc:
-        print(f"mcp-solver: {exc}", file=sys.stderr)
-        return 2
-
-    with_packages = build_with_packages(args.solver, dev_path)
+    with_packages = build_with_packages(args.solver)
     if dev_path is not None:
         print(
-            f"mcp-solver: dev mode — helpers and templates from {dev_path}",
+            f"mcp-solver: dev mode — templates from {dev_path}",
             file=sys.stderr,
         )
 

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-import mcp_solver
 from mcp_solver.agent import engine
 
 
@@ -116,7 +115,7 @@ async def test_start_engine_closes_manager_on_failed_check(monkeypatch):
     assert engine.ENGINE_SERVER_NAME in seen["servers"]
 
 
-# --- dev mode and published versions ----------------------------------------
+# --- dev mode ----------------------------------------------------------------
 
 
 def test_resolve_dev_path_order(monkeypatch):
@@ -141,21 +140,6 @@ def test_resolve_dev_path_auto_without_checkout_errors(monkeypatch, dev, env):
     monkeypatch.setattr(engine, "local_checkout", lambda: None)
     with pytest.raises(engine.DevModeError, match="no source checkout"):
         engine.resolve_dev_path(dev)
-
-
-def test_require_publishable(monkeypatch):
-    monkeypatch.setattr(mcp_solver, "__version__", "4.0.0a0")
-    with pytest.raises(engine.UnpublishedVersionError, match="--dev"):
-        engine.require_publishable(None)
-    engine.require_publishable("/repo")  # dev mode: fine
-    monkeypatch.setattr(mcp_solver, "__version__", "4.0.0")
-    engine.require_publishable(None)
-
-
-def test_is_unpublishable():
-    assert not engine.is_unpublishable("4.2.0")
-    assert engine.is_unpublishable("4.2.0rc1")
-    assert engine.is_unpublishable("4.2.0+local")
 
 
 def test_kernel_env_drops_credential_like_names(monkeypatch):

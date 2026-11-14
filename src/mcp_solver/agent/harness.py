@@ -274,8 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         const="auto",
         default=None,
         metavar="PATH",
-        help="dev mode: pass through to the CLI so helpers and templates come"
-        " from a local checkout (bare --dev auto-detects; default: CLI decides)",
+        help="dev mode: pass through to the CLI so templates come from a"
+        " local checkout (bare --dev auto-detects; default: CLI decides)",
     )
     parser.add_argument(
         "--out",

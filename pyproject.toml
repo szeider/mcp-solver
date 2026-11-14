@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentic-mcp-solver"
-version = "4.3.0"
+version = "4.4.0"
 description = "LLM-driven constraint solving (SAT, MaxSAT, SMT, CP, ASP) on top of agentic-python-coder"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,10 +12,9 @@ authors = [
     { name = "Stefan Szeider", email = "stefan@szeider.net" },
 ]
 requires-python = ">=3.13,<3.15"
-# The base package is the solver helper library only. It is installed into
-# ephemeral solve-time kernels via `uv run --with agentic-mcp-solver==<version>`,
-# so it must stay dependency-free. Solver packages (python-sat, z3-solver,
-# cpmpy, clingo) are likewise supplied at solve time via --with.
+# Everything runtime is in the [agent] extra. Solve-time kernels do not
+# install this distribution; their solver packages (python-sat, z3-solver,
+# cpmpy, clingo, didppy) are supplied at solve time via `uv run --with`.
 dependencies = []
 
 [project.optional-dependencies]
@@ -26,7 +25,7 @@ agent = [
     "mcp-minion>=0.3.0",
     "mcp>=2,<3",
 ]
-# Solver libraries needed to unit-test the helpers and run problem validators.
+# Solver libraries needed by the unit tests and the problem validators.
 test = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26",
@@ -109,13 +108,6 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-
-[tool.uv]
-# Dev-mode kernels install this checkout via `uv run --with <checkout>`; uv
-# caches the built package and by default rebuilds only when pyproject.toml
-# changes, so new kernels would miss edits to the helpers. Key the cache on
-# the Python sources too.
-cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
 
 # uv workspace: mcp-solver (root) plus the mcp-minion agent runner.
 [tool.uv.workspace]

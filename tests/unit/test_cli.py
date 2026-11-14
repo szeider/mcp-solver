@@ -105,22 +105,12 @@ def test_problem_path_is_directory_clean_error(tmp_path, capsys):
 # --- with_packages construction ------------------------------------------
 
 
-def test_with_packages_pysat_pins_helpers(monkeypatch):
-    # Outside a source checkout the helpers fall back to the PyPI pin.
-    monkeypatch.setattr(engine, "local_checkout", lambda: None)
-    pkgs = cli.build_with_packages("pysat")
-    assert pkgs == [
-        "python-sat[pb]",
-        f"agentic-mcp-solver=={mcp_solver.__version__}",
-    ]
-
-
 def test_source_checkout_auto_detected():
     # The test suite runs from an editable install, so detection must fire
     # and point at the repo root.
     checkout = engine.local_checkout()
     assert checkout is not None
-    assert cli.helpers_package(checkout) == checkout
+    assert (Path(checkout) / "src" / "mcp_solver" / "templates").is_dir()
 
 
 @pytest.mark.parametrize(
@@ -134,17 +124,10 @@ def test_source_checkout_auto_detected():
         ("didp", "didppy>=0.11.1,<0.12"),
     ],
 )
-def test_with_packages_solver_libraries(solver, lib, monkeypatch):
-    monkeypatch.setattr(engine, "local_checkout", lambda: None)
-    pkgs = cli.build_with_packages(solver)
-    assert pkgs[0] == lib
-    # helpers package is always injected, for every backend.
-    assert pkgs[-1] == f"agentic-mcp-solver=={mcp_solver.__version__}"
-
-
-def test_dev_path_used_as_helpers(monkeypatch):
-    pkgs = cli.build_with_packages("z3", dev_path="/path/to/checkout")
-    assert pkgs == ["z3-solver", "/path/to/checkout"]
+def test_with_packages_solver_libraries(solver, lib):
+    # Only the backend's solver library; this distribution is not installed
+    # into kernels, in dev mode or not.
+    assert cli.build_with_packages(solver) == [lib]
 
 
 # --- dev-path resolution -------------------------------------------------
@@ -160,8 +143,8 @@ def _resolve(argv, monkeypatch, env=None):
     return cli.resolve_dev_path(args, parser)
 
 
-def test_no_dev_forces_pin_even_in_checkout(monkeypatch):
-    # A checkout is detected, but --no-dev overrides it → published behavior.
+def test_no_dev_disables_template_override_even_in_checkout(monkeypatch):
+    # A checkout is detected, but --no-dev overrides it → packaged templates.
     monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     assert _resolve(["z3", "--no-dev", "hi"], monkeypatch) is None
 
@@ -402,6 +385,7 @@ def test_main_persists_submission_and_runs_it(monkeypatch, tmp_path, capsys):
     artifact = tmp_path / "queens_code.py"
     assert artifact.read_text(encoding="utf-8") == "print('SOLUTION')"
     assert ran["program"] == artifact
+    assert ran["with_packages"] == ["z3-solver"]
 
 
 def test_main_no_submission_returns_3(monkeypatch, tmp_path, capsys):
@@ -536,8 +520,8 @@ def test_main_no_api_key_returns_1(monkeypatch, tmp_path, capsys):
 def test_missing_engine_returns_1(monkeypatch, capsys):
     # Setting the module to None makes ``import agentic_python_coder`` raise
     # ImportError, exercising the polite-error branch without the engine.
-    # A checkout is detected here, so dev mode is on and the fast-fail is
-    # skipped; the run reaches the engine-import branch.
+    # A checkout is detected here, so dev mode is on; the run reaches the
+    # engine-import branch.
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.setattr(engine, "local_checkout", lambda: "/repo")
     monkeypatch.setitem(sys.modules, "agentic_python_coder", None)
@@ -547,24 +531,12 @@ def test_missing_engine_returns_1(monkeypatch, capsys):
     assert "uv pip install 'agentic-mcp-solver[agent]'" in err
 
 
-# --- fast-fail: unpublishable version with dev mode off ------------------
-
-
-def test_fast_fail_unpublishable_no_dev(monkeypatch, capsys):
-    # No checkout, no env, and a pre-release version → fail before the engine.
+def test_unpublished_version_without_dev_mode_runs(monkeypatch):
+    # No checkout, no env, and a version that is not on PyPI: nothing pins
+    # this distribution any more, so the run proceeds (to the engine-import
+    # branch, which is absent here → rc 1, not the former usage error 2).
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.setattr(mcp_solver, "__version__", "4.0.0a0")
-    monkeypatch.setattr(engine, "local_checkout", lambda: None)
-    rc = cli.main(["z3", "hello"])
-    assert rc == 2
-    assert "--dev" in capsys.readouterr().err
-
-
-def test_no_fast_fail_for_published_version(monkeypatch, capsys):
-    # A plain numeric version is publishable, so the pin is fine and the run
-    # proceeds (to the engine-import branch, which is absent here → rc 1).
-    monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
-    monkeypatch.setattr(mcp_solver, "__version__", "4.0.0")
     monkeypatch.setattr(engine, "local_checkout", lambda: None)
     monkeypatch.setitem(sys.modules, "agentic_python_coder", None)
     rc = cli.main(["z3", "hello"])
