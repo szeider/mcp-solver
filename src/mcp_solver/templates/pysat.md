@@ -24,21 +24,21 @@ fabricate a model, or check constraints by hand instead of solving.
 
 ```python
 import json
-from pysat.formula import CNF
+from pysat.formula import CNF, IDPool
+from pysat.card import CardEnc, EncType
 from pysat.solvers import Glucose3
-from mcp_solver.helpers.pysat import VariableMap, exactly_one
 
 formula = CNF()
-var_map = VariableMap()
+vpool = IDPool()   # ONE pool per program: named variables AND encoder auxiliaries
 
-# Variables: map problem entities to SAT variable ids (1-based)
-# Constraints: formula.append([...]) clauses
+# Variables: x = vpool.id(("x", i))  -> ids 1, 2, 3, ... on first use
+# Constraints: formula.append([...]) clauses; cardinality via CardEnc (below)
 # Solve
 with Glucose3(bootstrap_with=formula) as solver:
     if solver.solve():
         model = solver.get_model()
-        assignment = var_map.interpret_model(model)
-        result = {"satisfiable": True, "assignment": assignment}
+        true_vars = [vpool.obj(l) for l in model if l > 0 and vpool.obj(l) is not None]
+        result = {"satisfiable": True, "true_vars": true_vars}
     else:
         result = {"satisfiable": False}
 print(json.dumps(result))
@@ -47,72 +47,72 @@ print(json.dumps(result))
 ## SAT Variables — the two numbering systems
 
 SAT variables must be positive integers starting at 1 (variable 0 is invalid);
-Python iterates 0-based. Keep the two apart:
+Python iterates 0-based. Let the pool keep the two apart: it maps any hashable
+name (use tuples) to a 1-based id, the same name always to the same id.
 
 ```python
-# Dict-based mapping (preferred for readability)
+from pysat.formula import IDPool
+
+vpool = IDPool()
 queen = {}
-var_num = 1
 for row in range(8):            # 0-based iteration
     for col in range(8):
-        queen[(row, col)] = var_num   # 1-based SAT variable
-        var_num += 1
-
-# Formula-based mapping
-def get_var(row, col, num_cols):
-    return row * num_cols + col + 1   # +1 makes it 1-based
+        queen[(row, col)] = vpool.id(("queen", row, col))   # 1-based SAT variable
+node_color = vpool.id(("color", "A", "Red"))
 ```
 
-Or let `VariableMap` manage ids and names:
-
-```python
-var_map = VariableMap()
-x = var_map.get_id("x")                       # allocates 1, 2, 3, ... per name
-node_color = var_map.get_id("node_A_Red")
-assignment = var_map.interpret_model(model)   # {"x": True, "node_A_Red": False, ...}
-```
+If you number variables by hand (`row * n + col + 1`), create the pool as
+`IDPool(start_from=<largest hand-made id> + 1)` before any encoder call;
+otherwise auxiliaries reuse your ids.
 
 ## Interpreting the model
 
 `solver.get_model()` returns a list of literals: positive = variable TRUE,
-negative = variable FALSE.
+negative = variable FALSE. `vpool.obj(id)` gives the name back, and `None`
+for auxiliary ids created by encoders.
 
 ```python
 model = solver.get_model()
 is_true = x in model                                   # single variable
-solution = {name: (vid in model) for name, vid in var_map.get_mapping().items()}
+placed = [vpool.obj(l)[1:] for l in model if l > 0 and vpool.obj(l)]  # [(row, col), ...]
 ```
 
-## Helper library (mcp_solver.helpers.pysat)
+## Cardinality and pseudo-Boolean constraints
 
-All of these return `list[list[int]]` clauses — append each clause to your formula:
+`pysat.card.CardEnc` and `pysat.pb.PBEnc` return an object whose `.clauses`
+you add to the formula. ALWAYS pass `vpool=vpool`: the encoder then takes its
+auxiliary ids from the pool, and later `vpool.id(...)` calls skip them.
+Without it, auxiliaries can reuse ids of other variables.
 
 ```python
-from mcp_solver.helpers.pysat import (
-    VariableMap,
-    at_most_one, exactly_one,          # pairwise (at_most_one: CardEnc above
-                                       #   20 vars, without top_id)
-    at_most_k, at_least_k, exactly_k,  # cardinality (pairwise <=20 vars, CardEnc
-                                       #   above — then pass top_id=<max var id
-                                       #   in your formula> so auxiliaries don't
-                                       #   collide with your other variables)
-    implies, mutually_exclusive, if_then_else,
-)
+from pysat.card import CardEnc, EncType
+from pysat.pb import PBEnc
 
-for clause in exactly_k(list(queen.values()), 8):
-    formula.append(clause)
-for clause in implies(a, b):          # a -> b, i.e. [[-a, b]]
-    formula.append(clause)
+cells = list(queen.values())
+formula.extend(CardEnc.equals(lits=cells, bound=8, vpool=vpool,
+                              encoding=EncType.seqcounter).clauses)
+for r in range(8):              # one-hot: exactly one queen per row
+    row = [queen[(r, c)] for c in range(8)]
+    formula.extend(CardEnc.equals(lits=row, bound=1, vpool=vpool,
+                                  encoding=EncType.pairwise).clauses)
+# CardEnc.atmost / CardEnc.atleast take the same arguments
+# weighted sum: 3*x0 + 2*x1 + 4*x2 <= 5
+formula.extend(PBEnc.atmost(lits=cells[:3], weights=[3, 2, 4], bound=5,
+                            vpool=vpool).clauses)
 ```
 
-PySAT's own `pysat.card.CardEnc` is also available if you need a specific
-encoding, but the helpers above are the tested path.
+- Default `EncType.seqcounter`: any bound, about n*k auxiliaries.
+- `EncType.pairwise` adds no auxiliaries but supports only bound 1 (fine for
+  one-hot groups of up to a few dozen variables). Do not use `native`: it
+  needs a Minicard solver and produces no clauses.
+- A bound below 0, or above `len(lits)` for `equals`/`atleast`, raises
+  `ValueError`: such a constraint is unsatisfiable, so re-read the problem.
 
 ## Common logical encodings
 
 - a AND b implies c: `formula.append([-a, -b, c])`
 - at least one of a set: `formula.append(list_of_vars)`
-- exactly one value per entity (one-hot): `formula.extend(exactly_one(entity_vars))`
+- exactly one value per entity (one-hot): `CardEnc.equals(..., bound=1, ...)` as above
 - adjacent nodes differ (per color c): `formula.append([-color[u][c], -color[v][c]])`
 
 ## PySAT Pitfalls — Avoid These
@@ -120,8 +120,8 @@ encoding, but the helpers above are the tested path.
 - Variable 0 does not exist; ids must start at 1.
 - "9 colors" means `range(9)` (colors 0–8), not `range(10)` — off-by-one on
   ranges is the #1 encoding error.
-- Do NOT hand-roll global counters with `nonlocal` at module level; use
-  `VariableMap` (or `global` if you must).
+- Do NOT hand-roll global counters with `nonlocal` at module level; take
+  every id from the one `IDPool`.
 - Do NOT print anything except the final JSON in the submitted program.
 - Solvers: `Glucose3` is the default; `Cadical153` is a good alternative for
   harder instances (`from pysat.solvers import Cadical153`).
@@ -181,9 +181,9 @@ swapped indices). Before submitting, you MUST:
 
 Finish by calling `submit_code` with the final, verified program as one
 self-contained script (all imports included, no reliance on session state;
-`mcp_solver.helpers` imports are fine — the library is available wherever the
-program is re-executed). Do NOT call submit_code until verification passes.
+`pysat` and the standard library are available wherever the program is
+re-executed). Do NOT call submit_code until verification passes.
 If it fails, fix the encoding and re-verify.
 
-That's it. Read the problem carefully, map entities to 1-based variables, encode
+That's it. Read the problem carefully, map entities to pool variables, encode
 exactly what is stated, verify independently, and let the SAT solver do the search.

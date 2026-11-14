@@ -22,18 +22,15 @@ optimize by hand — always go through RC2.
 
 ```python
 import json
-from pysat.formula import WCNF
+from pysat.formula import WCNF, IDPool
+from pysat.card import CardEnc, EncType
 from pysat.examples.rc2 import RC2
-from mcp_solver.helpers.pysat import VariableMap, exactly_one
-from mcp_solver.helpers import maxsat as card   # WCNF-mutating cardinality
 
 wcnf = WCNF()
-var_map = VariableMap()
+vpool = IDPool()   # ONE pool: named variables, encoder and reification auxiliaries
 
 # 1. Variables (1-based ids; comment each with its meaning)
-#    item = var_map.get_id("item_A")   # allocate/look up an id per name
-#    (the method is get_id; after solving, var_map.interpret_model(model)
-#    returns {name: bool})
+#    item = vpool.id(("item", "A"))   # same name -> same id; vpool.obj(id) -> name
 # 2. Hard constraints:  wcnf.append([literals])
 # 3. Soft constraints:  wcnf.append([literals], weight=w)
 # 4. Solve
@@ -43,7 +40,8 @@ with RC2(wcnf) as solver:
         result = {
             "satisfiable": True,
             "cost": solver.cost,      # total weight of violated soft clauses
-            "assignment": var_map.interpret_model(model),
+            "true_vars": [vpool.obj(l) for l in model
+                          if l > 0 and vpool.obj(l) is not None],
         }
     else:
         result = {"satisfiable": False}
@@ -69,46 +67,48 @@ reports "optimal". The verification step below is your safety net.
 
 ## Cardinality constraints
 
-```python
-from mcp_solver.helpers import maxsat as card
+Use `pysat.card.CardEnc` and ALWAYS pass `vpool=vpool`, so that its
+auxiliary variables come from the pool and never coincide with your other
+variables. `wcnf.extend(clauses)` without weights adds hard clauses.
 
-card.exactly_k(wcnf, items, 2)     # mutate wcnf in place (hard clauses)
-card.at_most_k(wcnf, items, 3)
-card.at_least_k(wcnf, items, 1)
+```python
+from pysat.card import CardEnc, EncType
+
+wcnf.extend(CardEnc.equals(lits=items, bound=2, vpool=vpool,
+                           encoding=EncType.seqcounter).clauses)
+wcnf.extend(CardEnc.atmost(lits=items, bound=3, vpool=vpool).clauses)
+wcnf.extend(CardEnc.atleast(lits=items, bound=1, vpool=vpool).clauses)
 ```
 
-Soft cardinality (a preference, not a requirement) via the clause-returning
-family:
+`EncType.seqcounter` (the default) handles any bound; `EncType.pairwise`
+adds no auxiliaries but supports only bound 1.
+
+**Soft cardinality** (a preference, priced ONCE): reify the constraint with a
+pool auxiliary `ok` and make `ok` soft:
 
 ```python
-from mcp_solver.helpers.pysat import soft_at_least_k, add_soft_clauses_to_wcnf
-
-add_soft_clauses_to_wcnf(wcnf, soft_at_least_k(items, k, weight=5))
+ok = vpool.id(("at_least", k))   # ok -> at least k items selected
+for cl in CardEnc.atleast(lits=items, bound=k, vpool=vpool).clauses:
+    wcnf.append(cl + [-ok])
+wcnf.append([ok], weight=4)      # pay 4 if fewer than k are selected
 ```
 
 **Weighted budgets (pseudo-Boolean).** For a weighted sum bound like
-`sum(w_i * x_i) <= B`, use PBEnc instead of the unweighted `card.*` helpers
-(which count items, not weights, and scale badly for large k):
+`sum(w_i * x_i) <= B`, use PBEnc (CardEnc counts items, not weights):
 
 ```python
 from pysat.pb import PBEnc
 
-enc = PBEnc.atmost(lits=items, weights=w, bound=B, top_id=wcnf.nv)
-for cl in enc.clauses:
-    wcnf.append(cl)
-wcnf.nv = max(wcnf.nv, enc.nv)  # absorb PBEnc's auxiliary vars
+wcnf.extend(PBEnc.atmost(lits=items, weights=w, bound=B, vpool=vpool).clauses)
 ```
 
 ## Auxiliary-variable patterns (reified objectives)
 
 To reward or penalize a COMBINATION of variables, reify it with an auxiliary
-variable. Allocate fresh ids above all existing ones (`wcnf.nv` counts only
-ids already in clauses, and `var_map` does not know `aux`, so do this only
-after every named variable is allocated and appears in a clause):
+variable taken from the same pool, at any point of the program:
 
 ```python
-aux = wcnf.nv + 1            # next free variable id
-wcnf.nv = aux
+aux = vpool.id(("both", "A", "B"))   # fresh id, distinct from every other
 ```
 
 **Bonus if two items are selected together** (aux <-> A AND B, reward the aux):
@@ -139,11 +139,11 @@ weights to the underlying variables again.
 
 ## MaxSAT Pitfalls — Avoid These
 
-- Variable ids are positive integers starting at 1; after helper calls that
-  add auxiliaries, allocate new ids from `wcnf.nv + 1`.
+- Variable ids are positive integers starting at 1; take every id, auxiliaries
+  included, from the one `IDPool` (no hand-made `wcnf.nv + 1` ids).
 - Use `WCNF()`, not `CNF()`; add soft clauses only via `weight=`.
-- `mcp_solver.helpers.pysat` functions return clause lists — append EVERY
-  clause, don't append the list itself (`card.*` appends to `wcnf` itself).
+- Encoders return an object: add its `.clauses` with `wcnf.extend(...)`,
+  don't append the object or the list as one clause.
 - Building the WCNF without instantiating RC2 solves nothing.
 - Do NOT print anything except the final JSON in the submitted program.
 
@@ -187,8 +187,8 @@ independent of the encoding:
 
 Finish by calling `submit_code` with the final, verified program as one
 self-contained script (all imports included, no reliance on session state;
-`mcp_solver.helpers` imports are fine — the library is available wherever the
-program is re-executed). Do NOT call submit_code until verification passes.
+`pysat` and the standard library are available wherever the program is
+re-executed). Do NOT call submit_code until verification passes.
 
 That's it. Separate hard from soft, penalize what you don't want, verify the
 objective independently, and let RC2 find the optimum.
