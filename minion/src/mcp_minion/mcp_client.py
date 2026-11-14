@@ -270,16 +270,26 @@ class MCPManager:
                 parts.append(str(item))
         return "\n".join(parts)
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None) -> str:
         """Call a tool and return the result as a JSON string.
 
         Args:
             name: Tool name
-            arguments: Tool arguments
+            arguments: Tool arguments (None counts as no arguments)
 
         Returns:
             JSON string with result or error
         """
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return json.dumps(
+                {
+                    "error": f"Tool '{name}' arguments must be a JSON object,"
+                    f" got {type(arguments).__name__}"
+                }
+            )
+
         tool_info = self._tools.get(name)
         if not tool_info:
             return json.dumps({"error": f"Unknown MCP tool: {name}"})
@@ -314,7 +324,7 @@ class MCPManager:
         except Exception as e:
             return json.dumps({"error": f"Tool '{name}' failed: {e}"})
 
-    def _effective_timeout(self, arguments: dict[str, Any]) -> float:
+    def _effective_timeout(self, arguments: dict[str, Any] | None) -> float:
         """Client-side timeout for one tool call.
 
         At least ``tool_timeout``; if the call itself carries a numeric
@@ -322,6 +332,8 @@ class MCPManager:
         the server-side timeout always fires first.
         """
         timeout = self.tool_timeout
+        if not isinstance(arguments, dict):
+            return timeout
         arg_timeout = arguments.get("timeout")
         if isinstance(arg_timeout, int | float) and not isinstance(arg_timeout, bool):
             timeout = max(timeout, float(arg_timeout) + TIMEOUT_MARGIN)

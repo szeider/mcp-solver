@@ -244,8 +244,12 @@ async def run_agent_async(
     mcp_servers: dict[str, Any] | None,
     prompt: str,
     api_key: str,
-) -> None:
-    """Run the agent with MCP support."""
+) -> int:
+    """Run the agent with MCP support; return the process exit code.
+
+    The exit code is 1 when the run ended with an LLM API error
+    (``AgentResult.error``), else 0. A valid submission is saved either way.
+    """
     # Create logger (saves to run folder)
     logger = None if args.no_log else RunLogger(log_dir=args.folder)
 
@@ -320,6 +324,11 @@ async def run_agent_async(
                 if submission_path
                 else f"\nLog: {logger.log_path}"
             )
+
+        if result.error:
+            print(f"Error: agent run failed: {result.error}", file=sys.stderr)
+            return 1
+        return 0
 
     except Exception as e:
         print(f"Error running agent: {e}", file=sys.stderr)
@@ -424,9 +433,13 @@ More info: https://github.com/szeider/mcp-solver""",
 
     # Run async
     try:
-        asyncio.run(run_agent_async(args, config, mcp_servers, prompt, api_key))
+        exit_code = asyncio.run(
+            run_agent_async(args, config, mcp_servers, prompt, api_key)
+        )
     except Exception:
         sys.exit(1)
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

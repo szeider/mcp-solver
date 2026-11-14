@@ -235,7 +235,7 @@ async def test_toolkit_round_trip(engine):
         assert "recycled" in text
         name, args = engine.calls[-1]
         assert name == "python_reset" and args["kernel_id"] == "k1"
-        assert args["packages"][0] == "python-sat"
+        assert args["packages"][0] == "python-sat[pb]"
 
         # A stale kernel falls back to a fresh one, and routing follows.
         engine.kernels.clear()

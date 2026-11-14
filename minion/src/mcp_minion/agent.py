@@ -9,13 +9,101 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from mcp_minion.logging import RESERVED_REQUEST_KEYS, RunLogger
 from mcp_minion.tools import ToolRegistry
 
 if TYPE_CHECKING:
     from mcp_minion.mcp_client import MCPManager
+
+
+# Retries for API error responses the OpenAI SDK parses without raising:
+# OpenRouter intermittently returns HTTP 200 whose body is an error object
+# ({"choices": null, "error": {...}}), or a choice with finish_reason "error".
+# (Ported from agentic-python-coder's agent.py; exceptions raised by the SDK
+# are retried by the SDK itself.)
+API_ERROR_MAX_RETRIES = 3
+API_ERROR_BACKOFF_SECONDS = 5
+
+# Sent when a reply without tool calls was cut off at max_tokens.
+TRUNCATION_NOTICE = (
+    "Your previous response was truncated at the max_tokens limit."
+    " Continue, and be more concise."
+)
+
+
+_MISSING = object()
+
+
+class LLMResponseError(RuntimeError):
+    """The API kept returning error responses after all retries."""
+
+
+def _response_error(response: Any) -> str | None:
+    """Return a description if the response is an error envelope, else None."""
+    if not response.choices:
+        error = (getattr(response, "model_extra", None) or {}).get("error")
+        if error:
+            return f"no choices, error: {error}"
+        dump = getattr(response, "model_dump_json", None)
+        body = dump() if callable(dump) else repr(response)
+        return f"no choices, body: {body[:500]}"
+    choice = response.choices[0]
+    if choice.finish_reason == "error":
+        error = (getattr(choice, "model_extra", None) or {}).get("error") or (
+            getattr(response, "model_extra", None) or {}
+        ).get("error")
+        return f"finish_reason 'error', error: {error}"
+    return None
+
+
+def _one_line(text: str, limit: int = 500) -> str:
+    """Collapse whitespace so a message fits on one line, then truncate."""
+    line = " ".join(text.split())
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def _echo_arguments(raw: Any) -> str:
+    """Tool-call arguments as the string sent back in the assistant history.
+
+    A non-empty string is kept; missing, empty or blank arguments become
+    "{}" (the API rejects null); any other JSON value is JSON-encoded.
+    """
+    if isinstance(raw, str):
+        return raw if raw.strip() else "{}"
+    if raw is None:
+        return "{}"
+    try:
+        return json.dumps(raw)
+    except (TypeError, ValueError):
+        return json.dumps(str(raw))
+
+
+def _parse_tool_arguments(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse a tool call's arguments into a dict.
+
+    Returns ``(args, None)`` on success and ``(None, message)`` when the
+    arguments are unusable. Empty or missing arguments count as ``{}``;
+    arguments that parse to anything but a JSON object are an error.
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return {}, None
+    if isinstance(raw, dict):
+        return raw, None
+    if not isinstance(raw, str | bytes | bytearray):
+        return None, (
+            f"Tool arguments must be a JSON object, got {type(raw).__name__}: {raw!r}"
+        )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, RecursionError):
+        return None, f"Invalid JSON arguments: {raw}"
+    if not isinstance(parsed, dict):
+        return None, (
+            f"Tool arguments must be a JSON object, got {type(parsed).__name__}: {raw}"
+        )
+    return parsed, None
 
 
 SYSTEM_PROMPT_BASE = """You are a helpful assistant that solves problems step by step.
@@ -148,6 +236,9 @@ class AgentResult:
     max_steps_reached: bool = False
     # True when the run was aborted by AgentConfig.max_total_tokens.
     token_cap_reached: bool = False
+    # Set (one line, with the exception type) when the run was cut short by
+    # an LLM API failure; steps and totals then cover the steps completed.
+    error: str | None = None
 
 
 class Agent:
@@ -224,6 +315,45 @@ class Agent:
             sections.append("")
 
         return "\n".join(sections) + "\n"
+
+    async def _create_with_retry(self, request_kwargs: dict[str, Any]) -> Any:
+        """Call the completions API, retrying error responses.
+
+        Raises LLMResponseError when retries are exhausted, so the run ends
+        with an error instead of a silent early stop reported as success.
+        """
+        detail = ""
+        for attempt in range(API_ERROR_MAX_RETRIES + 1):
+            # The SDK does not wrap a malformed JSON body (JSONDecodeError)
+            # and returns the raw text for a non-JSON content type (e.g. an
+            # HTML error page); both are treated as error responses.
+            try:
+                response = self.client.chat.completions.create(**request_kwargs)
+            except json.JSONDecodeError as e:
+                detail = f"malformed JSON response: {e}"
+            else:
+                choices = getattr(response, "choices", _MISSING)
+                if choices is _MISSING or not (
+                    choices is None or isinstance(choices, list)
+                ):
+                    detail = (
+                        f"unexpected response of type {type(response).__name__}:"
+                        f" {str(response)[:500]}"
+                    )
+                else:
+                    detail = _response_error(response)
+            if detail is None:
+                return response
+            if self.logger:
+                self.logger.log_step_metadata(
+                    api_error_response=_one_line(detail), api_attempt=attempt + 1
+                )
+            if attempt < API_ERROR_MAX_RETRIES:
+                await asyncio.sleep(API_ERROR_BACKOFF_SECONDS * (attempt + 1))
+        raise LLMResponseError(
+            f"API returned error responses on {API_ERROR_MAX_RETRIES + 1}"
+            f" attempts; last: {detail}"
+        )
 
     def run(self, prompt: str) -> AgentResult:
         """Run the agent synchronously (convenience wrapper).
@@ -310,12 +440,26 @@ class Agent:
                 if self.logger:
                     self.logger.log_api_request(request_kwargs)
 
-                response = self.client.chat.completions.create(**request_kwargs)
-
-                if not response.choices:
-                    raise RuntimeError("API returned no choices")
+                try:
+                    response = await self._create_with_retry(request_kwargs)
+                except (OpenAIError, LLMResponseError) as e:
+                    # Keep the steps so far: end the run with an error
+                    # result instead of raising.
+                    error = _one_line(f"{type(e).__name__}: {e}")
+                    if self.logger:
+                        self.logger.log_error(error, traceback.format_exc())
+                    return AgentResult(
+                        answer=f"[Agent stopped: LLM call failed: {error}]",
+                        steps=steps,
+                        tool_calls_made=tool_calls_made,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost=cost,
+                        error=error,
+                    )
 
                 assistant_message = response.choices[0].message
+                finish_reason = response.choices[0].finish_reason
 
                 # Accumulate token usage and cost (independent of logging).
                 step_cost = None
@@ -346,7 +490,7 @@ class Agent:
                             }
                             for tc in (assistant_message.tool_calls or [])
                         ],
-                        "finish_reason": response.choices[0].finish_reason,
+                        "finish_reason": finish_reason,
                         "usage": {
                             "prompt_tokens": response.usage.prompt_tokens,
                             "completion_tokens": response.usage.completion_tokens,
@@ -388,7 +532,9 @@ class Agent:
                                     "type": "function",
                                     "function": {
                                         "name": tc.function.name,
-                                        "arguments": tc.function.arguments,
+                                        "arguments": _echo_arguments(
+                                            tc.function.arguments
+                                        ),
                                     },
                                 }
                                 for tc in assistant_message.tool_calls
@@ -401,14 +547,12 @@ class Agent:
                         tool_name = tool_call.function.name
                         tool_args_str = tool_call.function.arguments
 
-                        try:
-                            tool_args = json.loads(tool_args_str)
-                        except (json.JSONDecodeError, TypeError):
-                            tool_result = json.dumps(
-                                {"error": f"Invalid JSON arguments: {tool_args_str}"}
-                            )
+                        parsed_args, args_error = _parse_tool_arguments(tool_args_str)
+                        if parsed_args is None:
+                            tool_result = json.dumps({"error": args_error})
                             tool_args = {"_raw": tool_args_str}
                         else:
+                            tool_args = parsed_args
                             tool_result = await self._execute_tool(tool_name, tool_args)
 
                         tool_calls_made += 1
@@ -440,23 +584,20 @@ class Agent:
                             }
                         )
 
-                    steps.append(step_info)
-                    if self.on_step:
-                        self.on_step(step_info)
-
-                    # Per-run token cap: stop looping once the cumulative
-                    # input+output tokens exceed the cap. Checked only after a
-                    # completed step, so a step is never cut in half.
-                    cap = self.config.max_total_tokens
-                    if cap > 0 and input_tokens + output_tokens > cap:
-                        token_cap_reached = True
-                        if self.logger:
-                            self.logger.log_step_metadata(
-                                token_cap_reached=True,
-                                cumulative_tokens=input_tokens + output_tokens,
-                                token_cap=cap,
-                            )
-                        break
+                elif finish_reason == "length":
+                    # Reply cut off at max_tokens with no tool call: do not
+                    # accept the truncated text as the final answer; ask the
+                    # model to continue (as agentic-python-coder does).
+                    step_info["truncated"] = True
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": assistant_message.content or "",
+                        }
+                    )
+                    messages.append({"role": "user", "content": TRUNCATION_NOTICE})
+                    if self.logger:
+                        self.logger.log_step_metadata(truncated=True)
 
                 else:
                     # No tool calls - this is the final answer
@@ -483,6 +624,25 @@ class Agent:
                         )
 
                     return result
+
+                # Tool-call or truncated step: record it and continue.
+                steps.append(step_info)
+                if self.on_step:
+                    self.on_step(step_info)
+
+                # Per-run token cap: stop looping once the cumulative
+                # input+output tokens exceed the cap. Checked only after a
+                # completed step, so a step is never cut in half.
+                cap = self.config.max_total_tokens
+                if cap > 0 and input_tokens + output_tokens > cap:
+                    token_cap_reached = True
+                    if self.logger:
+                        self.logger.log_step_metadata(
+                            token_cap_reached=True,
+                            cumulative_tokens=input_tokens + output_tokens,
+                            token_cap=cap,
+                        )
+                    break
 
             # Reached max steps or the token cap without a final answer
             if token_cap_reached:

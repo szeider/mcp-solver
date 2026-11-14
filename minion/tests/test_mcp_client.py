@@ -168,3 +168,53 @@ def test_content_text_renders_resource_links() -> None:
     text = _content_text(content)
     assert "solution" in text
     assert "[resource_link] app://runs/1/code.py (code.py) — the program" in text
+
+
+# --- malformed tool arguments ------------------------------------------------
+
+
+def test_effective_timeout_tolerates_non_dict_arguments() -> None:
+    manager = MCPManager({}, tool_timeout=60.0)
+    assert manager._effective_timeout(None) == 60.0
+    assert manager._effective_timeout([1, 2]) == 60.0
+
+
+class _RecordingSession:
+    """Stands in for an MCP ClientSession; records the arguments it gets."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def call_tool(self, name, arguments):
+        from types import SimpleNamespace
+
+        self.calls.append((name, arguments))
+        return SimpleNamespace(
+            is_error=False, content=[SimpleNamespace(type="text", text="ok")]
+        )
+
+
+def _manager_with_fake_tool() -> tuple[MCPManager, _RecordingSession]:
+    from mcp_minion.mcp_client import MCPToolInfo
+
+    manager = MCPManager({})
+    session = _RecordingSession()
+    manager._tools["t"] = MCPToolInfo(
+        name="t", description="", parameters={}, server_name="fake"
+    )
+    manager._sessions["fake"] = session
+    return manager, session
+
+
+async def test_call_tool_none_arguments_become_empty_dict() -> None:
+    manager, session = _manager_with_fake_tool()
+    result = json.loads(await manager.call_tool("t", None))
+    assert result == {"result": "ok"}
+    assert session.calls == [("t", {})]
+
+
+async def test_call_tool_non_object_arguments_is_error() -> None:
+    manager, session = _manager_with_fake_tool()
+    result = json.loads(await manager.call_tool("t", [1, 2]))
+    assert "must be a JSON object" in result["error"]
+    assert session.calls == []

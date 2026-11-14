@@ -79,3 +79,53 @@ class TestExtractLastSubmission:
             "result": _ok(),
         }
         assert extract_last_submission([{"tool_calls": [call]}]) == "stringified"
+
+
+# Real result shapes of the kernel server's submit_code, as wrapped by
+# MCPManager.call_tool: the server reports a rejected submission as a NORMAL
+# result whose text is {"ok": false, "error": ...}.
+_SUBMIT_OK = json.dumps({"result": json.dumps({"ok": True})})
+_SUBMIT_REJECTED = json.dumps(
+    {
+        "result": json.dumps(
+            {"ok": False, "error": "Syntax error at line 1: invalid syntax"}
+        )
+    }
+)
+
+
+class TestRejectedSubmissions:
+    def test_good_then_rejected_returns_good(self) -> None:
+        steps = [
+            {"tool_calls": [_call("submit_code", "good", _SUBMIT_OK)]},
+            {"tool_calls": [_call("submit_code", "def (:", _SUBMIT_REJECTED)]},
+        ]
+        assert extract_last_submission(steps) == "good"
+
+    def test_only_rejected_returns_none(self) -> None:
+        steps = [{"tool_calls": [_call("submit_code", "def (:", _SUBMIT_REJECTED)]}]
+        assert extract_last_submission(steps) is None
+
+    def test_rejected_then_good_returns_good(self) -> None:
+        steps = [
+            {"tool_calls": [_call("submit_code", "def (:", _SUBMIT_REJECTED)]},
+            {"tool_calls": [_call("submit_code", "good", _SUBMIT_OK)]},
+        ]
+        assert extract_last_submission(steps) == "good"
+
+    def test_result_without_ok_key_counts_as_success(self) -> None:
+        result = json.dumps({"result": json.dumps({"status": "stored"})})
+        steps = [{"tool_calls": [_call("submit_code", "v", result)]}]
+        assert extract_last_submission(steps) == "v"
+
+    def test_plain_text_result_counts_as_success(self) -> None:
+        steps = [{"tool_calls": [_call("submit_code", "v", _ok("accepted"))]}]
+        assert extract_last_submission(steps) == "v"
+
+    def test_rejected_result_as_dict_is_skipped(self) -> None:
+        call = {
+            "name": "submit_code",
+            "arguments": {"code": "bad"},
+            "result": {"result": {"ok": False, "error": "x"}},
+        }
+        assert extract_last_submission([{"tool_calls": [call]}]) is None

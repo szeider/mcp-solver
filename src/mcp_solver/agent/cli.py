@@ -9,6 +9,19 @@ server over stdio. The agent must submit its final program via the server's
 ``submit_code`` tool; the CLI persists that submission to
 ``<basename>_code.py``, re-executes it in a fresh ``uv`` kernel, and prints
 its solution (JSON) to stdout.
+
+Exit status:
+    0    the submitted program ran and exited 0
+    1    setup or agent failure (agent layer missing, no API key, engine
+         error, an exception from the solve, or an agent error before any
+         submission)
+    2    usage error, or an unpublished version with dev mode off
+    3    the agent finished without a successful ``submit_code``
+    4    the agent stopped early with an error (e.g. an LLM API failure)
+         after an accepted submission; that submission was saved and ran
+         with exit 0, but it may not be the agent's final, verified program
+    127  ``uv`` not found when re-executing the program
+    any other code is the submitted program's own nonzero exit code
 """
 
 import argparse
@@ -29,12 +42,17 @@ from mcp_solver.templates import SOLVERS, get_template
 # ran the agent's kernel, so in-kernel verification carries over.
 PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 
+# Exit code for a run the agent ended early with an error after an accepted
+# submission (see the module docstring for all exit codes).
+EXIT_AGENT_ERROR_WITH_SUBMISSION = 4
+
 # Solver libraries injected into the solve-time kernel, per backend.
-# pypblib backs pysat.pb.PBEnc (pseudo-Boolean encodings — budgets,
-# capacities); without it PBEnc raises at import time.
+# The [pb] extra installs pindakaas, which backs pysat.pb.PBEnc
+# (pseudo-Boolean encodings: budgets, capacities); without it every PBEnc
+# encoding call raises "Package 'pindakaas' is unavailable".
 SOLVER_PACKAGES: dict[str, list[str]] = {
-    "pysat": ["python-sat", "pypblib"],
-    "maxsat": ["python-sat", "pypblib"],
+    "pysat": ["python-sat[pb]"],
+    "maxsat": ["python-sat[pb]"],
     "z3": ["z3-solver"],
     "cpmpy": ["cpmpy"],
     "clingo": ["clingo"],
@@ -393,6 +411,18 @@ def run_program(program: Path, with_packages: list[str]) -> int:
         return 127
 
 
+def _describe_exception(exc: BaseException) -> str:
+    """Return a one-line ``Type: message`` description of *exc*.
+
+    Single-member exception groups (anyio task groups in the MCP client wrap
+    connection errors this way) are unwrapped to the underlying error.
+    """
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    message = " ".join(str(exc).split())
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -464,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         print(f"mcp-solver: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        print(
+            f"mcp-solver: the solve failed: {_describe_exception(exc)}",
+            file=sys.stderr,
+        )
+        return 1
     elapsed = time.monotonic() - start
 
     stats = build_stats(result, elapsed, model_id)
@@ -477,8 +513,18 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
+    # Set by mcp-minion when the agent stopped early (e.g. an LLM API
+    # failure); getattr keeps older minions without the field working.
+    agent_error = getattr(result, "error", None)
     code = extract_last_submission(result.steps)
     if code is None:
+        if agent_error:
+            print(
+                f"mcp-solver: the agent stopped with an error before any"
+                f" accepted submission: {agent_error}",
+                file=sys.stderr,
+            )
+            return 1
         print(
             "mcp-solver: the run submitted no final program"
             " (submit_code was never called successfully).",
@@ -488,8 +534,18 @@ def main(argv: list[str] | None = None) -> int:
     program = workdir / f"{task_basename}_code.py"
     program.write_text(code, encoding="utf-8")
 
+    if agent_error:
+        print(
+            f"mcp-solver: the agent stopped early with an error: {agent_error}\n"
+            f"mcp-solver: {program.name} holds the last accepted submission,"
+            " which may not be the agent's final program.",
+            file=sys.stderr,
+        )
     print(f"mcp-solver: running {program}", file=sys.stderr)
-    return run_program(program, with_packages)
+    rc = run_program(program, with_packages)
+    if agent_error and rc == 0:
+        return EXIT_AGENT_ERROR_WITH_SUBMISSION
+    return rc
 
 
 if __name__ == "__main__":

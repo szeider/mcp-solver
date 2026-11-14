@@ -89,6 +89,13 @@ ignore = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.uv]
+# Dev-mode kernels install this checkout via `uv run --with <checkout>`; uv
+# caches the built package and by default rebuilds only when pyproject.toml
+# changes, so new kernels would miss edits to the helpers. Key the cache on
+# the Python sources too.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
+
 # uv workspace: mcp-solver (root) plus the mcp-minion agent runner.
 [tool.uv.workspace]
 members = ["minion"]

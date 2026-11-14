@@ -18,18 +18,30 @@ def _is_error_result(result: Any) -> bool:
     ``Tool.execute``: ``{"result": ...}`` on success, ``{"error": ...}`` on
     failure. A missing result counts as unsuccessful; a non-JSON string is
     treated as a (successful) plain result.
+
+    Servers may also report a domain failure as a normal result whose text is
+    a JSON object with ``"ok": false`` (the kernel server's ``submit_code``
+    returns ``{"ok": false, "error": "Syntax error ..."}``); such a result
+    counts as unsuccessful too.
     """
     if result is None:
         return True
-    if isinstance(result, dict):
-        return "error" in result
     if isinstance(result, str):
         try:
-            parsed = json.loads(result)
+            result = json.loads(result)
         except (json.JSONDecodeError, TypeError):
             return False
-        return isinstance(parsed, dict) and "error" in parsed
-    return False
+    if not isinstance(result, dict):
+        return False
+    if "error" in result:
+        return True
+    inner = result.get("result")
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    return isinstance(inner, dict) and inner.get("ok") is False
 
 
 def _iter_steps(log_or_steps: Any) -> list[dict[str, Any]]:

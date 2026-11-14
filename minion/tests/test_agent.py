@@ -73,7 +73,14 @@ class TestAgentResult:
 # --- run_async behavior with a fake OpenAI client --------------------------
 
 
-def _response(content=None, tool_calls=None, prompt=7, completion=3, cost=None):
+def _response(
+    content=None,
+    tool_calls=None,
+    prompt=7,
+    completion=3,
+    cost=None,
+    finish_reason="stop",
+):
     """Build a minimal chat-completions response object."""
     return SimpleNamespace(
         id="resp-1",
@@ -81,7 +88,7 @@ def _response(content=None, tool_calls=None, prompt=7, completion=3, cost=None):
         choices=[
             SimpleNamespace(
                 message=SimpleNamespace(content=content, tool_calls=tool_calls),
-                finish_reason="stop",
+                finish_reason=finish_reason,
             )
         ],
         usage=SimpleNamespace(
@@ -101,14 +108,22 @@ def _tool_call(name="add", arguments='{"a": 1, "b": 2}'):
 
 
 class FakeClient:
-    """Stands in for the OpenAI client; returns canned responses in order."""
+    """Stands in for the OpenAI client; returns canned responses in order.
+
+    An exception instance in the list is raised instead of returned.
+    """
 
     def __init__(self, responses):
         self._responses = list(responses)
+        self.requests: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **kwargs):
-        return self._responses.pop(0)
+        self.requests.append(kwargs)
+        item = self._responses.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 def _make_agent(responses, config=None, on_step=None, logger=None):
@@ -310,3 +325,293 @@ def test_tool_sections_list_resources() -> None:
     assert "## Resources" in sections
     assert "`app://guide` (guide): How to choose." in sections
     assert "read_resource" in sections
+
+
+# --- LLM error responses, truncation and API failures ------------------------
+
+
+def _error_envelope():
+    """OpenRouter's HTTP-200 error body: no choices, an `error` object."""
+    return SimpleNamespace(
+        id="resp-err",
+        model="fake-model",
+        choices=None,
+        usage=None,
+        model_extra={"error": {"code": 502, "message": "upstream error"}},
+    )
+
+
+@pytest.fixture
+def no_backoff(monkeypatch):
+    import mcp_minion.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "API_ERROR_BACKOFF_SECONDS", 0)
+
+
+async def test_error_response_is_retried(no_backoff) -> None:
+    agent = _make_agent(
+        [
+            _error_envelope(),
+            _response(content="oops", finish_reason="error"),
+            _response(content="done"),
+        ]
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.error is None
+    assert len(agent.client.requests) == 3
+
+
+async def test_persistent_error_finish_reason_is_not_success(no_backoff) -> None:
+    """A reply with finish_reason 'error' must not become the final answer."""
+    from mcp_minion.agent import API_ERROR_MAX_RETRIES
+
+    agent = _make_agent(
+        [_response(content="partial", finish_reason="error")]
+        * (API_ERROR_MAX_RETRIES + 1)
+    )
+    result = await agent.run_async("hi")
+    assert result.error is not None
+    assert "LLMResponseError" in result.error
+    assert "finish_reason 'error'" in result.error
+    assert result.answer != "partial"
+
+
+async def test_api_error_keeps_steps_so_far(no_backoff, tmp_path) -> None:
+    import json as json_mod
+
+    from mcp_minion.agent import API_ERROR_MAX_RETRIES
+    from mcp_minion.logging import RunLogger
+
+    logger = RunLogger(log_dir=tmp_path)
+    agent = _make_agent(
+        [_response(tool_calls=[_tool_call()], prompt=10, completion=2, cost=0.01)]
+        + [_error_envelope()] * (API_ERROR_MAX_RETRIES + 1),
+        config=AgentConfig(max_steps=5),
+        logger=logger,
+    )
+    result = await agent.run_async("hi")
+    assert result.error is not None
+    assert result.error.startswith("LLMResponseError: ")
+    assert "\n" not in result.error
+    assert len(result.steps) == 1
+    assert result.tool_calls_made == 1
+    assert result.input_tokens == 10
+    assert result.output_tokens == 2
+    assert result.cost == pytest.approx(0.01)
+    log = json_mod.loads(logger.log_path.read_text())
+    assert log["status"] == "error"
+
+
+async def test_openai_exception_returns_partial_result() -> None:
+    import httpx
+    import openai
+
+    exc = openai.APIConnectionError(
+        message="Connection error.",
+        request=httpx.Request("POST", "https://openrouter.ai/api/v1"),
+    )
+    agent = _make_agent(
+        [_response(tool_calls=[_tool_call()], prompt=10, completion=2), exc],
+        config=AgentConfig(max_steps=5),
+    )
+    result = await agent.run_async("hi")
+    assert result.error == "APIConnectionError: Connection error."
+    assert len(result.steps) == 1
+    assert result.input_tokens == 10
+
+
+def test_sync_run_returns_partial_result_on_api_error() -> None:
+    import openai
+
+    agent = _make_agent([openai.OpenAIError("no key")])
+    result = agent.run("hi")
+    assert result.error == "OpenAIError: no key"
+    assert result.steps == []
+
+
+async def test_programming_error_still_raises() -> None:
+    agent = _make_agent([TypeError("bug in minion")])
+    with pytest.raises(TypeError):
+        await agent.run_async("hi")
+
+
+async def test_truncated_reply_is_not_final_answer() -> None:
+    agent = _make_agent(
+        [
+            _response(content="The answer is", finish_reason="length"),
+            _response(content="done"),
+        ],
+        config=AgentConfig(max_steps=5),
+    )
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.error is None
+    assert result.steps[0]["truncated"] is True
+    assert len(result.steps) == 2
+    # The model was told to continue.
+    second_messages = agent.client.requests[1]["messages"]
+    assert second_messages[-2] == {"role": "assistant", "content": "The answer is"}
+    assert "truncated" in second_messages[-1]["content"]
+
+
+async def test_truncation_until_max_steps_is_not_success() -> None:
+    agent = _make_agent(
+        [_response(content="cut", finish_reason="length")] * 2,
+        config=AgentConfig(max_steps=2),
+    )
+    result = await agent.run_async("hi")
+    assert result.max_steps_reached is True
+    assert result.answer != "cut"
+
+
+# --- malformed tool-call arguments -------------------------------------------
+
+
+def _recording_registry():
+    from mcp_minion.tools import Tool, ToolRegistry
+
+    seen: list[dict] = []
+
+    def ping(**kwargs):
+        seen.append(kwargs)
+        return "pong"
+
+    registry = ToolRegistry()
+    registry.register(
+        Tool(
+            name="ping",
+            description="ping",
+            parameters={"type": "object", "properties": {}},
+            function=ping,
+        )
+    )
+    return registry, seen
+
+
+@pytest.mark.parametrize("raw", ["", None, "  "])
+async def test_empty_tool_arguments_become_empty_dict(raw) -> None:
+    import json
+
+    registry, seen = _recording_registry()
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call(name="ping", arguments=raw)]),
+            _response(content="done"),
+        ]
+    )
+    agent.tools = registry
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert seen == [{}]
+    call = result.steps[0]["tool_calls"][0]
+    assert call["arguments"] == {}
+    assert json.loads(call["result"]) == {"result": "pong"}
+    # The echoed assistant message never carries null arguments.
+    echoed = agent.client.requests[1]["messages"][2]["tool_calls"][0]
+    assert echoed["function"]["arguments"] == "{}"
+
+
+@pytest.mark.parametrize("raw", ["[1, 2]", "42", '"text"', "null"])
+async def test_non_object_tool_arguments_are_error_result(raw) -> None:
+    import json
+
+    registry, seen = _recording_registry()
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call(name="ping", arguments=raw)]),
+            _response(content="done"),
+        ]
+    )
+    agent.tools = registry
+    result = await agent.run_async("hi")
+    # The run continues and the model sees an error tool result.
+    assert result.answer == "done"
+    assert seen == []
+    call = result.steps[0]["tool_calls"][0]
+    assert "must be a JSON object" in json.loads(call["result"])["error"]
+    assert call["arguments"] == {"_raw": raw}
+
+
+# --- undecodable responses and non-string tool arguments ---------------------
+
+
+async def test_malformed_json_response_returns_partial_result(no_backoff) -> None:
+    import json
+
+    from mcp_minion.agent import API_ERROR_MAX_RETRIES
+
+    decode_error = json.JSONDecodeError("Expecting value", "<html>", 0)
+    agent = _make_agent(
+        [_response(tool_calls=[_tool_call()], prompt=10, completion=2)]
+        + [decode_error] * (API_ERROR_MAX_RETRIES + 1),
+        config=AgentConfig(max_steps=5),
+    )
+    result = await agent.run_async("hi")
+    assert result.error is not None
+    assert result.error.startswith("LLMResponseError: ")
+    assert "malformed JSON response" in result.error
+    assert len(result.steps) == 1
+    assert result.input_tokens == 10
+
+
+async def test_text_response_returns_partial_result(no_backoff) -> None:
+    from mcp_minion.agent import API_ERROR_MAX_RETRIES
+
+    page = "<html><body>502 Bad Gateway</body></html>"
+    agent = _make_agent(
+        [_response(tool_calls=[_tool_call()], prompt=10, completion=2)]
+        + [page] * (API_ERROR_MAX_RETRIES + 1),
+        config=AgentConfig(max_steps=5),
+    )
+    result = await agent.run_async("hi")
+    assert result.error is not None
+    assert "unexpected response of type str" in result.error
+    assert "502 Bad Gateway" in result.error
+    assert len(result.steps) == 1
+
+
+async def test_malformed_response_then_good_is_retried(no_backoff) -> None:
+    agent = _make_agent(["<html>oops</html>", _response(content="done")])
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert result.error is None
+
+
+async def test_dict_tool_arguments_are_accepted() -> None:
+    import json
+
+    registry, seen = _recording_registry()
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call(name="ping", arguments={"x": 1})]),
+            _response(content="done"),
+        ]
+    )
+    agent.tools = registry
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert seen == [{"x": 1}]
+    echoed = agent.client.requests[1]["messages"][2]["tool_calls"][0]
+    assert echoed["function"]["arguments"] == json.dumps({"x": 1})
+
+
+@pytest.mark.parametrize("raw", [42, [1, 2], []])
+async def test_non_string_non_dict_tool_arguments_are_error_result(raw) -> None:
+    import json
+
+    registry, seen = _recording_registry()
+    agent = _make_agent(
+        [
+            _response(tool_calls=[_tool_call(name="ping", arguments=raw)]),
+            _response(content="done"),
+        ]
+    )
+    agent.tools = registry
+    result = await agent.run_async("hi")
+    assert result.answer == "done"
+    assert seen == []
+    call = result.steps[0]["tool_calls"][0]
+    assert "must be a JSON object" in json.loads(call["result"])["error"]
+    echoed = agent.client.requests[1]["messages"][2]["tool_calls"][0]
+    assert echoed["function"]["arguments"] == json.dumps(raw)

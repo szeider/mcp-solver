@@ -74,7 +74,7 @@ class TestLoadRunFolder:
             (folder / "config.json").write_text('{"modelstring": "test"}')
             (folder / "task.md").write_text("Do something")
 
-            agent_config, mcp_servers, prompt = load_run_folder(folder)
+            _agent_config, mcp_servers, prompt = load_run_folder(folder)
 
             assert prompt == "Do something"
             assert "---" not in prompt  # No separator when no project.md
@@ -114,7 +114,7 @@ class TestLoadRunFolder:
             (folder / "config.json").write_text("{}")
             (folder / "task.md").write_text("Test task")
 
-            agent_config, _, prompt = load_run_folder(folder)
+            agent_config, _, _prompt = load_run_folder(folder)
 
             # Should use defaults from AgentConfig
             assert agent_config.model == "google/gemini-3-flash-preview"
@@ -198,7 +198,7 @@ class TestLoadRunFolder:
             (folder / "config.json").write_text(json.dumps(config))
             (folder / "task.md").write_text("Test task")
 
-            agent_config, mcp_servers, prompt = load_run_folder(folder)
+            agent_config, mcp_servers, _prompt = load_run_folder(folder)
 
             assert agent_config.model == "test/new-model"
             assert agent_config.max_steps == 7
@@ -486,3 +486,82 @@ class TestSaveSubmission:
         assert save_submission([], tmp_path) is None
         assert save_submission(self._steps("x", ok=False), tmp_path) is None
         assert not (tmp_path / "submission.py").exists()
+
+
+class TestRunAgentErrorExit:
+    """An LLM API failure ends the CLI run non-zero but keeps the submission."""
+
+    @staticmethod
+    def _run(monkeypatch, tmp_path, agent_result):
+        import argparse
+        import asyncio
+
+        import mcp_minion.cli as cli_mod
+        from mcp_minion.agent import AgentConfig
+
+        class FakeAgent:
+            def __init__(self, **kwargs) -> None:
+                pass
+
+            async def run_async(self, prompt):
+                return agent_result
+
+        monkeypatch.setattr(cli_mod, "Agent", FakeAgent)
+        args = argparse.Namespace(folder=tmp_path, no_log=True, verbose=False)
+        return asyncio.run(
+            cli_mod.run_agent_async(args, AgentConfig(), None, "task", "key")
+        )
+
+    @staticmethod
+    def _steps():
+        return [
+            {
+                "step": 1,
+                "content": None,
+                "tool_calls": [
+                    {
+                        "name": "submit_code",
+                        "arguments": {"code": "print(1)"},
+                        "result": json.dumps({"result": json.dumps({"ok": True})}),
+                    }
+                ],
+            }
+        ]
+
+    def test_error_exits_nonzero_and_saves_submission(
+        self, monkeypatch, tmp_path, capsys
+    ) -> None:
+        from mcp_minion.agent import AgentResult
+
+        result = AgentResult(
+            answer="[Agent stopped]",
+            steps=self._steps(),
+            error="APIConnectionError: Connection error.",
+        )
+        code = self._run(monkeypatch, tmp_path, result)
+        assert code == 1
+        assert (tmp_path / "submission.py").read_text().startswith("print(1)")
+        assert "APIConnectionError: Connection error." in capsys.readouterr().err
+
+    def test_success_exits_zero(self, monkeypatch, tmp_path) -> None:
+        from mcp_minion.agent import AgentResult
+
+        result = AgentResult(answer="done", steps=self._steps())
+        assert self._run(monkeypatch, tmp_path, result) == 0
+
+    def test_main_exits_nonzero_on_agent_error(self, monkeypatch, tmp_path) -> None:
+        import sys
+
+        import mcp_minion.cli as cli_mod
+
+        async def fake_run(*args, **kwargs):
+            return 1
+
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "task.md").write_text("do it")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+        monkeypatch.setattr(cli_mod, "run_agent_async", fake_run)
+        monkeypatch.setattr(sys, "argv", ["mcp-minion", str(tmp_path)])
+        with pytest.raises(SystemExit) as exc:
+            cli_mod.main()
+        assert exc.value.code == 1

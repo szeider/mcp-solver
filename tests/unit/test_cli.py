@@ -107,8 +107,7 @@ def test_with_packages_pysat_pins_helpers(monkeypatch):
     monkeypatch.setattr(cli, "_local_checkout", lambda: None)
     pkgs = cli.build_with_packages("pysat")
     assert pkgs == [
-        "python-sat",
-        "pypblib",
+        "python-sat[pb]",
         f"agentic-mcp-solver=={mcp_solver.__version__}",
     ]
 
@@ -124,8 +123,8 @@ def test_source_checkout_auto_detected():
 @pytest.mark.parametrize(
     ("solver", "lib"),
     [
-        ("pysat", "python-sat"),
-        ("maxsat", "python-sat"),
+        ("pysat", "python-sat[pb]"),
+        ("maxsat", "python-sat[pb]"),
         ("z3", "z3-solver"),
         ("cpmpy", "cpmpy"),
         ("clingo", "clingo"),
@@ -344,6 +343,110 @@ def test_main_no_submission_returns_3(monkeypatch, tmp_path, capsys):
     rc = cli.main(["z3", "--problem", str(problem), "--workdir", str(tmp_path), "-q"])
     assert rc == 3
     assert "submit_code" in capsys.readouterr().err
+
+
+def test_main_agent_error_after_submission_runs_it_and_returns_4(
+    monkeypatch, tmp_path, capsys
+):
+    # The agent stopped early (LLM API failure) after an accepted submission:
+    # the submission is persisted and re-executed, and the exit code flags it.
+    problem = tmp_path / "queens.md"
+    problem.write_text("Place 8 queens.", encoding="utf-8")
+    stats_file = tmp_path / "stats.json"
+
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_solve_result("print('EARLIER')")
+        # Set as an attribute so the test also runs against a minion
+        # whose AgentResult has no ``error`` field yet.
+        result.error = "APIError: 502 Bad Gateway"
+        return result
+
+    ran = {}
+
+    def fake_run_program(program, with_packages):
+        ran["program"] = program
+        return 0
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", fake_run_program)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(
+        [
+            "z3",
+            "--problem",
+            str(problem),
+            "--workdir",
+            str(tmp_path),
+            "--stats-json",
+            str(stats_file),
+            "-q",
+        ]
+    )
+    assert rc == cli.EXIT_AGENT_ERROR_WITH_SUBMISSION == 4
+    artifact = tmp_path / "queens_code.py"
+    assert artifact.read_text(encoding="utf-8") == "print('EARLIER')"
+    assert ran["program"] == artifact
+    assert stats_file.is_file()
+    err = capsys.readouterr().err
+    assert "502 Bad Gateway" in err
+    assert "last accepted submission" in err
+
+
+def test_main_agent_error_after_submission_keeps_program_failure_code(
+    monkeypatch, tmp_path
+):
+    # A failing re-execution keeps the program's own exit code.
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_solve_result()
+        result.error = "boom"
+        return result
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", lambda program, with_packages: 7)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
+    assert rc == 7
+
+
+def test_main_agent_error_without_submission_returns_1(monkeypatch, tmp_path, capsys):
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_result([{"step": 1, "content": None, "tool_calls": None}])
+        result.error = "APIError: 401 Unauthorized"
+        return result
+
+    def fail_run_program(program, with_packages):
+        raise AssertionError("nothing to run")
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "run_program", fail_run_program)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
+    assert rc == 1
+    assert "401 Unauthorized" in capsys.readouterr().err
+    assert not (tmp_path / "task_code.py").exists()
+
+
+def test_main_unexpected_exception_one_line_returns_1(monkeypatch, tmp_path, capsys):
+    async def fake_solve(task, api_key, config, logger, quiet):
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionResetError("connection\nreset by peer")],
+        )
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(cli, "find_api_key", lambda: "sk-test")
+
+    rc = cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    failure = [line for line in err.splitlines() if "solve failed" in line]
+    assert failure == [
+        "mcp-solver: the solve failed: ConnectionResetError: connection reset by peer"
+    ]
 
 
 def test_main_no_api_key_returns_1(monkeypatch, tmp_path, capsys):
