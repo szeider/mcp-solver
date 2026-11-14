@@ -41,11 +41,15 @@
 - **Fix:** `mcp-solver-bench` kills the whole process group of a timed-out
   solve on macOS and Linux (uv, python, engine), not only the CLI process;
   the result row is unchanged.
-- **Fix:** `mcp-solver-serve`: a `python_exec` that follows a timed-out one
-  first probes the kernel. If code that ignores interrupts still holds the
-  kernel, the new code is not run and the reply says so and points to
-  `python_reset`. Previously the new call was reported as timed out although
-  it never ran.
+- **Fix:** Requires agentic-python-coder >=3.6.0, which reports a kernel
+  whose code is still running after a timeout (the interrupt did not stop
+  it), refuses new code behind it with a reply saying the code was not
+  executed, and lets `python_reset` replace such a kernel without waiting.
+  Formerly the next `python_exec` was reported as timed out although its code
+  never ran. `mcp-solver-serve` passes these replies to the host unchanged.
+  The CLI and the server now check the installed engine version at startup
+  and stop with a message naming the required version (formerly an older
+  engine with the same tools was accepted).
 - **Behavior Change:** `mcp-solver-bench` counts a run as valid only if the
   validator accepts the solution and the persisted program imports the
   backend's solver library (`pysat` for pysat and maxsat, `z3`, `cpmpy`,

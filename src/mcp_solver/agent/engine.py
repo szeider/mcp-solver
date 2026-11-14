@@ -16,7 +16,9 @@ server over stdio through ``mcp_minion.MCPManager``. This module owns
 from __future__ import annotations
 
 import os
+import re
 import sys
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +26,7 @@ import mcp_solver
 
 # Minimum agentic-python-coder release; must equal the pin in the [agent]
 # extra of pyproject.toml (a unit test checks this).
-MIN_ENGINE_VERSION = "3.5.0"
+MIN_ENGINE_VERSION = "3.6.0"
 
 # Name of the engine server in the MCPManager config.
 ENGINE_SERVER_NAME = "ipython"
@@ -155,6 +157,34 @@ def require_engine(manager: Any) -> None:
         )
 
 
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Leading numeric release of *version* ("3.6.0.dev1" -> (3, 6, 0))."""
+    match = re.match(r"\d+(\.\d+)*", version)
+    return tuple(int(p) for p in match.group(0).split(".")) if match else ()
+
+
+def require_engine_version(installed: str | None = None) -> None:
+    """Raise EngineError unless agentic-python-coder >= MIN_ENGINE_VERSION.
+
+    The engine runs under this interpreter, so the installed distribution is
+    the one that starts. Older releases offer the same tools, so the tool
+    check alone does not catch them.
+    """
+    hint = f'install "agentic-python-coder>={MIN_ENGINE_VERSION}" in this environment'
+    if installed is None:
+        try:
+            installed = metadata.version("agentic-python-coder")
+        except metadata.PackageNotFoundError:
+            raise EngineError(
+                f"agentic-python-coder is not installed; {hint}"
+            ) from None
+    if _version_tuple(installed) < _version_tuple(MIN_ENGINE_VERSION):
+        raise EngineError(
+            f"agentic-python-coder {installed} is too old (mcp-solver needs"
+            f" >={MIN_ENGINE_VERSION}); {hint}"
+        )
+
+
 async def start_engine(errlog: Any = None) -> Any:
     """Start the engine and check it; return the entered MCPManager.
 
@@ -164,6 +194,7 @@ async def start_engine(errlog: Any = None) -> Any:
     """
     import mcp_minion
 
+    require_engine_version()
     kwargs = {} if errlog is None else {"errlog": errlog}
     manager = mcp_minion.MCPManager(engine_server_config(), **kwargs)
     await manager.__aenter__()

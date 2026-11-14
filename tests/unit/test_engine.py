@@ -3,6 +3,7 @@
 import re
 import sys
 import tomllib
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,28 @@ def test_require_engine_names_missing_tools_and_version():
         engine.require_engine(_Manager(tools))
     assert "submit_code" in str(info.value)
     assert f">={engine.MIN_ENGINE_VERSION}" in str(info.value)
+
+
+def test_require_engine_version():
+    engine.require_engine_version(engine.MIN_ENGINE_VERSION)
+    engine.require_engine_version("99.0.0.dev1")
+    with pytest.raises(engine.EngineError) as info:
+        engine.require_engine_version("3.5.0")
+    assert "3.5.0 is too old" in str(info.value)
+    assert f">={engine.MIN_ENGINE_VERSION}" in str(info.value)
+
+
+def test_installed_engine_meets_minimum():
+    engine.require_engine_version()
+
+
+async def test_start_engine_rejects_old_engine_before_launch(monkeypatch):
+    import mcp_minion
+
+    monkeypatch.setattr(metadata, "version", lambda name: "3.5.0")
+    monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: 1 / 0)
+    with pytest.raises(engine.EngineError, match="too old"):
+        await engine.start_engine()
 
 
 async def test_start_engine_closes_manager_on_failed_check(monkeypatch):

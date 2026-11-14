@@ -186,10 +186,10 @@ You installed the bare package without the product layer. Install the `[agent]`
 extra: `uv pip install "agentic-mcp-solver[agent]"`, or
 `uv pip install -e ".[agent]"` from a checkout (see [Install](#install)).
 
-**`the ipython_mcp engine lacks the tools ...`** (CLI and server)
-Your installed `agentic-python-coder` is older than 3.5.0, or missing from
+**`agentic-python-coder ... is too old`, `... is not installed` or `the ipython_mcp engine lacks the tools ...`** (CLI and server)
+Your installed `agentic-python-coder` is older than 3.6.0, or missing from
 the environment the server runs in. Upgrade it:
-`uv pip install "agentic-python-coder>=3.5.0"` (or `-e` from a checkout).
+`uv pip install "agentic-python-coder>=3.6.0"` (or `-e` from a checkout).
 
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its
