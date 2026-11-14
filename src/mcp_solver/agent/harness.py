@@ -9,21 +9,45 @@ re-executed programs of parallel runs do not share one.
 """
 
 import argparse
+import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+from mcp_solver.agent.cli import (
+    NEW_SESSION,
+    kill_process_group,
+    signal_process_group,
+)
 from mcp_solver.templates import SOLVERS
 
 # File in each run directory holding the CLI subprocess's stderr.
 STDERR_FILE = "cli_stderr.txt"
 # Lines of that stderr copied into the result row of a failed run.
 STDERR_TAIL_LINES = 20
+# Seconds to wait for the remaining output after a timed-out run was killed.
+KILL_GRACE = 5
+# Seconds a CLI gets after SIGTERM (to kill its re-executed program) before
+# its process group gets SIGKILL.
+TERM_GRACE = 3
+
+# CLI processes running now. In their own sessions they no longer receive the
+# terminal's Ctrl-C, so main() stops them on KeyboardInterrupt or SIGTERM;
+# after that (_stopping) no new CLI is started. Both under _live_lock.
+_live: set[subprocess.Popen] = set()
+_stopping = False
+_live_lock = threading.Lock()
+
+
+class BenchmarkStopped(Exception):
+    """A solve was about to start after the benchmark was interrupted."""
 
 
 def _text(captured: str | bytes | None) -> str:
@@ -33,6 +57,69 @@ def _text(captured: str | bytes | None) -> str:
     if isinstance(captured, bytes):
         return captured.decode("utf-8", errors="replace")
     return captured
+
+
+def run_cli(cmd: list[str], timeout: float, cwd: Path) -> subprocess.CompletedProcess:
+    """``subprocess.run(cmd, capture_output=True, text=True, ...)`` whose
+    timeout kills the CLI with all its descendants (uv, python, the engine).
+
+    On POSIX the CLI starts in its own session and the whole process group
+    is killed; ``subprocess.TimeoutExpired`` is raised as by
+    ``subprocess.run``, carrying the stderr captured until the kill.
+    """
+    # Spawn and register atomically with respect to _stop_all().
+    with _live_lock:
+        if _stopping:
+            raise BenchmarkStopped
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            start_new_session=NEW_SESSION,
+        )
+        _live.add(proc)
+    with proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            kill_process_group(proc, grace=TERM_GRACE)
+            # A process outside the group (e.g. a kernel in its own session)
+            # may still hold the pipes open; do not wait for it.
+            try:
+                exc.output, exc.stderr = proc.communicate(timeout=KILL_GRACE)
+            except subprocess.TimeoutExpired as late:
+                exc.output, exc.stderr = late.output, late.stderr
+            raise exc from None
+        except BaseException:
+            kill_process_group(proc, grace=TERM_GRACE)
+            raise
+        finally:
+            with _live_lock:
+                _live.discard(proc)
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+def _stop_all() -> None:
+    """Stop every running CLI (SIGTERM, then SIGKILL after TERM_GRACE
+    seconds, to the whole group) and start no new one."""
+    global _stopping
+    with _live_lock:
+        _stopping = True
+        running = list(_live)
+    for proc in running:
+        signal_process_group(proc, signal.SIGTERM)
+    deadline = time.monotonic() + TERM_GRACE
+    for proc in running:
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    for proc in running:
+        kill_process_group(proc)
+
+
+def _interrupt_on_sigterm(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
 
 
 def discover(problems_root: Path, solvers: list[str]) -> list[tuple[str, Path]]:
@@ -127,9 +214,7 @@ def run_one(
     }
     start = time.monotonic()
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=args.timeout, cwd=workdir
-        )
+        proc = run_cli(cmd, timeout=args.timeout, cwd=workdir)
         row["exit_code"] = proc.returncode
         row["solution"] = proc.stdout.strip()
         stderr = _text(proc.stderr)
@@ -308,21 +393,36 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     rows = []
-    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = {
-            pool.submit(run_one, s, p, args, out_root, i): (s, p) for s, p, i in jobs
-        }
-        for future in as_completed(futures):
-            row = future.result()
-            rows.append(row)
-            with results_file.open("a") as fh:
-                fh.write(json.dumps(row) + "\n")
-            status = {True: "ok", False: "FAIL", None: "?"}[row.get("valid")]
-            print(
-                f"[{len(rows)}/{len(jobs)}] {status:<4} {row['solver']}/{row['problem']}"
-                f" ({row['wall_seconds']}s)",
-                file=sys.stderr,
-            )
+    # SIGTERM takes the KeyboardInterrupt path, which stops the running CLIs.
+    on_main = threading.current_thread() is threading.main_thread()
+    if on_main:
+        previous = signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
+    try:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            try:
+                futures = {
+                    pool.submit(run_one, s, p, args, out_root, i): (s, p)
+                    for s, p, i in jobs
+                }
+                for future in as_completed(futures):
+                    row = future.result()
+                    rows.append(row)
+                    with results_file.open("a") as fh:
+                        fh.write(json.dumps(row) + "\n")
+                    status = {True: "ok", False: "FAIL", None: "?"}[row.get("valid")]
+                    print(
+                        f"[{len(rows)}/{len(jobs)}] {status:<4}"
+                        f" {row['solver']}/{row['problem']} ({row['wall_seconds']}s)",
+                        file=sys.stderr,
+                    )
+            except KeyboardInterrupt:
+                pool.shutdown(wait=False, cancel_futures=True)
+                _stop_all()
+                raise
+    finally:
+        if on_main:
+            # None: the previous handler was not installed from Python.
+            signal.signal(signal.SIGTERM, previous or signal.SIG_DFL)
 
     print_summary(rows)
     print(str(results_file))

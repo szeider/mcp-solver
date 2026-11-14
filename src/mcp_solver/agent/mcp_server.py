@@ -123,6 +123,28 @@ _kernel_lock = asyncio.Lock()
 # here too so an oversized host value cannot stretch the client-side wait.
 _MAX_EXEC_TIMEOUT = 300
 
+# Kernels whose last python_exec timed out, keyed by the kernel id the
+# engine's reply reports (else the requested id). Code that ignores SIGINT
+# keeps running after the engine's timeout and holds the kernel busy; the
+# engine then answers the NEXT python_exec with the same timeout text,
+# although that code never ran. A short probe execution tells the cases
+# apart before new code is forwarded. python_reset/select_backend clear it.
+_timed_out: set[str | None] = set()
+_PROBE_TIMEOUT = 2.0
+# The kernel id the engine reported for the last bare python_exec (no
+# kernel_id requested, none selected), so bare and explicit calls to the
+# engine's default kernel share one flag entry.
+_bare_kernel: str | None = None
+# Serializes python_exec (flag check, probe, forwarding, flag update). Kept
+# apart from _kernel_lock: python_reset and select_backend must reach the
+# engine at once while an exec runs, since reset is the way out of a busy
+# kernel; python_status and python_interrupt take no lock.
+_exec_lock = asyncio.Lock()
+# Prefix of the engine's timeout error when the kernel survived the interrupt
+# ("... Code interrupted but session state preserved."); the crash variant
+# ("... Session crashed ...") needs no probe, the kernel is gone.
+_TIMEOUT_PREFIX = "Execution timed out after"
+
 # Bounded store of successful submissions (Tier 2 resources).
 _submissions: dict[str, str] = {}
 _MAX_SUBMISSIONS = 50
@@ -222,7 +244,7 @@ def _dev_path() -> str | None:
 @asynccontextmanager
 async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     """Hold one engine (ipython_mcp) connection for the server's lifetime."""
-    global _engine, _kernel_id
+    global _engine, _kernel_id, _bare_kernel
     manager = await engine.start_engine()
     _engine = manager
     try:
@@ -231,6 +253,8 @@ async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
         _episode_close("shutdown")
         _engine = None
         _kernel_id = None
+        _timed_out.clear()
+        _bare_kernel = None
         await manager.__aexit__(None, None, None)
 
 
@@ -269,6 +293,35 @@ def _parse_engine_json(text: str) -> dict:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _is_exec_timeout(text: str) -> bool:
+    """True when an engine python_exec reply is a timeout of a live kernel."""
+    parsed = _parse_engine_json(text)
+    error = str(parsed.get("error") or "")
+    return (
+        parsed.get("success") is False
+        and error.startswith(_TIMEOUT_PREFIX)
+        and "Session crashed" not in error
+    )
+
+
+def _still_busy_reply(target: str | None) -> str:
+    """The python_exec result when earlier code still occupies the kernel."""
+    reset = f'python_reset(kernel_id="{target}")' if target else "python_reset()"
+    return json.dumps(
+        {
+            "success": False,
+            "kernel_id": target,
+            "error": (
+                "Code from an earlier python_exec call is still running in"
+                " this kernel and ignores interrupts. The code of THIS call"
+                " was NOT executed. Do not retry python_exec: call"
+                f" {reset} to restart the kernel (its state is lost; this"
+                " can take several seconds), then run the code again."
+            ),
+        }
+    )
 
 
 @mcp.resource("mcp-solver://guide", mime_type="text/markdown")
@@ -332,6 +385,7 @@ async def select_backend(solver: str) -> str:
                     f" {parsed.get('error') or 'unknown engine error'}"
                 )
         _kernel_id = parsed.get("kernel_id") or _kernel_id
+        _timed_out.discard(_kernel_id)
         _episode_open(solver)
         _episode_sync()
 
@@ -352,6 +406,29 @@ async def select_backend(solver: str) -> str:
     return f"{template}\n\n---\n\n{kernel_note}"
 
 
+async def _exec_checked(args: dict) -> str:
+    """Forward one python_exec unless earlier code still holds the kernel."""
+    global _bare_kernel
+    target = args.get("kernel_id")
+    key = target or _bare_kernel
+    if key in _timed_out:
+        # The previous exec here timed out: make sure the kernel is free
+        # before sending code that would otherwise wait behind it and be
+        # reported as timed out without having run.
+        probe = {**args, "code": "pass", "timeout": _PROBE_TIMEOUT}
+        if _is_exec_timeout(await _engine_call("python_exec", probe)):
+            return _still_busy_reply(key)
+        _timed_out.discard(key)
+    text = await _engine_call("python_exec", args)
+    reported = _parse_engine_json(text).get("kernel_id")
+    kernel = str(reported) if reported else target
+    if target is None and reported:
+        _bare_kernel = kernel
+    if _is_exec_timeout(text):
+        _timed_out.add(kernel)
+    return text
+
+
 @mcp.tool(structured_output=False)
 async def python_exec(
     code: str, timeout: float = 30, kernel_id: str | None = None
@@ -369,7 +446,8 @@ async def python_exec(
     target = kernel_id or _kernel_id
     if target:
         args["kernel_id"] = target
-    text = await _engine_call("python_exec", args)
+    async with _exec_lock:
+        text = await _exec_checked(args)
     if _episode is not None and _parse_engine_json(text).get("success") is False:
         _episode["exec_failures"] += 1
         _episode_sync()
@@ -396,6 +474,7 @@ async def python_reset(
         parsed = _parse_engine_json(text)
         if parsed.get("success") and parsed.get("kernel_id"):
             _kernel_id = str(parsed["kernel_id"])
+            _timed_out.discard(_kernel_id)
     return text
 
 

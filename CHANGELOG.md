@@ -24,6 +24,20 @@
   a 2 KB preview; a unit test checks the size for every backend.
 - **Fix:** The snippets and library claims of all templates were checked by
   execution and repaired where wrong.
+- **Fix:** The CLI's re-execution of the submitted program has a time limit
+  of 360 seconds (the kernel's 300-second execution maximum plus time for uv);
+  a program that runs longer is killed (on macOS and Linux with its child
+  processes; on Windows only the direct child) and the CLI exits with the new
+  code 124 and a message on stderr (formerly it waited without limit). A
+  SIGTERM during re-execution kills the program too and exits with 143.
+- **Fix:** `mcp-solver-bench` kills the whole process group of a timed-out
+  solve on macOS and Linux (uv, python, engine), not only the CLI process;
+  the result row is unchanged.
+- **Fix:** `mcp-solver-serve`: a `python_exec` that follows a timed-out one
+  first probes the kernel. If code that ignores interrupts still holds the
+  kernel, the new code is not run and the reply says so and points to
+  `python_reset`. Previously the new call was reported as timed out although
+  it never ran.
 
 ### [4.3.0] - 2026-11-14
 

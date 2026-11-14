@@ -21,16 +21,22 @@ Exit status:
     4    the agent stopped early with an error (e.g. an LLM API failure)
          after an accepted submission; that submission was saved and ran
          with exit 0, but it may not be the agent's final, verified program
+    124  the re-executed program did not finish within ``RERUN_TIMEOUT``
+         seconds and was killed with its descendants
     127  ``uv`` not found when re-executing the program
+    143  SIGTERM arrived during re-execution; the program was killed
     any other code is the submitted program's own nonzero exit code
 """
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +53,18 @@ PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 # Exit code for a run the agent ended early with an error after an accepted
 # submission (see the module docstring for all exit codes).
 EXIT_AGENT_ERROR_WITH_SUBMISSION = 4
+
+# Wall-clock limit (seconds) for re-executing the submitted program: the
+# kernel's maximum python_exec timeout (300 s), under which the agent ran and
+# verified the program, plus 60 s for uv to set up the cached environment.
+RERUN_TIMEOUT = 360
+# Exit code when the re-execution hits RERUN_TIMEOUT (as timeout(1)).
+EXIT_RERUN_TIMEOUT = 124
+
+# On POSIX, children that run solver code start in their own session (and
+# process group), so a timeout kills them with all their descendants (uv,
+# python, kernels); elsewhere only the direct child is killed.
+NEW_SESSION = os.name == "posix"
 
 # Default cap on the total (input + output) tokens of one run.
 DEFAULT_TOKEN_LIMIT = 2_000_000
@@ -403,6 +421,9 @@ def print_stats(stats: dict) -> None:
 def run_program(program: Path, with_packages: list[str]) -> int:
     """Execute the saved program in a uv kernel; return its exit code.
 
+    After ``RERUN_TIMEOUT`` seconds the program and its descendants are
+    killed and ``EXIT_RERUN_TIMEOUT`` is returned.
+
     The program runs under ``engine.kernel_env()``, the environment the
     agent's kernel had (API keys withheld). Its stdout (the solution JSON)
     is inherited so it becomes this command's stdout.
@@ -411,8 +432,18 @@ def run_program(program: Path, with_packages: list[str]) -> int:
     for pkg in with_packages:
         cmd += ["--with", pkg]
     cmd += ["python", str(program)]
+    # The program runs in its own session, so a SIGTERM to this process (or
+    # to its process group, as the benchmark harness sends) does not reach
+    # it: turn SIGTERM into SystemExit, whose cleanup below kills the program.
+    handle_term = NEW_SESSION and threading.current_thread() is threading.main_thread()
+    if handle_term:
+        previous = signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    proc = None
     try:
-        return subprocess.run(cmd, env=engine.kernel_env()).returncode
+        proc = subprocess.Popen(
+            cmd, env=engine.kernel_env(), start_new_session=NEW_SESSION
+        )
+        return proc.wait(timeout=RERUN_TIMEOUT)
     except FileNotFoundError:
         print(
             "mcp-solver: 'uv' not found on PATH; it is required to run the"
@@ -420,6 +451,59 @@ def run_program(program: Path, with_packages: list[str]) -> int:
             file=sys.stderr,
         )
         return 127
+    except subprocess.TimeoutExpired:
+        kill_process_group(proc)
+        print(
+            f"mcp-solver: the submitted program did not finish within"
+            f" {RERUN_TIMEOUT} s and was killed; {program.name} is kept.",
+            file=sys.stderr,
+        )
+        return EXIT_RERUN_TIMEOUT
+    except BaseException:
+        # In its own session the program no longer receives the terminal's
+        # Ctrl-C, so take it down on any interruption of this process.
+        if proc is not None:
+            kill_process_group(proc)
+        raise
+    finally:
+        if handle_term:
+            # None: the previous handler was not installed from Python.
+            signal.signal(signal.SIGTERM, previous or signal.SIG_DFL)
+
+
+def _exit_on_sigterm(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+def signal_process_group(proc: subprocess.Popen, sig: int) -> None:
+    """Send *sig* to *proc*'s process group (POSIX); elsewhere kill *proc*.
+
+    *proc* must have been started with ``start_new_session=NEW_SESSION``.
+    """
+    # OSError: the group or process is already gone (ESRCH; EPERM on macOS
+    # when only zombies are left).
+    with contextlib.suppress(OSError):
+        if NEW_SESSION:
+            os.killpg(proc.pid, sig)
+        else:
+            proc.kill()
+
+
+def kill_process_group(proc: subprocess.Popen, grace: float = 0) -> None:
+    """Kill *proc* and, on POSIX, every process in its group; reap *proc*.
+
+    With *grace* > 0 the group first gets SIGTERM, so that *proc* can clean
+    up (the CLI kills its re-executed program, which runs in a session of
+    its own), and *proc* gets up to *grace* seconds to exit; then the group
+    gets SIGKILL. *proc* must have been started with
+    ``start_new_session=NEW_SESSION``.
+    """
+    if NEW_SESSION and grace > 0:
+        signal_process_group(proc, signal.SIGTERM)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=grace)
+    signal_process_group(proc, signal.SIGKILL if NEW_SESSION else 0)
+    proc.wait()
 
 
 def _describe_exception(exc: BaseException) -> str:

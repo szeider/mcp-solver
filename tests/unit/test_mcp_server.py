@@ -6,6 +6,7 @@ mimics its public contract: flat-JSON tool results (``success``/``kernel_id``
 for kernel tools, ``ok`` for submit_code) returned as ``ToolOutcome`` text.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -34,6 +35,12 @@ class FakeEngine:
         self.kernels: set[str] = set()
         self.next_id = 0
         self.break_reset = False  # make python_reset return malformed JSON
+        # python_exec codes answered with the engine's timeout reply
+        self.timeout_codes: set[str] = set()
+        # python_exec codes that wait for `gate` before replying
+        self.gated_codes: set[str] = set()
+        self.gate = asyncio.Event()
+        self.events: list[tuple[str, str]] = []  # (start|end, code)
 
     async def __aenter__(self):
         return self
@@ -46,6 +53,13 @@ class FakeEngine:
 
     async def call_tool(self, name, arguments):
         self.calls.append((name, dict(arguments)))
+        code = arguments.get("code", name)
+        self.events.append(("start", code))
+        if name == "python_exec":
+            if code in self.gated_codes:
+                await self.gate.wait()
+            await asyncio.sleep(0.01)  # let concurrent calls interleave
+        self.events.append(("end", code))
         return ToolOutcome(text=json.dumps(self._respond(name, arguments)))
 
     def _respond(self, name, args):
@@ -62,6 +76,13 @@ class FakeEngine:
             self.kernels.add(kid)
             return {"success": True, "kernel_id": kid, "message": "started"}
         if name == "python_exec":
+            if args.get("code") in self.timeout_codes:
+                return {
+                    "success": False,
+                    "kernel_id": args.get("kernel_id", "_default"),
+                    "error": f"Execution timed out after {float(args['timeout'])}s."
+                    " Code interrupted but session state preserved.",
+                }
             return {
                 "success": True,
                 "kernel_id": args.get("kernel_id", "_default"),
@@ -94,6 +115,9 @@ def engine(monkeypatch):
     monkeypatch.delenv("MCP_SOLVER_STATS", raising=False)
     monkeypatch.setattr(mcp_server, "_kernel_id", None)
     monkeypatch.setattr(mcp_server, "_episode", None)
+    monkeypatch.setattr(mcp_server, "_timed_out", set())
+    monkeypatch.setattr(mcp_server, "_bare_kernel", None)
+    monkeypatch.setattr(mcp_server, "_exec_lock", asyncio.Lock())
     mcp_server._submissions.clear()
     return fake
 
@@ -380,6 +404,131 @@ async def test_manual_reset_retargets_routing(engine):
         assert _engine_payload(result)["kernel_id"] == "k2"
         await session.call_tool("python_exec", {"code": "print(1)"})
         assert engine.calls[-1][1]["kernel_id"] == "k2"
+
+
+# --- timeout blame: earlier code that ignores interrupts ----------------------
+
+
+def _exec_codes(engine) -> list[str]:
+    return [args["code"] for name, args in engine.calls if name == "python_exec"]
+
+
+async def test_exec_after_timeout_reports_busy_kernel(engine):
+    # The probe times out too: the earlier code still holds the kernel, so the
+    # new code is not sent and the reply says so instead of blaming it.
+    engine.timeout_codes = {"hog()", "pass"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "hog()", "timeout": 3})
+        assert "k1" in mcp_server._timed_out
+        result = await session.call_tool("python_exec", {"code": "print(1)"})
+        assert not result.is_error
+        payload = _engine_payload(result)
+        assert payload["success"] is False and payload["kernel_id"] == "k1"
+        assert "still running" in payload["error"]
+        assert "NOT executed" in payload["error"]
+        assert 'python_reset(kernel_id="k1")' in payload["error"]
+        assert _exec_codes(engine) == ["hog()", "pass"]
+        assert engine.calls[-1][1]["timeout"] == mcp_server._PROBE_TIMEOUT
+        assert engine.calls[-1][1]["kernel_id"] == "k1"
+        assert "k1" in mcp_server._timed_out
+
+
+async def test_exec_after_timeout_runs_when_probe_succeeds(engine):
+    engine.timeout_codes = {"slow()"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "slow()", "timeout": 3})
+        result = await session.call_tool("python_exec", {"code": "print(1)"})
+        assert _engine_payload(result)["success"] is True
+        assert _exec_codes(engine) == ["slow()", "pass", "print(1)"]
+        assert mcp_server._timed_out == set()
+
+
+async def test_no_probe_without_previous_timeout(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "x = 1"})
+        await session.call_tool("python_exec", {"code": "print(x)"})
+        assert _exec_codes(engine) == ["x = 1", "print(x)"]
+
+
+async def test_python_reset_clears_timeout_flag(engine):
+    engine.timeout_codes = {"hog()", "pass"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "hog()"})
+        await session.call_tool("python_reset", {"kernel_id": "k1"})
+        assert mcp_server._timed_out == set()
+        result = await session.call_tool("python_exec", {"code": "print(1)"})
+        assert _engine_payload(result)["success"] is True
+        assert _exec_codes(engine) == ["hog()", "print(1)"]
+
+
+async def test_select_backend_clears_timeout_flag(engine):
+    engine.timeout_codes = {"hog()", "pass"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "hog()"})
+        await session.call_tool("select_backend", {"solver": "pysat"})
+        assert mcp_server._timed_out == set()
+
+
+async def test_concurrent_execs_do_not_interleave(engine):
+    engine.timeout_codes = {"slow()"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "slow()"})
+        engine.events.clear()
+        await asyncio.gather(
+            session.call_tool("python_exec", {"code": "a()"}),
+            session.call_tool("python_exec", {"code": "b()"}),
+        )
+    # Each engine call ends before the next starts: probe, first code, then
+    # the second call (no probe: the first cleared the flag).
+    codes = [c for _, c in engine.events]
+    assert [ph for ph, _ in engine.events] == ["start", "end"] * 3
+    assert codes[:2] == ["pass", "pass"]
+    assert {codes[2], codes[4]} == {"a()", "b()"}
+    assert codes[2:4] == [codes[2]] * 2
+
+
+async def test_reset_not_blocked_by_running_exec(engine):
+    engine.gated_codes = {"long()"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        running = asyncio.create_task(
+            session.call_tool("python_exec", {"code": "long()"})
+        )
+        while ("start", "long()") not in engine.events:
+            await asyncio.sleep(0.01)
+        try:
+            await asyncio.wait_for(
+                session.call_tool("python_reset", {"kernel_id": "k1"}), 2
+            )
+            await asyncio.wait_for(session.call_tool("python_interrupt", {}), 2)
+            assert not running.done()
+            assert ("end", "long()") not in engine.events
+        finally:
+            engine.gate.set()
+            await running
+    names = [name for name, _ in engine.calls]
+    assert names[-3:] == ["python_exec", "python_reset", "python_interrupt"]
+
+
+async def test_timeout_flag_shared_by_bare_and_explicit_id(engine):
+    # No backend selected: a bare call runs in the engine's default kernel,
+    # and a later call naming it explicitly must hit the same flag.
+    engine.timeout_codes = {"hog()", "pass"}
+    async with _session() as session:
+        result = await session.call_tool("python_exec", {"code": "hog()"})
+        kid = _engine_payload(result)["kernel_id"]
+        assert kid == "_default"
+        result = await session.call_tool(
+            "python_exec", {"code": "print(1)", "kernel_id": kid}
+        )
+        assert "NOT executed" in _engine_payload(result)["error"]
+        assert _exec_codes(engine) == ["hog()", "pass"]
 
 
 async def test_resource_error_text_reaches_client(engine):

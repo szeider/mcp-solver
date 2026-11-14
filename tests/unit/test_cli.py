@@ -1,7 +1,11 @@
 """Unit tests for the v4 mcp-solver CLI (no engine, no network)."""
 
+import contextlib
 import json
+import os
+import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -689,20 +693,82 @@ def test_run_program_uses_kernel_env(monkeypatch, tmp_path):
     seen = {}
 
     class Done:
-        returncode = 0
+        def __init__(self, cmd, **kwargs):
+            seen["cmd"] = cmd
+            seen["env"] = kwargs.get("env")
 
-    def fake_run(cmd, **kwargs):
-        seen["cmd"] = cmd
-        seen["env"] = kwargs.get("env")
-        return Done()
+        def wait(self, timeout=None):
+            seen["timeout"] = timeout
+            return 0
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli.subprocess, "Popen", Done)
     program = tmp_path / "p.py"
     assert cli.run_program(program, ["z3-solver"]) == 0
     assert seen["cmd"][-2:] == ["python", str(program)]
     assert seen["env"] == engine.kernel_env()
     assert "OPENROUTER_API_KEY" not in seen["env"]
     assert seen["env"]["UV_INDEX_URL"] == "https://example.invalid/simple"
+    assert seen["timeout"] == cli.RERUN_TIMEOUT
+
+
+def _gone(pid, wait=3.0):
+    """True once *pid* no longer exists (killed orphans may linger briefly
+    as zombies until init reaps them)."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        time.sleep(0.05)
+    return False
+
+
+def _reap(pids):
+    """Kill whatever a failed test left running."""
+    for pid in pids:
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+def test_run_program_timeout_kills_program_and_descendants(
+    monkeypatch, tmp_path, capsys
+):
+    # A fake ``uv`` on PATH runs the program as its child, as the real one
+    # does, so the program is a grandchild of the CLI; the program starts a
+    # sleeping child of its own and records both pids, then sleeps.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(f'#!/bin/sh\nfor last; do :; done\n"{sys.executable}" "$last"\n')
+    fake_uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    pid_file = tmp_path / "pids.txt"
+    program = tmp_path / "p_code.py"
+    program.write_text(
+        "import os, subprocess, sys, time\n"
+        "child = subprocess.Popen("
+        "[sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"open({str(pid_file)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
+        "time.sleep(600)\n"
+    )
+    monkeypatch.setattr(cli, "RERUN_TIMEOUT", 2)
+    pids = []
+    try:
+        start = time.monotonic()
+        rc = cli.run_program(program, ["z3-solver"])
+        assert time.monotonic() - start < 5
+        pids = list(map(int, pid_file.read_text().split()))
+        assert rc == cli.EXIT_RERUN_TIMEOUT == 124
+        assert "did not finish within 2 s" in capsys.readouterr().err
+        assert len(pids) == 2
+        for pid in pids:
+            assert _gone(pid)
+    finally:
+        _reap(pids)
 
 
 # --- custom endpoint: base_url and api_key_env -----------------------------
