@@ -116,6 +116,15 @@ def test_select_backend_description_within_budget():
     assert len(mcp_server.SELECT_BACKEND_DESCRIPTION.encode()) <= 1200
 
 
+def test_select_backend_result_within_budget():
+    # Claude Code (2.1.325, measured 2026-11-14) replaces an MCP tool result
+    # of more than 50,000 characters by a 2 KB preview, so the host would
+    # solve without the template. The result is the template plus a kernel
+    # note; 500 characters cover the note.
+    for solver in BACKENDS:
+        assert len(mcp_server.get_template(solver)) + 500 <= 49_000, solver
+
+
 def test_guide_and_description_mention_every_backend():
     for solver in BACKENDS:
         assert solver in mcp_server.GUIDE
