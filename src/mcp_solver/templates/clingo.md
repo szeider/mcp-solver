@@ -834,7 +834,7 @@ your encoding's ordering predicates in the verifier.
 
 ### 4.11 Runs in Line Puzzles (Nonograms)
 
-Two errors recur. (1) A gap between every pair of consecutive runs: only runs of the *same* color need one; runs of different colors may touch, and a colored clue can fill its line exactly (10+4+10 in 24 cells), so a gap rule for all runs is UNSAT. (2) Optional runs (`{...} 1`) or free cells outside the runs: unless the problem says otherwise, the clue lists all runs, so place each run exactly once and make every other cell background.
+Two errors recur. (1) A gap between every pair of consecutive runs: only runs of the *same* color need one; runs of different colors may touch, and a colored clue can fill its line exactly (3+2+3 in 8 cells), so a gap rule for all runs is UNSAT. (2) Optional runs (`{...} 1`) or free cells outside the runs: unless the problem says otherwise, the clue lists all runs, so place each run exactly once and make every other cell background.
 
 ```asp
 % Lines L = r(Row) or c(Col); color 0 = background.
