@@ -705,6 +705,9 @@ def test_run_program_uses_kernel_env(monkeypatch, tmp_path):
     program = tmp_path / "p.py"
     assert cli.run_program(program, ["z3-solver"]) == 0
     assert seen["cmd"][-2:] == ["python", str(program)]
+    # Isolated from any surrounding virtual environment (uv would otherwise
+    # layer the packages on a matching .venv or VIRTUAL_ENV).
+    assert seen["cmd"][:4] == ["uv", "run", "--no-project", "--isolated"]
     assert seen["env"] == engine.kernel_env()
     assert "OPENROUTER_API_KEY" not in seen["env"]
     assert seen["env"]["UV_INDEX_URL"] == "https://example.invalid/simple"

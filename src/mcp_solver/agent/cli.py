@@ -428,7 +428,10 @@ def run_program(program: Path, with_packages: list[str]) -> int:
     agent's kernel had (API keys withheld). Its stdout (the solution JSON)
     is inherited so it becomes this command's stdout.
     """
-    cmd = ["uv", "run", "--no-project", "--python", PYTHON_VERSION]
+    # --isolated: without it uv layers the packages on an existing virtual
+    # environment (VIRTUAL_ENV, or a .venv in the cwd or a parent) when the
+    # Python version matches, so the program could import what it never asked for.
+    cmd = ["uv", "run", "--no-project", "--isolated", "--python", PYTHON_VERSION]
     for pkg in with_packages:
         cmd += ["--with", pkg]
     cmd += ["python", str(program)]

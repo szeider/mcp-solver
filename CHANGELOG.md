@@ -24,6 +24,11 @@
   keeps the backend's solver libraries: the server installs the backend's
   packages first, then the host's, without duplicates (formerly the host's
   list replaced them). Without `packages` the kernel keeps its packages.
+- **Fix:** The CLI re-executes the submitted program in an isolated uv
+  environment (`uv run --isolated`). Formerly uv used an existing virtual
+  environment as the base when the Python version matched (for example the
+  project's `.venv` when run from a checkout), so the program could import
+  packages that are not in the backend's list.
 
 ### [4.4.0] - 2026-11-14
 
