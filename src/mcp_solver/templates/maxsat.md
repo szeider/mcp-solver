@@ -18,35 +18,50 @@ optimize by hand — always go through RC2.
    DON'T want — see the polarity rule below, the #1 source of MaxSAT errors.
 5. Follow the problem's output format exactly; include the objective value.
 
-## Basic Template
+## Program Shape (every submitted program)
 
 ```python
 import json
 from pysat.formula import WCNF, IDPool
-from pysat.card import CardEnc, EncType
+from pysat.pb import PBEnc
 from pysat.examples.rc2 import RC2
 
-wcnf = WCNF()
-vpool = IDPool()   # ONE pool: named variables, encoder and reification auxiliaries
+VALUES, WEIGHTS, CAPACITY = [8, 11, 6, 4], [5, 7, 4, 3], 14   # instance data
 
-# 1. Variables (1-based ids; comment each with its meaning)
-#    item = vpool.id(("item", "A"))   # same name -> same id; vpool.obj(id) -> name
-# 2. Hard constraints:  wcnf.append([literals])
-# 3. Soft constraints:  wcnf.append([literals], weight=w)
-# 4. Solve
-with RC2(wcnf) as solver:
-    model = solver.compute()          # list of literals, or None
-    if model is not None:
-        result = {
-            "satisfiable": True,
-            "cost": solver.cost,      # total weight of violated soft clauses
-            "true_vars": [vpool.obj(l) for l in model
-                          if l > 0 and vpool.obj(l) is not None],
-        }
-    else:
-        result = {"satisfiable": False}
-print(json.dumps(result))
+def solve() -> dict:
+    wcnf = WCNF()
+    vpool = IDPool()   # ONE pool: named variables, encoder and reification auxiliaries
+    take = [vpool.id(("take", i)) for i in range(len(VALUES))]
+    wcnf.extend(PBEnc.atmost(lits=take, weights=WEIGHTS, bound=CAPACITY,
+                             vpool=vpool).clauses)   # hard
+    for t, v in zip(take, VALUES):
+        wcnf.append([t], weight=v)   # soft: pay v if item NOT taken
+    with RC2(wcnf) as solver:
+        model = solver.compute()     # optimal model, or None (hard part UNSAT)
+        if model is None:
+            return {"satisfiable": False}
+        cost = solver.cost
+    items = [i for i, t in enumerate(take) if t in set(model)]
+    return {"satisfiable": True, "items": items, "value": sum(VALUES) - cost}
+
+def verify(solution: dict) -> None:
+    if not solution["satisfiable"]:
+        return
+    items = solution["items"]
+    assert len(set(items)) == len(items), "item taken twice"
+    assert all(0 <= i < len(VALUES) for i in items), "unknown item"
+    assert sum(WEIGHTS[i] for i in items) <= CAPACITY, "over capacity"
+    assert solution["value"] == sum(VALUES[i] for i in items), "wrong value"
+
+if __name__ == "__main__":
+    solution = solve()
+    verify(solution)
+    print(json.dumps(solution))
 ```
+
+`verify()` takes only the solution and reads the data from module-level
+constants; importing the module must not solve or print. RC2 is exact:
+`compute()` returns a proven optimum, no re-solve needed.
 
 ## The Polarity Rule (CRITICAL — #1 source of errors)
 
@@ -166,14 +181,14 @@ Polarity errors produce confident wrong answers, so verification must be
 independent of the encoding:
 
 1. **Decode** the model into problem-level selections/assignments.
-2. **Write a `verify()` function** from the problem TEXT alone:
+2. **Write a `verify(solution)` function** (part of the submitted program,
+   called before printing) from the problem TEXT alone:
    - re-check every hard constraint with plain Python;
    - recompute the objective (total value/cost) directly from the decoded
      solution — never from solver internals;
-   - check the penalty accounting: recompute the total weight of the
-     VIOLATED soft clauses directly from the decoded solution — it must
-     equal `solver.cost` (for a pure maximize-encoding this is the identity
-     `objective_achieved + solver.cost == total_possible_value`).
+   - check the penalty accounting in python_exec: the recomputed total weight
+     of the VIOLATED soft clauses must equal `solver.cost` (for a pure
+     maximize-encoding: `objective_achieved + solver.cost == total_possible_value`).
 3. **Example outputs**: an example output in the problem statement fixes the
    output format (keys, nesting, types). Its values count as a solution only
    if the problem says so. If the problem presents the example as a valid or
@@ -191,10 +206,8 @@ independent of the encoding:
    before reporting UNSAT. Also relax one hard bound by a unit and check
    the instance becomes satisfiable — if not, suspect your encoding.
 
-Finish by calling `submit_code` with the final, verified program as one
-self-contained script (all imports included, no reliance on session state;
-`pysat` and the standard library are available wherever the program is
-re-executed). Do NOT call submit_code until verification passes.
-
-That's it. Separate hard from soft, penalize what you don't want, verify the
-objective independently, and let RC2 find the optimum.
+Finish by calling `submit_code` with the final program in the shape above,
+self-contained (all imports included, no reliance on session state; `pysat`
+and the standard library are available wherever it is re-executed). It runs
+as `__main__`, so a failing `verify()` exits nonzero and the submission is
+rejected: fix it and submit again.

@@ -20,7 +20,7 @@ fabricate a model, or check constraints by hand instead of solving.
 5. Free solver memory: use the solver as a context manager, or call
    `solver.delete()`.
 
-## Basic Template
+## Program Shape (every submitted program)
 
 ```python
 import json
@@ -28,21 +28,42 @@ from pysat.formula import CNF, IDPool
 from pysat.card import CardEnc, EncType
 from pysat.solvers import Glucose3
 
-formula = CNF()
-vpool = IDPool()   # ONE pool per program: named variables AND encoder auxiliaries
+EDGES, N_NODES, N_COLORS = [(0, 1), (1, 2), (0, 2), (2, 3)], 4, 3   # instance data
 
-# Variables: x = vpool.id(("x", i))  -> ids 1, 2, 3, ... on first use
-# Constraints: formula.append([...]) clauses; cardinality via CardEnc (below)
-# Solve
-with Glucose3(bootstrap_with=formula) as solver:
-    if solver.solve():
-        model = solver.get_model()
-        true_vars = [vpool.obj(l) for l in model if l > 0 and vpool.obj(l) is not None]
-        result = {"satisfiable": True, "true_vars": true_vars}
-    else:
-        result = {"satisfiable": False}
-print(json.dumps(result))
+def solve() -> dict:
+    formula = CNF()
+    vpool = IDPool()   # ONE pool per program: named variables AND encoder auxiliaries
+    x = {(v, c): vpool.id(("x", v, c)) for v in range(N_NODES) for c in range(N_COLORS)}
+    for v in range(N_NODES):   # exactly one color per node
+        formula.extend(CardEnc.equals(lits=[x[v, c] for c in range(N_COLORS)], bound=1,
+                                      vpool=vpool, encoding=EncType.pairwise).clauses)
+    for u, v in EDGES:
+        for c in range(N_COLORS):
+            formula.append([-x[u, c], -x[v, c]])
+    with Glucose3(bootstrap_with=formula) as solver:
+        if not solver.solve():
+            return {"satisfiable": False}
+        model = set(solver.get_model())
+    colors = [next(c for c in range(N_COLORS) if x[v, c] in model) for v in range(N_NODES)]
+    return {"satisfiable": True, "colors": colors}
+
+def verify(solution: dict) -> None:
+    if not solution["satisfiable"]:
+        return
+    col = solution["colors"]
+    assert len(col) == N_NODES, "wrong number of nodes"
+    assert all(0 <= c < N_COLORS for c in col), "color out of range"
+    for u, v in EDGES:
+        assert col[u] != col[v], f"edge {u}-{v} has one color"
+
+if __name__ == "__main__":
+    solution = solve()
+    verify(solution)
+    print(json.dumps(solution))
 ```
+
+`verify()` takes only the solution and reads the data from module-level
+constants; importing the module must not solve or print.
 
 ## SAT Variables — the two numbering systems
 
@@ -144,19 +165,19 @@ SAT encodings easily contain subtle bugs (wrong polarity, missing clauses,
 swapped indices). Before submitting, you MUST:
 
 1. **Solve and decode** the model into problem-level values.
-2. **Write a `verify()` function** that checks every constraint from the problem
+2. **Write a `verify(solution)` function** (part of the submitted program,
+   called before printing) that checks every constraint from the problem
    statement using plain Python — independent of your CNF encoding:
    ```python
    import itertools
 
-   def verify(result):
+   def verify(solution):
        # Re-derive sizes and constraints from the problem TEXT,
        # not from your encoding's variables
-       assert len(result["queens"]) == 8
-       for (r1, c1), (r2, c2) in itertools.combinations(result["queens"], 2):
+       assert len(solution["queens"]) == 8
+       for (r1, c1), (r2, c2) in itertools.combinations(solution["queens"], 2):
            assert r1 != r2 and c1 != c2, "attacking pair (row/col)"
            assert abs(r1 - r2) != abs(c1 - c2), "attacking pair (diagonal)"
-       print("All checks passed")
    ```
    If your encoding and your verifier share an assumption, a wrong assumption
    passes silently — re-read the problem statement when writing `verify()`.
@@ -173,9 +194,6 @@ swapped indices). Before submitting, you MUST:
    says nothing about its validity, do not copy its values and do not test
    against them.
 4. **Execute the verification** via python_exec and confirm it passes.
-   `verify()` belongs to this exploration phase; the final submitted program
-   need not include it (and if it does, it must not print anything besides
-   the solution JSON).
 5. **For an UNSAT answer**: list each clause group and the sentence of the
    problem statement that justifies it. If any clause lacks a justification,
    remove it and re-solve before reporting UNSAT. Also confirm the UNSAT is
@@ -183,11 +201,8 @@ swapped indices). Before submitting, you MUST:
    more unit of budget) and check the solver then returns SAT — if even the
    relaxation is UNSAT, suspect your encoding before the problem.
 
-Finish by calling `submit_code` with the final, verified program as one
-self-contained script (all imports included, no reliance on session state;
-`pysat` and the standard library are available wherever the program is
-re-executed). Do NOT call submit_code until verification passes.
-If it fails, fix the encoding and re-verify.
-
-That's it. Read the problem carefully, map entities to pool variables, encode
-exactly what is stated, verify independently, and let the SAT solver do the search.
+Finish by calling `submit_code` with the final program in the shape above,
+self-contained (all imports included, no reliance on session state; `pysat`
+and the standard library are available wherever it is re-executed). It runs
+as `__main__`, so a failing `verify()` exits nonzero and the submission is
+rejected: fix the encoding and submit again.

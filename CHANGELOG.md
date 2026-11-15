@@ -36,8 +36,29 @@
   checked that the program compiles, so it accepted, for example, the bare
   text `PLACEHOLDER` or a program that relies on kernel variables. Before
   any `select_backend` the check is compile-only and the reply says so.
-- **Feature:** `submit_code` adds a `warning` to an accepted program that
-  defines no `verify()` function, which every template requires.
+- **Behavior Change:** All six templates prescribe one program shape:
+  `solve()` returns the solution as a dict, `verify(solution)` re-checks it
+  in plain Python against module-level instance data (every constraint and
+  the objective value) and raises `AssertionError` on a failure, and a
+  `__main__` guard runs `solve()`, `verify()` and prints the JSON; importing
+  the program does nothing. `verify()` is part of the submitted program, so
+  a failing check makes the program exit nonzero and `submit_code` (server
+  path) and the CLI's re-execution reject it. Each template's example
+  program is rewritten into this shape. Formerly the templates kept
+  `verify()` in the kernel session and some examples printed "All checks
+  passed".
+- **Behavior Change:** Optimality rules per backend, each checked by
+  experiment: cpmpy and z3 no longer re-solve with a stricter bound (hosts
+  skipped it in 28 of 31 optimization sessions); a cpmpy solution is optimal
+  only if `model.status().exitstatus` is `OPTIMAL` (`solve()` returns True
+  also after a time limit with a feasible solution), a z3 `Optimize` result
+  only if `check()` returned `sat` (after a timeout it returns `unknown`
+  with the best model so far), a clingo result only if the solve result is
+  `exhausted`; didp keeps `is_optimal`; maxsat notes that RC2's `compute()`
+  is exact. A solution not proven optimal is marked so in a program comment.
+- **Change:** `submit_code` no longer warns when a program defines no
+  `verify()` (a notice added earlier in this cycle); its description now
+  says a rejected submission may be fixed and submitted again.
 - **Fix:** The CLI re-executes the submitted program in an isolated uv
   environment (`uv run --isolated`). Formerly uv used an existing virtual
   environment as the base when the Python version matched (for example the

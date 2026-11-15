@@ -43,53 +43,59 @@ Think in states and decisions, not constraints:
    wrong one silently changes the answer. Get a plain model correct and
    verified FIRST, then add these one at a time per the safety rules below.
 
-## Basic Template
+## Program Shape (every submitted program)
 ```python
 import didppy as dp
 import json
 
-model = dp.Model(maximize=False, float_cost=False)
+TRAVEL = [[0, 3, 4, 2], [3, 0, 2, 5], [4, 2, 0, 3], [2, 5, 3, 0]]   # instance data
+N = len(TRAVEL)
 
-# Objects and state variables
-n = 5  # from the problem data
-customer = model.add_object_type(number=n)
-unvisited = model.add_set_var(object_type=customer, target=list(range(1, n)))
-location = model.add_element_var(object_type=customer, target=0)
-
-# Tables of constants (index with element vars/exprs)
-travel = model.add_int_table(travel_time_matrix)  # 2D list
-
-# One transition per decision
-for j in range(1, n):
-    model.add_transition(dp.Transition(
-        name=f"visit {j}",
-        cost=travel[location, j] + dp.IntExpr.state_cost(),
-        effects=[(unvisited, unvisited.remove(j)), (location, j)],
-        preconditions=[unvisited.contains(j)],
+def solve() -> dict:
+    model = dp.Model(maximize=False, float_cost=False)
+    customer = model.add_object_type(number=N)
+    unvisited = model.add_set_var(object_type=customer, target=list(range(1, N)))
+    location = model.add_element_var(object_type=customer, target=0)
+    travel = model.add_int_table(TRAVEL)   # index with element vars/exprs
+    for j in range(1, N):   # one transition per decision
+        model.add_transition(dp.Transition(
+            name=f"visit {j}",
+            cost=travel[location, j] + dp.IntExpr.state_cost(),
+            effects=[(unvisited, unvisited.remove(j)), (location, j)],
+            preconditions=[unvisited.contains(j)],
+        ))
+    model.add_transition(dp.Transition(   # the last leg back to the depot
+        name="return",
+        cost=travel[location, 0] + dp.IntExpr.state_cost(),
+        effects=[(location, 0)],
+        preconditions=[unvisited.is_empty(), location != 0],
     ))
-# Don't forget the last leg back to the depot
-model.add_transition(dp.Transition(
-    name="return",
-    cost=travel[location, 0] + dp.IntExpr.state_cost(),
-    effects=[(location, 0)],
-    preconditions=[unvisited.is_empty(), location != 0],
-))
-
-model.add_base_case([unvisited.is_empty(), location == 0])
-
-solver = dp.CABS(model, time_limit=60, quiet=True)
-solution = solver.search()
-
-if solution.is_infeasible:
-    print(json.dumps({"error": "No solution exists"}))
-else:
+    model.add_base_case([unvisited.is_empty(), location == 0])
+    solution = dp.CABS(model, time_limit=60, quiet=True).search()
+    if solution.is_infeasible:
+        return {"error": "No solution exists"}
     # Decode transition names into the plain data the output format asks for
     visits = [int(t.name.split()[1])
               for t in solution.transitions if t.name.startswith("visit")]
-    result = {"tour": [0] + visits + [0], "cost": solution.cost}
-    # Verify solution satisfies problem requirements, then:
-    print(json.dumps(result))
+    return {"tour": [0] + visits + [0], "cost": solution.cost}
+
+def verify(solution: dict) -> None:
+    if "error" in solution:
+        return
+    tour = solution["tour"]
+    assert tour[0] == tour[-1] == 0, "tour must start and end at the depot"
+    assert sorted(tour[1:-1]) == list(range(1, N)), "visit each customer once"
+    cost = sum(TRAVEL[a][b] for a, b in zip(tour, tour[1:]))
+    assert solution["cost"] == cost, "wrong cost"
+
+if __name__ == "__main__":
+    solution = solve()
+    verify(solution)
+    print(json.dumps(solution))
 ```
+
+`verify()` takes only the solution and reads the data from module-level
+constants; importing the module must not solve or print.
 
 ## API Essentials
 
@@ -186,7 +192,7 @@ negative-profit item never forces its way into an upper bound).
      optimality NOT proven. If the problem asks for the optimum, do not
      stop here: tighten the model (justified bounds/dominance), raise the
      time budget, or scale the model down — an unproven incumbent may fail
-     validation;
+     validation; if you submit it anyway, say so in a program comment;
   3. `cost is None` with `is_infeasible=False` — the search simply ran out
      of time before finding anything. This is NOT "no solution exists".
 - Give the solver room: `time_limit` well under the `python_exec` timeout
@@ -215,18 +221,18 @@ submitting, you MUST:
 
 1. **Solve and decode** the transition sequence into a concrete solution
    (tour, packing, schedule).
-2. **Write a `verify()` function** that replays that solution with plain
-   Python — independent of your DIDP model: recompute times/loads/costs step
-   by step from the problem data, assert every stated constraint holds, and
-   assert the recomputed objective equals `solution.cost`.
+2. **Write a `verify(solution)` function** (part of the submitted program,
+   called before printing) that replays that solution with plain Python —
+   independent of your DIDP model: recompute times/loads/costs step by step
+   from the problem data, assert every stated constraint holds, and assert
+   the recomputed objective equals the reported cost.
 
    The verifier must be derived from the problem text alone: re-read the
    problem statement and re-derive every rule and quantity from its own
    parameters. If your model and your verifier share an assumption, a wrong
    assumption passes silently.
 3. **Execute the verification** via python_exec and confirm it passes.
-   Run it as a separate exploratory cell; the FINAL submitted program must
-   print only the solution JSON — silent asserts, no "checks passed" text.
+   `verify()` asserts silently; the program prints only the solution JSON.
 4. **Know what step 2 proves — and what it does not.** Replaying the
    solution proves feasibility and the reported cost; it can NEVER prove
    optimality. A model with a missing state variable, an unjustified
@@ -270,10 +276,10 @@ infeasible problem. Before reporting "No solution exists":
 3. Only once every remaining restriction is grounded in the problem is
    infeasibility a valid answer.
 
-Finish by calling `submit_code` with the final, verified program as one
-self-contained script (all imports included, no reliance on session state).
-Do NOT call submit_code until verification passes. If it fails, fix the model
-and re-verify.
+Finish by calling `submit_code` with the final program in the shape above,
+self-contained (all imports included, no reliance on session state). It runs
+as `__main__`, so a failing `verify()` exits nonzero and the submission is
+rejected: fix the model and submit again.
 
 That's it. Read the problem carefully, design the state, let the solver
 search, verify independently — and never guess a dual bound.

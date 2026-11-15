@@ -416,7 +416,6 @@ async def test_submit_code_round_trip(engine):
             "ok": True,
             "executed": False,
             "message": mcp_server.NOT_EXECUTED_MESSAGE,
-            "warning": mcp_server.NO_VERIFY_WARNING,
         }
         assert json.loads(result.content[0].text) == expected
         assert result.structured_content == expected
@@ -795,7 +794,7 @@ async def test_submit_runs_program_standalone(engine):
             "message": mcp_server.RUN_OK_MESSAGE,
         }
         sc = result.structured_content
-        assert sc["stdout"] == '{"x": 3}\n' and "warning" not in sc
+        assert sc["stdout"] == '{"x": 3}\n'
         assert sc["stats"]["submit_attempts"] == 1
         assert len(_links(result)) == 1
         assert list(mcp_server._submissions.values()) == [VERIFIED]
@@ -823,7 +822,6 @@ async def test_submit_failing_standalone_is_rejected_not_stored(
         assert "compiles but failed when run on its own" in payload["error"]
         assert "self-contained" in payload["error"]
         assert "python_exec" in payload["error"]
-        assert "warning" not in payload
         assert result.structured_content["ok"] is False
         assert _links(result) == []
         assert mcp_server._submissions == {}
@@ -883,33 +881,6 @@ async def test_submit_output_capped_keeping_the_end(engine):
         assert len(payload["stderr"]) == mcp_server._STDERR_CAP == 3_000
         assert payload["stderr"].endswith("eLAST")
         assert "stderr cut" in payload["note"]
-
-
-@pytest.mark.parametrize(
-    ("code", "defines"),
-    [
-        ("def verify(s):\n    return True\nprint(1)", True),
-        ("async def verify():\n    pass\nprint(1)", True),
-        ("def main():\n    def verify():\n        pass\nprint(1)", True),
-        ("# verify() is not needed here\nprint('verify')", False),
-        ("verify = lambda: True\nprint(verify())", False),
-        ("def verify_solution():\n    pass\nprint(1)", False),
-    ],
-)
-def test_defines_verify(code, defines):
-    assert mcp_server._defines_verify(code) is defines
-
-
-async def test_verify_warning_only_without_def_verify(engine):
-    async with _session() as session:
-        await session.call_tool("select_backend", {"solver": "z3"})
-        result = await session.call_tool(
-            "submit_code", {"code": "# verify() later\nprint('\"verify\"')"}
-        )
-        assert result.structured_content["warning"] == mcp_server.NO_VERIFY_WARNING
-        assert not result.is_error and len(_links(result)) == 1
-        result = await session.call_tool("submit_code", {"code": VERIFIED})
-        assert "warning" not in result.structured_content
 
 
 async def test_submit_run_uses_packages_added_by_routed_reset(engine):

@@ -41,10 +41,11 @@ no API key:
   timeout, no output) is rejected; an accepted one is stored and linked
   back as an MCP resource (`mcp-solver://submissions/{id}`), with the
   verdict as structured content. "Verified" thus means: the host checked
-  the solution against the problem (the templates require an independent
-  `verify()`; the reply warns when the program defines none), and the
-  server confirmed that the program runs self-contained and prints a
-  result. The server does not check the solution itself.
+  the solution against the problem (the templates require every program
+  to carry an independent `verify(solution)` that runs before the JSON is
+  printed, so a failed check rejects the submission), and the server
+  confirmed that the program runs self-contained and prints a result. The
+  server does not check the solution itself.
 - **Resources:** `mcp-solver://guide` (backend selection and workflow) and
   `mcp-solver://template/{solver}` (the full modeling instructions,
   browsable without selecting).

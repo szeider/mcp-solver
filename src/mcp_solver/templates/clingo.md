@@ -27,9 +27,8 @@ Before completing your solution, verify:
 ☐ 4b. **No Model escapes on_model** - All solution data extracted to plain Python objects inside the callback (touching a Model after solve() returns segfaults)
 ☐ 5. **Output format correct** - JSON output with appropriate structure
 ☐ 6. **Predicates meaningful** - Clear names that reflect the problem domain
-☐ 7. **Constraints verified independently** - All problem constraints are encoded AND re-checked by a plain-Python verify() whose expectations are re-derived from the problem text, not from your encoding's own interpretation
-☐ 8. **Program submitted** - Call `submit_code` with the complete, verified,
-self-contained program (all imports included, no reliance on session state)
+☐ 7. **Constraints verified independently** - All problem constraints are encoded AND re-checked by a plain-Python verify(solution) in the submitted program, called before printing, whose expectations are re-derived from the problem text, not from your encoding's own interpretation
+☐ 8. **Program submitted** - Call `submit_code` with the self-contained program in the shape of 3.1; it runs as `__main__`, so a failing verify() exits nonzero and the submission is rejected: fix it and submit again
 
 ## Section 2: Critical Rules of Engagement
 
@@ -52,7 +51,7 @@ This is the single most important distinction in ASP syntax.
 **Common Mistake and Correction:**
 
 | Incorrect (produces "unsafe variable" error) | Correct |
-|:----------------------------------------------|:--------|
+|:---|:---|
 | `amino_acid(1, H).` | `amino_acid(1, "H").` **(Best Practice)** or `amino_acid(1, h).` |
 | `type(engine, V8).` | `type(engine, "V8").` or `type(engine, v8).` |
 | `player(P1).` | `player(p1).` or `player("P1").` |
@@ -68,7 +67,7 @@ All data must come from two places only:
 **Common Mistake and Correction:**
 
 | Incorrect (Hallucinates data) | Correct |
-|:----------------------------------------------|:--------|
+|:---|:---|
 | **Problem:** "The available parts are a `cpu` and a `gpu`." <br/><br/> `part(cpu; gpu; ram).` <br/><br/> **Error**: The program invented `part(ram)`, which was not in the problem description. | **Problem:** "The available parts are a `cpu` and a `gpu`." <br/><br/> `part(cpu). part(gpu).` <br/><br/> **Explanation**: Only facts directly corresponding to the input are created. |
 | **Problem:** "Schedule tasks for workers `w1`, `w2`." <br/><br/> `worker(W) :- assigned(_, W).` <br/><br/> **Error**: This only defines workers *if* they get a task. If `w2` is a valid worker but gets no tasks, `worker(w2)` will not be true. | **Problem:** "Schedule tasks for workers `w1`, `w2`." <br/><br/> `worker(w1). worker(w2).` <br/><br/> **Explanation**: The set of all possible workers is explicitly defined as facts from the problem input. |
 | **Problem:** "Costs are: R1→C1: 10, R1→C2: 12" <br/><br/> `cost("R1","C1",10). cost("R1","C2",12). cost("R2","C2",12).` <br/><br/> **Error**: Invented cost for R2→C2 not in problem. | **Problem:** "Costs are: R1→C1: 10, R1→C2: 12" <br/><br/> `cost("R1","C1",10). cost("R1","C2",12).` <br/><br/> **Explanation**: Only the explicitly stated costs are created as facts. |
@@ -86,7 +85,7 @@ All data must come from two places only:
 **Common Mistake and Correction:**
 
 | Incorrect (Modifies data to match example) | Correct (Uses only primary data) |
-|:----------------------------------------------|:--------|
+|:---|:---|
 | **Data Table:** "Connection costs: A→B: 5, A→C: 10" <br/><br/> **Example Output:** Shows B connected to C <br/><br/> `cost("A","B",5). cost("A","C",10). cost("B","C",8).` <br/><br/> **Error**: Invented cost(B,C,8) to match example structure | **Data Table:** "Connection costs: A→B: 5, A→C: 10" <br/><br/> **Example Output:** Shows B connected to C <br/><br/> `cost("A","B",5). cost("A","C",10).` <br/><br/> **Explanation**: Use ONLY the provided costs. The solver finds the optimal solution using the true data. |
 | **Data:** "Capacities: Server1: 100GB, Server2: 200GB" <br/><br/> **Example:** Shows Server3 in use <br/><br/> `capacity("Server1",100). capacity("Server2",200). capacity("Server3",150).` <br/><br/> **Error**: Added Server3 because example showed it | **Data:** "Capacities: Server1: 100GB, Server2: 200GB" <br/><br/> **Example:** Shows Server3 in use <br/><br/> `capacity("Server1",100). capacity("Server2",200).` <br/><br/> **Explanation**: Example is from a different instance. Use only the provided servers. |
 
@@ -143,7 +142,7 @@ A critical application of this rule is when using negation (`not`). Any variable
 Imagine you have `task(1..10)` and `assigned(T, W)` facts for tasks that are already assigned. You want to write a rule to find unassigned tasks.
 
 | Incorrect (produces "unsafe variable" error) | Correct |
-|:----------------------------------------------|:--------|
+|:---|:---|
 | `unassigned(T) :- not assigned(T, W).` <br/><br/> **Error:** The variable `W` is unsafe. The solver doesn't know which set of workers (`W`) to check for non-assignment. | `unassigned(T) :- task(T), not assigned(T, _).` <br/><br/> **Explanation:** `task(T)` grounds the `T` variable. The underscore `_` in `not assigned(T, _)` checks for the existence of *any* assignment for that specific task `T`, correctly identifying tasks with no assignments. |
 
 #### Choice Rule Variable Safety
@@ -252,9 +251,9 @@ carrying(R,I,T+1) :- pickup(R,I,T).
 - Verify solution satisfies constraints
 - Handle UNSAT cases gracefully. A justified UNSAT is a correct final
   answer — verify only that every integrity constraint is warranted by the
-  problem text; do not try to prove *why* it is unsatisfiable. Likewise,
-  trust the solver's optimality; do not attempt to prove global optimality
-  yourself.
+  problem text; do not try to prove *why* it is unsatisfiable. Optimality:
+  trust the solver when the solve finished (`exhausted`); if it was stopped
+  early, say so in a program comment and do not claim optimality.
 
 ### 2.6 How to Express Constraints - The Eliminative Mindset
 
@@ -317,49 +316,53 @@ This allows sophisticated trade-off balancing without complex weight tuning.
 
 ## Section 3: Clingo API & Implementation Guide
 
-### 3.1 Basic API Flow
+### 3.1 Program Shape (every submitted program)
 
 ```python
-import clingo
 import json
+import clingo
 
-# Create control object
-ctl = clingo.Control()
+TASKS, WORKERS = ["t1", "t2"], ["w1", "w2"]   # instance data
+COST = {("t1", "w1"): 4, ("t1", "w2"): 2, ("t2", "w1"): 3, ("t2", "w2"): 5}
 
-# Add ASP program
-program = """
-% Facts from input
-% ... generated facts ...
-
-% Choice rules
-{ choice(X) } :- domain(X).
-
-% Constraints
-:- invalid_condition.
-
-% Optimization
-#minimize { Cost,X : selected(X), cost(X,Cost) }.
+PROGRAM = """
+{ assigned(T,W) : worker(W) } = 1 :- task(T).
+:- assigned(T1,W), assigned(T2,W), T1 < T2.   % one task per worker
+#minimize { C,T : assigned(T,W), cost(T,W,C) }.
 """
-ctl.add("base", [], program)
 
-# Ground the program
-ctl.ground([("base", [])])
+def solve() -> dict:
+    facts = [f"task({t})." for t in TASKS] + [f"worker({w})." for w in WORKERS]
+    facts += [f"cost({t},{w},{c})." for (t, w), c in COST.items()]
+    ctl = clingo.Control()
+    ctl.add("base", [], " ".join(facts) + PROGRAM)
+    ctl.ground([("base", [])])
+    best = {}
+    def on_model(m):   # extract plain data here (see 3.6)
+        best["assigned"] = {str(a.arguments[0]): str(a.arguments[1])
+                            for a in m.symbols(atoms=True) if a.match("assigned", 2)}
+        best["cost"] = m.cost[0]
+    if not ctl.solve(on_model=on_model).satisfiable:
+        return {"error": "No solution exists"}
+    return best
 
-# Solve and extract
-solution = None
-def on_model(m):
-    global solution
-    # Process atoms into solution
-    solution = [str(a) for a in m.symbols(atoms=True)]
+def verify(solution: dict) -> None:
+    if "error" in solution:
+        return
+    a = solution["assigned"]
+    assert sorted(a) == sorted(TASKS), "every task exactly once"
+    assert all(w in WORKERS for w in a.values()), "unknown worker"
+    assert len(set(a.values())) == len(a), "a worker with two tasks"
+    assert solution["cost"] == sum(COST[t, w] for t, w in a.items()), "wrong cost"
 
-result = ctl.solve(on_model=on_model)
-
-# Output
-if result.satisfiable:
+if __name__ == "__main__":
+    solution = solve()
+    verify(solution)
     print(json.dumps(solution))
-else:
-    print(json.dumps({"error": "No solution exists"}))
 ```
+
+`verify()` takes only the solution and reads the data from module-level
+constants; importing the module must not solve or print.
 
 ### 3.2 CRITICAL: Finding One vs. All Solutions (Solver Configuration)
 
@@ -367,16 +370,12 @@ A frequent and critical error is misconfiguring the solver to search for all pos
 
 > **Fundamental Rule:** If the problem asks for *a* feasible solution, you MUST limit the solver to find only one.
 
-| Configuration                  | Behavior                                                | Use Case                                                                              | Consequence of Misuse                                                                                             |
-| :----------------------------- | :------------------------------------------------------ | :------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------- |
-| `ctl = clingo.Control()`   | **Stops after the first solution (model) is found; with `#minimize`/`#maximize` it continues until the optimum (the last model passed to `on_model` is optimal).**    | **This should be your default for most tasks.** Use when the problem asks for *any* valid solution. | (Safe)                                                                                                            |
-| `ctl = clingo.Control(["1"])`   | **Stops after the first solution, also with `#minimize`/`#maximize` ("optimality of last model not guaranteed").** | Satisfaction problems only. | **Non-optimal answers** for optimization problems. |
+| Configuration | Behavior | Use Case | Consequence of Misuse |
+| :--- | :--- | :--- | :--- |
+| `ctl = clingo.Control()` | **Stops after the first solution (model) is found; with `#minimize`/`#maximize` it continues until the optimum (the last model is proven optimal only if the solve result's `exhausted` is True; a solve stopped early has `interrupted` True).** | **This should be your default for most tasks.** Use when the problem asks for *any* valid solution. | (Safe) |
+| `ctl = clingo.Control(["1"])` | **Stops after the first solution, also with `#minimize`/`#maximize` ("optimality of last model not guaranteed").** | Satisfaction problems only. | **Non-optimal answers** for optimization problems. |
 | `ctl = clingo.Control(["0"])` | **Finds all possible solutions.** | Use **only** when the problem explicitly requires enumerating every single valid combination. | **Leads to timeouts.** The solver will continue working long after finding a valid solution, needlessly exploring the entire search space. |
 
-**Example from a Failed Task (Bin Packing):**
-- **The Goal:** Find one valid way to pack bins.
-- **The Mistake:** `ctl = clingo.Control(["0"])` was used. The solver found a valid packing quickly but then continued searching for all other possible valid packings, eventually timing out.
-- **The Fix:** Changing the call to `ctl = clingo.Control()` allows the program to terminate immediately after the first valid model is found, solving the problem well within the time limit.
 
 ### 3.3 The Three-Step Action Modeling Pattern (CRITICAL for temporal problems)
 
@@ -981,12 +980,12 @@ This rule correctly states: "For any pair of rooms (R1, R2), choose **zero or on
 
 #### General Patterns for Cardinality Control
 
-| Goal                                   | ASP Pattern                                                         | Explanation                                            |
-| :------------------------------------- | :------------------------------------------------------------------ | :----------------------------------------------------- |
-| **Assign a unique property**           | `1 { has_property(X, P) : property(P) } 1 :- entity(X).`             | Each entity `X` must have **exactly one** property `P`.|
-| **Model an optional, unique connection** | `0 { connected(X, Y, Type) : conn_type(Type) } 1 :- pair(X, Y).`     | There is **at most one** connection between `X` and `Y`.|
-| **Select a fixed number of items**     | `k { selected(I) : item(I) } k :- ...`                              | **Exactly `k`** items must be selected from the domain. |
-| **Select a minimum number of items**   | `k { selected(I) : item(I) } :- ...`                                | **At least `k`** items must be selected.               |
+| Goal | ASP Pattern | Explanation |
+| :--- | :--- | :--- |
+| **Assign a unique property** | `1 { has_property(X, P) : property(P) } 1 :- entity(X).` | Each entity `X` must have **exactly one** property `P`.|
+| **Model an optional, unique connection** | `0 { connected(X, Y, Type) : conn_type(Type) } 1 :- pair(X, Y).` | There is **at most one** connection between `X` and `Y`.|
+| **Select a fixed number of items** | `k { selected(I) : item(I) } k :- ...` | **Exactly `k`** items must be selected from the domain. |
+| **Select a minimum number of items** | `k { selected(I) : item(I) } :- ...` | **At least `k`** items must be selected. |
 
 ### 5.4 Avoiding Grounding Explosion: Decompose Complex Arithmetic (Anti-Pattern: Monolithic Arithmetic)
 

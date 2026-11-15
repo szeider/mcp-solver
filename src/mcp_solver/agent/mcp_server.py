@@ -35,7 +35,6 @@ long-lived engine connection per server process, so kernel state persists
 across the host's tool calls.
 """
 
-import ast
 import asyncio
 import contextlib
 import json
@@ -89,8 +88,10 @@ Workflow: (1) `select_backend(solver)` — sets up the solving kernel with the
 right solver library and returns modeling instructions; (2) iterate
 `python_exec` (it runs in that kernel automatically): encode, run the real
 solver, verify the result independently against the problem statement;
-(3) finish with `submit_code` (the final, verified, self-contained program;
-the server runs it on its own and returns its output).
+(3) finish with `submit_code` (the final self-contained program in the
+template's shape: `solve()`, `verify(solution)`, a `__main__` guard that
+verifies before printing; the server runs it on its own and returns its
+output, and rejects it if verify() fails).
 
 Choosing a backend:
 - **pysat** — pure Boolean structure: placements, colorings, covers,
@@ -158,11 +159,6 @@ RUN_OK_MESSAGE = (
     " run it anywhere else."
 )
 NOT_EXECUTED_MESSAGE = "Compile check only, not executed: no backend selected."
-NO_VERIFY_WARNING = (
-    "The program defines no verify(): the template requires an independent"
-    " verify() that re-checks the solution against the problem text; add one"
-    " and submit again unless the problem leaves nothing to check."
-)
 
 # Solve statistics per episode (episode = one select_backend up to the next
 # one, or server shutdown). The host's tokens are invisible to the server,
@@ -390,7 +386,8 @@ async def select_backend(solver: str) -> str:
         f" {', '.join(packages)}. python_exec,"
         " python_status, python_interrupt and python_reset without kernel_id"
         " act on this kernel."
-        " Finish with submit_code(final verified self-contained program);"
+        " Finish with submit_code(final self-contained program in the"
+        " template's shape: solve(), verify(solution), __main__ guard);"
         " the server then runs it on its own and returns its output."
     )
     template = get_template(solver, root=dev)
@@ -531,19 +528,6 @@ def _tail(text: str | None, limit: int) -> tuple[str, bool]:
     return (text[-limit:], True) if len(text) > limit else (text, False)
 
 
-def _defines_verify(code: str) -> bool:
-    """True when the program defines a function named verify (any depth)."""
-    try:
-        tree = ast.parse(code)
-    except (SyntaxError, ValueError):
-        return False
-    return any(
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name == "verify"
-        for node in ast.walk(tree)
-    )
-
-
 def _run_failure(run: ProgramRun) -> str | None:
     """Why a standalone run failed (a clause), or None when it succeeded."""
     if run.timed_out:
@@ -559,7 +543,8 @@ def _run_failure(run: ProgramRun) -> str | None:
 async def submit_code(code: str) -> CallToolResult:
     """Submit the final, verified, self-contained solver program.
 
-    Call ONCE at the end, after your verification passed in python_exec.
+    Call when the program is complete and its verify() passes; if the reply
+    rejects it, fix it and call again.
     The server checks that it compiles and, once a backend is selected,
     runs it on its own in a clean environment (no kernel state) and returns
     its output; a program that fails there is rejected with the reason.
@@ -619,8 +604,6 @@ async def submit_code(code: str) -> CallToolResult:
             }
         if notes:
             reply["note"] = " ".join(notes)
-    if accepted and not _defines_verify(code):
-        reply["warning"] = NO_VERIFY_WARNING
     if reply != verdict:
         text = json.dumps(reply)
     content: list = [TextContent(type="text", text=text)]
