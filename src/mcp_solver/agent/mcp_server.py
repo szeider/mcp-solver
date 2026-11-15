@@ -5,8 +5,8 @@ batchable open-source host substitute) connects here and writes, runs, and
 verifies solver programs itself against a persistent IPython kernel. The
 server contributes the solver value: backend selection, solver packages
 injected into the kernel, the modeling instructions (templates), and
-the compile-gated ``submit_code`` finish line. It calls no LLM and needs no
-API key.
+the ``submit_code`` finish line (compile check, then one standalone run of
+the program). It calls no LLM and needs no API key.
 
 Kernel model: the solving kernel has the fixed engine kernel id
 ``"solver"`` (:data:`SOLVER_KERNEL`). Every ``select_backend`` call does one
@@ -35,6 +35,7 @@ long-lived engine connection per server process, so kernel state persists
 across the host's tool calls.
 """
 
+import ast
 import asyncio
 import contextlib
 import json
@@ -42,18 +43,20 @@ import logging
 import math
 import os
 import sys
+import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
 
 from mcp_solver.agent import engine
-from mcp_solver.agent.cli import build_with_packages
+from mcp_solver.agent.cli import ProgramRun, build_with_packages, run_isolated
 from mcp_solver.templates import SOLVERS, get_template
 
 SELECT_BACKEND_DESCRIPTION = """\
@@ -86,7 +89,8 @@ Workflow: (1) `select_backend(solver)` — sets up the solving kernel with the
 right solver library and returns modeling instructions; (2) iterate
 `python_exec` (it runs in that kernel automatically): encode, run the real
 solver, verify the result independently against the problem statement;
-(3) finish with `submit_code` (the final, verified, self-contained program).
+(3) finish with `submit_code` (the final, verified, self-contained program;
+the server runs it on its own and returns its output).
 
 Choosing a backend:
 - **pysat** — pure Boolean structure: placements, colorings, covers,
@@ -128,6 +132,9 @@ SOLVER_KERNEL = "solver"
 # running exec).
 _backend_packages: list[str] | None = None
 _kernel_lock = asyncio.Lock()
+# The solving kernel's current packages: the backend's plus those a routed
+# python_reset added. submit_code runs the submitted program with them.
+_kernel_packages: list[str] | None = None
 
 # Server-side execution cap of the engine's python_exec (seconds); clamp
 # here too so an oversized host value cannot stretch the client-side wait.
@@ -136,6 +143,26 @@ _MAX_EXEC_TIMEOUT = 300
 # Bounded store of successful submissions (Tier 2 resources).
 _submissions: dict[str, str] = {}
 _MAX_SUBMISSIONS = 50
+
+# submit_code runs an accepted program once on its own (as the CLI
+# re-executes it): wall-clock limit in seconds (below the 300 s after which
+# mcp-minion as host gives up on a tool call) and the characters of output kept in the reply (the end
+# of stdout, where programs print the solution JSON).
+STANDALONE_TIMEOUT = 240
+_STDOUT_CAP = 20_000
+_STDERR_CAP = 3_000
+
+RUN_OK_MESSAGE = (
+    "The server ran the program on its own in a clean environment with the"
+    ' backend\'s packages; its output is in "stdout", so there is no need to'
+    " run it anywhere else."
+)
+NOT_EXECUTED_MESSAGE = "Compile check only, not executed: no backend selected."
+NO_VERIFY_WARNING = (
+    "The program defines no verify(): the template requires an independent"
+    " verify() that re-checks the solution against the problem text; add one"
+    " and submit again unless the problem leaves nothing to check."
+)
 
 # Solve statistics per episode (episode = one select_backend up to the next
 # one, or server shutdown). The host's tokens are invisible to the server,
@@ -232,7 +259,7 @@ def _dev_path() -> str | None:
 @asynccontextmanager
 async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     """Hold one engine (ipython_mcp) connection for the server's lifetime."""
-    global _engine, _backend_packages
+    global _engine, _backend_packages, _kernel_packages
     manager = await engine.start_engine()
     _engine = manager
     try:
@@ -241,6 +268,7 @@ async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
         _episode_close("shutdown")
         _engine = None
         _backend_packages = None
+        _kernel_packages = None
         await manager.__aexit__(None, None, None)
 
 
@@ -323,7 +351,7 @@ def submission_resource(submission_id: str) -> str:
 
 @mcp.tool(description=SELECT_BACKEND_DESCRIPTION, structured_output=False)
 async def select_backend(solver: str) -> str:
-    global _backend_packages
+    global _backend_packages, _kernel_packages
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
 
@@ -348,6 +376,7 @@ async def select_backend(solver: str) -> str:
             )
         recycled = parsed.get("created") is False
         _backend_packages = packages
+        _kernel_packages = packages
         _episode_open(solver)
         _episode_sync()
 
@@ -361,7 +390,8 @@ async def select_backend(solver: str) -> str:
         f" {', '.join(packages)}. python_exec,"
         " python_status, python_interrupt and python_reset without kernel_id"
         " act on this kernel."
-        " Finish with submit_code(final verified self-contained program)."
+        " Finish with submit_code(final verified self-contained program);"
+        " the server then runs it on its own and returns its output."
     )
     template = get_template(solver, root=dev)
     # Plain text on purpose: the template IS the payload, and clients that
@@ -409,6 +439,7 @@ async def python_reset(
     it does not change which kernel calls without kernel_id use. To switch
     backends, call select_backend instead.
     """
+    global _kernel_packages
     _episode_count("python_reset")
     if _route(kernel_id) == SOLVER_KERNEL:
         async with _kernel_lock:
@@ -417,7 +448,10 @@ async def python_reset(
                 args: dict = {"kernel_id": SOLVER_KERNEL}
                 if packages:
                     args["packages"] = _merge_packages(backend, packages)
-                return await _engine_call("python_reset", args)
+                text = await _engine_call("python_reset", args)
+                if packages and _parse_engine_json(text).get("success") is True:
+                    _kernel_packages = args["packages"]
+                return text
     args = {}
     if kernel_id:
         args["kernel_id"] = kernel_id
@@ -473,14 +507,63 @@ async def python_interrupt(kernel_id: str | None = None) -> str:
     return await _engine_call("python_interrupt", args)
 
 
+def _run_standalone(code: str, packages: list[str]) -> ProgramRun:
+    """Run *code* once on its own: a fresh temporary directory, an isolated
+    uv environment with *packages*, the filtered environment, its own
+    process group, STANDALONE_TIMEOUT. Blocking; submit_code calls it in a
+    worker thread."""
+    with tempfile.TemporaryDirectory(
+        prefix="mcp-solver-run-", ignore_cleanup_errors=True
+    ) as tmp:
+        program = Path(tmp) / "submission.py"
+        program.write_text(code, encoding="utf-8")
+        try:
+            return run_isolated(
+                program, packages, STANDALONE_TIMEOUT, capture=True, cwd=tmp
+            )
+        except FileNotFoundError:
+            return ProgramRun(None, "", "uv not found on PATH", False)
+
+
+def _tail(text: str | None, limit: int) -> tuple[str, bool]:
+    """The last *limit* characters of *text*, and whether it was cut."""
+    text = text or ""
+    return (text[-limit:], True) if len(text) > limit else (text, False)
+
+
+def _defines_verify(code: str) -> bool:
+    """True when the program defines a function named verify (any depth)."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return False
+    return any(
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name == "verify"
+        for node in ast.walk(tree)
+    )
+
+
+def _run_failure(run: ProgramRun) -> str | None:
+    """Why a standalone run failed (a clause), or None when it succeeded."""
+    if run.timed_out:
+        return f"it did not finish within {STANDALONE_TIMEOUT} s and was killed"
+    if run.exit_code != 0:
+        return f"exit code {run.exit_code}"
+    if not (run.stdout or "").strip():
+        return "it printed nothing"
+    return None
+
+
 @mcp.tool()
 async def submit_code(code: str) -> CallToolResult:
     """Submit the final, verified, self-contained solver program.
 
-    Call ONCE at the end, only after executing the program via python_exec
-    and passing your verification. The code is syntax-checked; on success it
-    is stored and linked as a resource (the server keeps the last 50). A
-    rejected program comes back as an error result with the reason.
+    Call ONCE at the end, after your verification passed in python_exec.
+    The server checks that it compiles and, once a backend is selected,
+    runs it on its own in a clean environment (no kernel state) and returns
+    its output; a program that fails there is rejected with the reason.
+    Accepted programs are stored and linked as a resource (the last 50).
     """
     # Count the attempt BEFORE _episode_count syncs the .open snapshot, so a
     # failed submission (which never syncs again) is not lost on a host kill.
@@ -494,6 +577,52 @@ async def submit_code(code: str) -> CallToolResult:
     # A rejection ({"ok": false, "error": ...} from the engine) is an error
     # result, so every host sees it as a failed call.
     text = result_text if accepted else str(verdict.get("error") or result_text)
+    reply = dict(verdict)
+    packages = _kernel_packages
+    if accepted and packages is None:
+        reply["executed"] = False
+        reply["message"] = NOT_EXECUTED_MESSAGE
+    elif accepted:
+        # Run without the kernel lock and off the event loop: kernel tools
+        # (python_status, python_interrupt, a reset) stay responsive.
+        run = await asyncio.to_thread(_run_standalone, code, list(packages))
+        stdout, out_cut = _tail(run.stdout, _STDOUT_CAP)
+        notes = [f"stdout cut to its last {_STDOUT_CAP} characters."] if out_cut else []
+        failure = _run_failure(run)
+        if failure is None:
+            message = reply.get("message")
+            reply.update(
+                executed=True,
+                exit_code=0,
+                stdout=stdout,
+                message=f"{message} {RUN_OK_MESSAGE}" if message else RUN_OK_MESSAGE,
+            )
+        else:
+            accepted = False
+            stderr, err_cut = _tail(run.stderr, _STDERR_CAP)
+            if err_cut:
+                notes.append(f"stderr cut to its last {_STDERR_CAP} characters.")
+            reply = {
+                "ok": False,
+                "executed": True,
+                "exit_code": run.exit_code,
+                "timed_out": run.timed_out,
+                "stdout": stdout,
+                "stderr": stderr,
+                "error": (
+                    "The program compiles but failed when run on its own in a"
+                    f" clean environment ({failure}); the usual cause is that it"
+                    " relies on variables or imports from the kernel session,"
+                    " but a submitted program must be self-contained: fix it"
+                    " with python_exec and submit again."
+                ),
+            }
+        if notes:
+            reply["note"] = " ".join(notes)
+    if accepted and not _defines_verify(code):
+        reply["warning"] = NO_VERIFY_WARNING
+    if reply != verdict:
+        text = json.dumps(reply)
     content: list = [TextContent(type="text", text=text)]
     if accepted:
         if _episode is not None:
@@ -509,12 +638,12 @@ async def submit_code(code: str) -> CallToolResult:
                 type="resource_link",
                 uri=f"mcp-solver://submissions/{submission_id}",
                 name=f"submission_{submission_id[:8]}.py",
-                description="The accepted solver program (compile-checked).",
+                description="The accepted solver program.",
                 mime_type="text/x-python",
                 size=len(code.encode()),
             )
         )
-    structured = dict(verdict) if verdict else {}
+    structured = reply
     stats = _episode_snapshot()
     if stats:
         structured["stats"] = stats

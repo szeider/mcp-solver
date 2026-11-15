@@ -9,7 +9,10 @@ for submit_code) returned as ``ToolOutcome`` text.
 
 import asyncio
 import json
+import os
 import re
+import sys
+import time
 
 import pytest
 from mcp.client import Client
@@ -140,15 +143,33 @@ class FakeEngine:
 
 
 @pytest.fixture()
-def engine(monkeypatch):
-    """Fresh fake engine wired into the server's lifespan + clean state."""
+def engine(monkeypatch, tmp_path):
+    """Fresh fake engine wired into the server's lifespan + clean state.
+
+    A fake ``uv`` on PATH stands in for the standalone run of submit_code:
+    it logs its arguments to $MCP_SOLVER_TEST_UV_LOG (the prefix passes the
+    kernel environment's filter) and runs the program, its last argument,
+    under this interpreter.
+    """
     import mcp_minion
 
     fake = FakeEngine()
     monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: fake)
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.delenv("MCP_SOLVER_STATS", raising=False)
+    bindir = tmp_path / "fakebin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(
+        '#!/bin/sh\necho "$@" >> "$MCP_SOLVER_TEST_UV_LOG"\n'
+        f'for last; do :; done\nexec "{sys.executable}" "$last"\n'
+    )
+    fake_uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    fake.uv_log = tmp_path / "uv.log"
+    monkeypatch.setenv("MCP_SOLVER_TEST_UV_LOG", str(fake.uv_log))
     monkeypatch.setattr(mcp_server, "_backend_packages", None)
+    monkeypatch.setattr(mcp_server, "_kernel_packages", None)
     monkeypatch.setattr(mcp_server, "_episode", None)
     mcp_server._submissions.clear()
     return fake
@@ -386,12 +407,21 @@ async def test_submit_code_round_trip(engine):
         assert result.structured_content["ok"] is False
         assert all(c.type != "resource_link" for c in result.content)
 
-        # A valid program is stored and linked as a fetchable resource.
+        # A valid program is stored and linked as a fetchable resource;
+        # without a selected backend it is compiled, not run.
         program = "print('{\"answer\": 42}')"
         result = await session.call_tool("submit_code", {"code": program})
         assert not result.is_error
-        assert json.loads(result.content[0].text) == {"ok": True}
-        assert result.structured_content == {"ok": True}
+        expected = {
+            "ok": True,
+            "executed": False,
+            "message": mcp_server.NOT_EXECUTED_MESSAGE,
+            "warning": mcp_server.NO_VERIFY_WARNING,
+        }
+        assert json.loads(result.content[0].text) == expected
+        assert result.structured_content == expected
+        assert "not executed: no backend selected" in expected["message"]
+        assert not engine.uv_log.exists()
         links = [c for c in result.content if c.type == "resource_link"]
         assert len(links) == 1
         assert links[0].size == len(program.encode())
@@ -404,7 +434,7 @@ async def test_submission_store_is_bounded(engine, monkeypatch):
     async with _session() as session:
         for i in range(3):
             result = await session.call_tool("submit_code", {"code": f"print({i})"})
-            assert result.structured_content == {"ok": True}
+            assert result.structured_content["ok"] is True
     assert len(mcp_server._submissions) == 2
     assert list(mcp_server._submissions.values()) == ["print(1)", "print(2)"]
 
@@ -733,3 +763,202 @@ async def test_select_backend_unpublished_version_without_checkout(engine, monke
         result = await session.call_tool("select_backend", {"solver": "z3"})
         assert not result.is_error
     assert engine.calls[0][1]["packages"] == ["z3-solver"]
+
+
+# --- submit_code: standalone run of the accepted program --------------------
+
+VERIFIED = (
+    "import json\n"
+    "def verify(sol):\n"
+    "    return sol['x'] == 3\n"
+    "sol = {'x': 3}\n"
+    "assert verify(sol)\n"
+    "print(json.dumps(sol))\n"
+)
+
+
+def _links(result):
+    return [c for c in result.content if c.type == "resource_link"]
+
+
+async def test_submit_runs_program_standalone(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "cpmpy"})
+        result = await session.call_tool("submit_code", {"code": VERIFIED})
+        assert not result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload == {
+            "ok": True,
+            "executed": True,
+            "exit_code": 0,
+            "stdout": '{"x": 3}\n',
+            "message": mcp_server.RUN_OK_MESSAGE,
+        }
+        sc = result.structured_content
+        assert sc["stdout"] == '{"x": 3}\n' and "warning" not in sc
+        assert sc["stats"]["submit_attempts"] == 1
+        assert len(_links(result)) == 1
+        assert list(mcp_server._submissions.values()) == [VERIFIED]
+        assert mcp_server._episode["submit_ok"] == 1
+    args = engine.uv_log.read_text().split()
+    assert args[:4] == ["run", "--no-project", "--isolated", "--python"]
+    assert args[5:7] == ["--with", "cpmpy"] and args[-1].endswith("submission.py")
+
+
+async def test_submit_failing_standalone_is_rejected_not_stored(
+    engine, monkeypatch, tmp_path
+):
+    # The engine accepts PLACEHOLDER (it compiles); run on its own it raises
+    # NameError, as a program that relies on kernel variables does.
+    stats_file = tmp_path / "stats.jsonl"
+    monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": "PLACEHOLDER"})
+        assert result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["ok"] is False and payload["executed"] is True
+        assert payload["exit_code"] == 1 and payload["timed_out"] is False
+        assert "NameError" in payload["stderr"]
+        assert "compiles but failed when run on its own" in payload["error"]
+        assert "self-contained" in payload["error"]
+        assert "python_exec" in payload["error"]
+        assert "warning" not in payload
+        assert result.structured_content["ok"] is False
+        assert _links(result) == []
+        assert mcp_server._submissions == {}
+        snap = json.loads((tmp_path / "stats.jsonl.open").read_text())
+        assert snap["submit_attempts"] == 1 and snap["submit_ok"] == 0
+        assert snap["code_bytes"] is None
+
+
+async def test_submit_without_output_is_rejected(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": "x = 1"})
+        assert result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["exit_code"] == 0
+        assert "printed nothing" in payload["error"]
+        assert mcp_server._submissions == {}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_submit_standalone_timeout(engine, monkeypatch):
+    monkeypatch.setattr(mcp_server, "STANDALONE_TIMEOUT", 3)
+    # 3 s leave room for interpreter start-up under load before the print.
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        start = time.monotonic()
+        result = await session.call_tool(
+            "submit_code",
+            {"code": "import time\nprint(1, flush=True)\ntime.sleep(600)"},
+        )
+        assert time.monotonic() - start < 10
+        assert result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["timed_out"] is True and payload["exit_code"] is None
+        assert payload["stdout"] == "1\n"
+        assert "did not finish within 3 s" in payload["error"]
+        assert mcp_server._submissions == {}
+
+
+async def test_submit_output_capped_keeping_the_end(engine):
+    program = "print('x' * 30000)\nprint('{\"end\": 1}')\n"
+    failing = "import sys\nprint('y' * 30000)\nsys.stderr.write('e' * 5000 + 'LAST')\nsys.exit(3)\n"
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        payload = json.loads(
+            (await session.call_tool("submit_code", {"code": program})).content[0].text
+        )
+        assert payload["ok"] is True
+        assert len(payload["stdout"]) == mcp_server._STDOUT_CAP == 20_000
+        assert payload["stdout"].endswith('x\n{"end": 1}\n')
+        assert "stdout cut" in payload["note"]
+        payload = json.loads(
+            (await session.call_tool("submit_code", {"code": failing})).content[0].text
+        )
+        assert payload["ok"] is False and payload["exit_code"] == 3
+        assert len(payload["stdout"]) == 20_000
+        assert len(payload["stderr"]) == mcp_server._STDERR_CAP == 3_000
+        assert payload["stderr"].endswith("eLAST")
+        assert "stderr cut" in payload["note"]
+
+
+@pytest.mark.parametrize(
+    ("code", "defines"),
+    [
+        ("def verify(s):\n    return True\nprint(1)", True),
+        ("async def verify():\n    pass\nprint(1)", True),
+        ("def main():\n    def verify():\n        pass\nprint(1)", True),
+        ("# verify() is not needed here\nprint('verify')", False),
+        ("verify = lambda: True\nprint(verify())", False),
+        ("def verify_solution():\n    pass\nprint(1)", False),
+    ],
+)
+def test_defines_verify(code, defines):
+    assert mcp_server._defines_verify(code) is defines
+
+
+async def test_verify_warning_only_without_def_verify(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool(
+            "submit_code", {"code": "# verify() later\nprint('\"verify\"')"}
+        )
+        assert result.structured_content["warning"] == mcp_server.NO_VERIFY_WARNING
+        assert not result.is_error and len(_links(result)) == 1
+        result = await session.call_tool("submit_code", {"code": VERIFIED})
+        assert "warning" not in result.structured_content
+
+
+async def test_submit_run_uses_packages_added_by_routed_reset(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "pysat"})
+        await session.call_tool("python_reset", {"packages": ["numpy"]})
+        # A failed routed reset keeps the kernel's previous packages.
+        engine.unresolvable = {"bogus"}
+        await session.call_tool("python_reset", {"packages": ["bogus"]})
+        assert mcp_server._kernel_packages == ["python-sat[pb]", "numpy"]
+        await session.call_tool("submit_code", {"code": VERIFIED})
+        # A backend switch resets the list to the new backend's packages.
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("submit_code", {"code": VERIFIED})
+    first, second = engine.uv_log.read_text().splitlines()
+    assert "--with python-sat[pb] --with numpy python" in first
+    assert "--with z3-solver python" in second
+
+
+async def test_standalone_run_does_not_block_kernel_tools(engine, tmp_path):
+    # The program signals its start, then waits (at most 20 s) until the
+    # test releases it, so the checks below run while it is in flight.
+    marker = tmp_path / "started"
+    release = tmp_path / "release"
+    program = (
+        "import os, time\n"
+        f"open({str(marker)!r}, 'w').close()\n"
+        "deadline = time.monotonic() + 20\n"
+        f"while not os.path.exists({str(release)!r}) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.02)\n"
+        "print(1)\n"
+    )
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        running = asyncio.create_task(
+            session.call_tool("submit_code", {"code": program})
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not marker.exists():
+                assert time.monotonic() < deadline
+                await asyncio.sleep(0.02)
+            # The event loop serves other calls, and the kernel lock is free.
+            assert not mcp_server._kernel_lock.locked()
+            await asyncio.wait_for(session.call_tool("python_status", {}), 2)
+            await asyncio.wait_for(session.call_tool("python_reset", {}), 2)
+            assert not running.done()
+        finally:
+            release.touch()
+            result = await running
+        assert not result.is_error
+        assert result.structured_content["stdout"] == "1\n"

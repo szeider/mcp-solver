@@ -36,11 +36,12 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import mcp_solver
 from mcp_solver.agent import engine
@@ -418,6 +419,88 @@ def print_stats(stats: dict) -> None:
         print("mcp-solver: the run stopped at the step limit.", file=sys.stderr)
 
 
+class ProgramRun(NamedTuple):
+    """Outcome of :func:`run_isolated`.
+
+    ``exit_code`` is None when the run timed out; ``stdout`` and ``stderr``
+    are None unless the output was captured (then at most the last
+    ``CAPTURE_TAIL_BYTES`` bytes of each, decoded as UTF-8).
+    """
+
+    exit_code: int | None
+    stdout: str | None
+    stderr: str | None
+    timed_out: bool
+
+
+# Captured output keeps at most this many trailing bytes per stream.
+CAPTURE_TAIL_BYTES = 1_000_000
+
+
+def run_isolated(
+    program: Path,
+    with_packages: list[str],
+    timeout: float,
+    *,
+    capture: bool = False,
+    cwd: str | Path | None = None,
+) -> ProgramRun:
+    """Run *program* on its own in an isolated uv environment.
+
+    ``uv run --no-project --isolated --python PYTHON_VERSION`` with one
+    ``--with`` per package, under ``engine.kernel_env()`` (API keys
+    withheld), in its own session. After *timeout* seconds the program and
+    its descendants are killed. Without *capture* its stdout and stderr are
+    inherited; with it they go to temporary files (no pipe, so a background
+    child holding the stream cannot stall the wait) and come back in the
+    result. Raises FileNotFoundError when ``uv`` is not on PATH; on any
+    other exception (Ctrl-C, SystemExit) the program is killed first.
+    """
+    # --isolated: without it uv layers the packages on an existing virtual
+    # environment (VIRTUAL_ENV, or a .venv in the cwd or a parent) when the
+    # Python version matches, so the program could import what it never asked for.
+    cmd = ["uv", "run", "--no-project", "--isolated", "--python", PYTHON_VERSION]
+    for pkg in with_packages:
+        cmd += ["--with", pkg]
+    cmd += ["python", str(program)]
+    with contextlib.ExitStack() as stack:
+        out = err = None
+        if capture:
+            out = stack.enter_context(tempfile.TemporaryFile())
+            err = stack.enter_context(tempfile.TemporaryFile())
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                env=engine.kernel_env(),
+                cwd=cwd,
+                stdout=out,
+                stderr=err,
+                start_new_session=NEW_SESSION,
+            )
+            try:
+                exit_code, timed_out = proc.wait(timeout=timeout), False
+            except subprocess.TimeoutExpired:
+                kill_process_group(proc)
+                exit_code, timed_out = None, True
+        except BaseException:
+            # In its own session the program no longer receives the
+            # terminal's Ctrl-C, so take it down on any interruption.
+            if proc is not None:
+                kill_process_group(proc)
+            raise
+        return ProgramRun(exit_code, _read_tail(out), _read_tail(err), timed_out)
+
+
+def _read_tail(fh: Any) -> str | None:
+    """The last CAPTURE_TAIL_BYTES of a capture file as text; None if none."""
+    if fh is None:
+        return None
+    size = fh.seek(0, os.SEEK_END)
+    fh.seek(max(0, size - CAPTURE_TAIL_BYTES))
+    return fh.read().decode("utf-8", errors="replace")
+
+
 def run_program(program: Path, with_packages: list[str]) -> int:
     """Execute the saved program in a uv kernel; return its exit code.
 
@@ -428,25 +511,15 @@ def run_program(program: Path, with_packages: list[str]) -> int:
     agent's kernel had (API keys withheld). Its stdout (the solution JSON)
     is inherited so it becomes this command's stdout.
     """
-    # --isolated: without it uv layers the packages on an existing virtual
-    # environment (VIRTUAL_ENV, or a .venv in the cwd or a parent) when the
-    # Python version matches, so the program could import what it never asked for.
-    cmd = ["uv", "run", "--no-project", "--isolated", "--python", PYTHON_VERSION]
-    for pkg in with_packages:
-        cmd += ["--with", pkg]
-    cmd += ["python", str(program)]
     # The program runs in its own session, so a SIGTERM to this process (or
     # to its process group, as the benchmark harness sends) does not reach
-    # it: turn SIGTERM into SystemExit, whose cleanup below kills the program.
+    # it: turn SIGTERM into SystemExit, whose cleanup in run_isolated kills
+    # the program.
     handle_term = NEW_SESSION and threading.current_thread() is threading.main_thread()
     if handle_term:
         previous = signal.signal(signal.SIGTERM, _exit_on_sigterm)
-    proc = None
     try:
-        proc = subprocess.Popen(
-            cmd, env=engine.kernel_env(), start_new_session=NEW_SESSION
-        )
-        return proc.wait(timeout=RERUN_TIMEOUT)
+        run = run_isolated(program, with_packages, RERUN_TIMEOUT)
     except FileNotFoundError:
         print(
             "mcp-solver: 'uv' not found on PATH; it is required to run the"
@@ -454,24 +527,18 @@ def run_program(program: Path, with_packages: list[str]) -> int:
             file=sys.stderr,
         )
         return 127
-    except subprocess.TimeoutExpired:
-        kill_process_group(proc)
+    finally:
+        if handle_term:
+            # None: the previous handler was not installed from Python.
+            signal.signal(signal.SIGTERM, previous or signal.SIG_DFL)
+    if run.timed_out:
         print(
             f"mcp-solver: the submitted program did not finish within"
             f" {RERUN_TIMEOUT} s and was killed; {program.name} is kept.",
             file=sys.stderr,
         )
         return EXIT_RERUN_TIMEOUT
-    except BaseException:
-        # In its own session the program no longer receives the terminal's
-        # Ctrl-C, so take it down on any interruption of this process.
-        if proc is not None:
-            kill_process_group(proc)
-        raise
-    finally:
-        if handle_term:
-            # None: the previous handler was not installed from Python.
-            signal.signal(signal.SIGTERM, previous or signal.SIG_DFL)
+    return run.exit_code
 
 
 def _exit_on_sigterm(signum: int, frame: object) -> None:

@@ -34,9 +34,17 @@ no API key:
   `packages` keeps the backend's solver libraries; another `kernel_id` is
   passed to the engine unchanged, with the packages as given.
 - **`submit_code(code)`** is the finish line: the final self-contained
-  program is syntax-checked and, on success, stored and linked back as an
-  MCP resource (`mcp-solver://submissions/{id}`), with the verdict as
-  structured content.
+  program is syntax-checked and then, once a backend is selected, run once
+  on its own in a clean, isolated environment with the backend's packages
+  (no kernel state, the same way the CLI re-executes it, 240 s limit). Its
+  output comes back in the reply. A program that fails there (nonzero exit,
+  timeout, no output) is rejected; an accepted one is stored and linked
+  back as an MCP resource (`mcp-solver://submissions/{id}`), with the
+  verdict as structured content. "Verified" thus means: the host checked
+  the solution against the problem (the templates require an independent
+  `verify()`; the reply warns when the program defines none), and the
+  server confirmed that the program runs self-contained and prints a
+  result. The server does not check the solution itself.
 - **Resources:** `mcp-solver://guide` (backend selection and workflow) and
   `mcp-solver://template/{solver}` (the full modeling instructions,
   browsable without selecting).
@@ -195,8 +203,9 @@ loop in a persistent IPython kernel — the `ipython_mcp` server from
 [agentic-python-coder](https://github.com/szeider/agentic-python-coder) —
 and must end the solve by calling `submit_code` with the final
 self-contained program (syntax-checked server-side, never written to disk
-by the kernel). On the MCP path the accepted submission is linked back to
-the host as a resource; on the CLI path the client extracts the last
+by the kernel). On the MCP path the server runs the program once on its own
+in a fresh `uv` environment, rejects it if that run fails, and links an
+accepted submission back to the host as a resource; on the CLI path the client extracts the last
 successful submission, writes it to `<basename>_code.py`, and re-executes
 it in a fresh `uv` kernel to produce the answer.
 

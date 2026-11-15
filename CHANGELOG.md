@@ -24,6 +24,20 @@
   keeps the backend's solver libraries: the server installs the backend's
   packages first, then the host's, without duplicates (formerly the host's
   list replaced them). Without `packages` the kernel keeps its packages.
+- **Behavior Change:** `mcp-solver-serve`'s `submit_code` runs an accepted
+  program once on its own after a backend is selected, as the CLI
+  re-executes it: `uv run --isolated` with the solving kernel's packages (the
+  backend's plus those a routed `python_reset` added) in a fresh temporary
+  directory, the filtered environment, 240 s limit, killed with its
+  descendants on timeout. The reply adds `executed`, `exit_code` and
+  `stdout` (last 20,000 characters). A program that exits nonzero, times out
+  or prints nothing is rejected with its stdout and stderr and is not stored
+  (the statistics count a failed submit attempt). Formerly the server only
+  checked that the program compiles, so it accepted, for example, the bare
+  text `PLACEHOLDER` or a program that relies on kernel variables. Before
+  any `select_backend` the check is compile-only and the reply says so.
+- **Feature:** `submit_code` adds a `warning` to an accepted program that
+  defines no `verify()` function, which every template requires.
 - **Fix:** The CLI re-executes the submitted program in an isolated uv
   environment (`uv run --isolated`). Formerly uv used an existing virtual
   environment as the base when the Python version matched (for example the
