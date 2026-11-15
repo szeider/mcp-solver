@@ -22,11 +22,11 @@ def _engine_pin() -> str:
     data = tomllib.loads((Path(checkout) / "pyproject.toml").read_text())
     for req in data["project"]["optional-dependencies"]["agent"]:
         match = re.fullmatch(
-            r"agentic-python-coder\s*>=\s*([\w.]+)\s*,\s*<\s*4", req.strip()
+            r"agentic-python-coder\s*>=\s*([\w.]+)\s*,\s*<\s*5", req.strip()
         )
         if match:
             return match.group(1)
-    raise AssertionError("no agentic-python-coder>=X,<4 pin in the [agent] extra")
+    raise AssertionError("no agentic-python-coder>=X,<5 pin in the [agent] extra")
 
 
 def test_min_engine_version_matches_pyproject_pin():
@@ -104,9 +104,13 @@ def test_require_engine_names_missing_tools_and_version():
 def test_require_engine_version():
     engine.require_engine_version(engine.MIN_ENGINE_VERSION)
     engine.require_engine_version("99.0.0.dev1")
+    # The release candidate and the final release both pass; the last 3.x
+    # release (old kernel-id rules) is refused with the required version.
+    engine.require_engine_version("4.0.0rc1")
+    engine.require_engine_version("4.0.0")
     with pytest.raises(engine.EngineError) as info:
-        engine.require_engine_version("3.5.0")
-    assert "3.5.0 is too old" in str(info.value)
+        engine.require_engine_version("3.6.1")
+    assert "3.6.1 is too old" in str(info.value)
     assert f">={engine.MIN_ENGINE_VERSION}" in str(info.value)
 
 

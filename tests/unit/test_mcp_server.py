@@ -2,8 +2,9 @@
 
 The round-trip tests drive the real MCPServer over an in-memory client
 session; the engine (ipython_mcp) is replaced by a fake MCPManager that
-mimics its public contract: flat-JSON tool results (``success``/``kernel_id``
-for kernel tools, ``ok`` for submit_code) returned as ``ToolOutcome`` text.
+mimics its public contract (agentic-python-coder >=4 kernel-id rules):
+flat-JSON tool results (``success``/``kernel_id`` for kernel tools, ``ok``
+for submit_code) returned as ``ToolOutcome`` text.
 """
 
 import asyncio
@@ -33,9 +34,11 @@ class FakeEngine:
 
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
-        self.kernels: set[str] = set()
-        self.next_id = 0
+        self.kernels: dict[str, list[str]] = {}  # live kernel id -> packages
+        self.crashed: dict[str, list[str]] = {}  # crash records -> packages
         self.break_reset = False  # make python_reset return malformed JSON
+        # a reset that asks for one of these packages fails to start
+        self.unresolvable: set[str] = set()
         # canned python_exec replies by code
         self.exec_replies: dict[str, dict] = {}
         # python_exec codes that wait for `gate` before replying
@@ -52,6 +55,10 @@ class FakeEngine:
     def has_tool(self, name):
         return name in ENGINE_TOOLS
 
+    def crash(self, kid):
+        """The kernel's process died: keep a crash record (engine >=4)."""
+        self.crashed[kid] = self.kernels.pop(kid)
+
     async def call_tool(self, name, arguments):
         self.calls.append((name, dict(arguments)))
         code = arguments.get("code", name)
@@ -62,24 +69,58 @@ class FakeEngine:
         return ToolOutcome(text=json.dumps(self._respond(name, arguments)))
 
     def _respond(self, name, args):
+        kid = args.get("kernel_id") or "_default"
         if name == "python_reset":
+            # Engine >=4: restart a live or crashed id, else create it under
+            # that id; a non-empty packages list replaces the kernel's
+            # packages; a failed restart leaves a crash record with the old
+            # packages.
             if self.break_reset:
                 return {}
-            kid = args.get("kernel_id")
-            if kid:
-                if kid not in self.kernels:
-                    return {"success": False, "error": f"Kernel '{kid}' not found"}
-                return {"success": True, "kernel_id": kid, "message": "reset"}
-            self.next_id += 1
-            kid = f"k{self.next_id}"
-            self.kernels.add(kid)
-            return {"success": True, "kernel_id": kid, "message": "started"}
+            created = kid not in self.kernels and kid not in self.crashed
+            old = self.kernels.pop(kid, None) or self.crashed.pop(kid, [])
+            new = list(args.get("packages") or old)
+            if self.unresolvable & set(new):
+                self.crashed[kid] = old
+                return {
+                    "success": False,
+                    "kernel_id": kid,
+                    "error": "Failed to start kernel: unresolvable package",
+                }
+            self.kernels[kid] = new
+            message = "Session started."
+            if created and kid != "_default":
+                # rc1's sentence for a created named kernel, verbatim.
+                message += (
+                    f' Created kernel "{kid}". Pass kernel_id="{kid}" on every'
+                    " python_exec, python_status and python_interrupt call;"
+                    " calls without kernel_id use the default kernel."
+                )
+            return {
+                "success": True,
+                "kernel_id": kid,
+                "message": message,
+                "created": created,
+            }
         if name == "python_exec":
+            if kid in self.crashed:
+                return {
+                    "success": False,
+                    "kernel_id": kid,
+                    "error": f'Kernel "{kid}" crashed, its state is lost.',
+                }
+            if kid != "_default" and kid not in self.kernels:
+                return {
+                    "success": False,
+                    "kernel_id": kid,
+                    "error": f'Kernel "{kid}" not found.',
+                }
+            self.kernels.setdefault(kid, [])
             if args.get("code") in self.exec_replies:
                 return self.exec_replies[args["code"]]
             return {
                 "success": True,
-                "kernel_id": args.get("kernel_id", "_default"),
+                "kernel_id": kid,
                 "stdout": "ran\n",
                 "stderr": "",
                 "result": None,
@@ -95,7 +136,7 @@ class FakeEngine:
                     "error": f"Syntax error at line {e.lineno}: {e.msg}",
                 }
             return {"ok": True}
-        return {"success": True, "kernel_id": args.get("kernel_id")}
+        return {"success": True, "kernel_id": kid}
 
 
 @pytest.fixture()
@@ -107,7 +148,7 @@ def engine(monkeypatch):
     monkeypatch.setattr(mcp_minion, "MCPManager", lambda *a, **k: fake)
     monkeypatch.delenv("MCP_SOLVER_DEV", raising=False)
     monkeypatch.delenv("MCP_SOLVER_STATS", raising=False)
-    monkeypatch.setattr(mcp_server, "_kernel_id", None)
+    monkeypatch.setattr(mcp_server, "_backend_packages", None)
     monkeypatch.setattr(mcp_server, "_episode", None)
     mcp_server._submissions.clear()
     return fake
@@ -271,36 +312,29 @@ async def test_toolkit_round_trip(engine):
         assert "fresh solving kernel" in text
         assert "submit_code" in text
         assert "z3" in text.lower()  # the template made it into the result
-        name, args = engine.calls[0]
-        assert name == "python_reset" and "kernel_id" not in args
-        assert args["packages"] == ["z3-solver"]
+        assert engine.calls[0] == (
+            "python_reset",
+            {"kernel_id": "solver", "packages": ["z3-solver"]},
+        )
 
         # Bare python_exec is routed to the solving kernel...
         result = await session.call_tool("python_exec", {"code": "print(1)"})
-        assert _engine_payload(result)["kernel_id"] == "k1"
-        assert engine.calls[-1][1]["kernel_id"] == "k1"
-        # ...and an explicit kernel_id overrides the routing.
+        assert _engine_payload(result)["kernel_id"] == "solver"
+        assert engine.calls[-1][1]["kernel_id"] == "solver"
+        # ...and an explicit kernel_id is passed through unchanged.
         await session.call_tool(
             "python_exec", {"code": "print(1)", "kernel_id": "other"}
         )
         assert engine.calls[-1][1]["kernel_id"] == "other"
 
-        # Re-selecting recycles the same kernel (state cleared).
+        # Re-selecting restarts the same kernel (state cleared), one reset.
+        n = len(engine.calls)
         result = await session.call_tool("select_backend", {"solver": "pysat"})
-        text = result.content[0].text
-        assert "recycled" in text
-        name, args = engine.calls[-1]
-        assert name == "python_reset" and args["kernel_id"] == "k1"
-        assert args["packages"] == ["python-sat[pb]"]
-
-        # A stale kernel falls back to a fresh one, and routing follows.
-        engine.kernels.clear()
-        result = await session.call_tool("select_backend", {"solver": "cpmpy"})
-        assert "fresh solving kernel" in result.content[0].text
-        name, args = engine.calls[-1]
-        assert name == "python_reset" and "kernel_id" not in args
-        await session.call_tool("python_exec", {"code": "print(1)"})
-        assert engine.calls[-1][1]["kernel_id"] == "k2"
+        assert "recycled" in result.content[0].text
+        assert engine.calls[n:] == [
+            ("python_reset", {"kernel_id": "solver", "packages": ["python-sat[pb]"]})
+        ]
+        assert engine.kernels["solver"] == ["python-sat[pb]"]
 
 
 async def test_select_backend_rejects_unknown_solver(engine):
@@ -318,7 +352,28 @@ async def test_select_backend_fails_closed_on_malformed_reset(engine):
         result = await session.call_tool("select_backend", {"solver": "z3"})
         assert result.is_error
         assert "kernel setup" in result.content[0].text
-    assert mcp_server._kernel_id is None
+        assert mcp_server._backend_packages is None
+        assert mcp_server._episode is None
+        # Nothing is selected, so calls without kernel_id are not routed.
+        await session.call_tool("python_exec", {"code": "1"})
+        assert "kernel_id" not in engine.calls[-1][1]
+
+
+async def test_failed_backend_switch_keeps_previous_backend(engine):
+    # A switch whose reset fails must not claim the new backend: the previous
+    # backend's packages (kept by the engine's crash record) and episode stay.
+    engine.unresolvable = {"z3-solver"}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "pysat"})
+        result = await session.call_tool("select_backend", {"solver": "z3"})
+        assert result.is_error
+        assert "kernel setup for 'z3' failed" in result.content[0].text
+        assert mcp_server._backend_packages == ["python-sat[pb]"]
+        assert mcp_server._episode["solver"] == "pysat"
+        assert engine.crashed["solver"] == ["python-sat[pb]"]
+        # A routed reset with packages still merges the previous backend's.
+        await session.call_tool("python_reset", {"packages": ["numpy"]})
+        assert engine.kernels["solver"] == ["python-sat[pb]", "numpy"]
 
 
 async def test_submit_code_round_trip(engine):
@@ -418,14 +473,178 @@ async def test_episode_stats_jsonl(engine, monkeypatch, tmp_path):
     assert second["solver"] == "pysat" and second["end"] == "shutdown"
 
 
-async def test_manual_reset_retargets_routing(engine):
+async def test_select_backend_after_crash_restarts_named_kernel(engine):
+    # After a crash the engine keeps a crash record for "solver"; the same
+    # single reset restarts it, the reply has created=false, and the note
+    # says recycled (as in the live run against rc1).
     async with _session() as session:
         await session.call_tool("select_backend", {"solver": "z3"})
-        # A manual python_reset creates a second kernel and takes over routing.
-        result = await session.call_tool("python_reset", {})
-        assert _engine_payload(result)["kernel_id"] == "k2"
+        engine.crash("solver")
+        result = await session.call_tool("python_exec", {"code": "print(1)"})
+        assert "crashed" in _engine_payload(result)["error"]
+        n = len(engine.calls)
+        result = await session.call_tool("select_backend", {"solver": "cpmpy"})
+        assert "recycled" in result.content[0].text
+        assert engine.calls[n:] == [
+            ("python_reset", {"kernel_id": "solver", "packages": ["cpmpy"]})
+        ]
+        assert engine.kernels["solver"] == ["cpmpy"]
+        assert "solver" not in engine.crashed
+
+
+async def test_select_backend_after_lost_kernel_reports_fresh(engine):
+    # An id without kernel and crash record is created: created=true.
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        engine.kernels.clear()
+        result = await session.call_tool("select_backend", {"solver": "cpmpy"})
+        assert "fresh solving kernel" in result.content[0].text
+
+
+async def test_calls_without_kernel_id_before_select_backend_unrouted(engine):
+    # Before any select_backend, calls without kernel_id reach the engine
+    # unchanged (its default kernel).
+    async with _session() as session:
+        for tool, args in (
+            ("python_exec", {"code": "1"}),
+            ("python_status", {}),
+            ("python_interrupt", {}),
+            ("python_reset", {}),
+        ):
+            await session.call_tool(tool, args)
+            assert "kernel_id" not in engine.calls[-1][1], tool
+        await session.call_tool("python_reset", {"packages": ["numpy"]})
+        assert engine.calls[-1][1] == {"packages": ["numpy"]}
+
+
+async def test_calls_without_kernel_id_routed_after_select_backend(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        for tool, args in (
+            ("python_exec", {"code": "1"}),
+            ("python_status", {}),
+            ("python_interrupt", {}),
+            ("python_reset", {}),
+            ("python_exec", {"code": "2", "kernel_id": ""}),
+        ):
+            await session.call_tool(tool, args)
+            assert engine.calls[-1][1]["kernel_id"] == "solver", tool
+        # A reset without packages forwards none: the engine keeps them.
+        reset_args = [a for n, a in engine.calls if n == "python_reset"][-1]
+        assert reset_args == {"kernel_id": "solver"}
+        assert engine.kernels["solver"] == ["z3-solver"]
+        assert set(engine.kernels) == {"solver"}  # no second kernel
+
+
+async def test_explicit_kernel_id_passes_through_and_keeps_routing(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool(
+            "python_reset", {"kernel_id": "scratch", "packages": ["numpy"]}
+        )
+        payload = _engine_payload(result)
+        assert payload["kernel_id"] == "scratch" and payload["created"] is True
+        assert engine.calls[-1][1] == {"kernel_id": "scratch", "packages": ["numpy"]}
+        # The engine's last sentence is true only for the engine itself; the
+        # server appends where calls without kernel_id go behind it.
+        assert payload["message"].startswith(
+            'Session started. Created kernel "scratch".'
+            ' Pass kernel_id="scratch" on every python_exec, python_status and'
+            " python_interrupt call; calls without kernel_id use the default"
+            " kernel. "
+        )
+        assert payload["message"].endswith(ROUTING_NOTE.format(kid="scratch"))
+        # Also on a restart of that kernel (created false).
+        result = await session.call_tool("python_reset", {"kernel_id": "scratch"})
+        payload = _engine_payload(result)
+        assert payload["created"] is False
+        assert payload["message"].endswith(ROUTING_NOTE.format(kid="scratch"))
+        for tool, args in (
+            ("python_status", {"kernel_id": "scratch"}),
+            ("python_interrupt", {"kernel_id": "_default"}),
+        ):
+            await session.call_tool(tool, args)
+            assert engine.calls[-1][1]["kernel_id"] == args["kernel_id"]
+        # Routing of calls without kernel_id is unchanged.
         await session.call_tool("python_exec", {"code": "print(1)"})
-        assert engine.calls[-1][1]["kernel_id"] == "k2"
+        assert engine.calls[-1][1]["kernel_id"] == "solver"
+        assert engine.kernels["scratch"] == ["numpy"]
+
+
+ROUTING_NOTE = (
+    "Through mcp-solver-serve, calls without kernel_id go to the solving kernel"
+    ' "solver"; pass kernel_id="{kid}" to use this kernel.'
+)
+
+
+async def test_explicit_reset_before_select_backend_unchanged(engine):
+    async with _session() as session:
+        result = await session.call_tool("python_reset", {"kernel_id": "scratch"})
+        # Byte for byte what the engine sent: no routing note before a
+        # backend is selected.
+        message = (
+            'Session started. Created kernel "scratch". Pass kernel_id="scratch"'
+            " on every python_exec, python_status and python_interrupt call;"
+            " calls without kernel_id use the default kernel."
+        )
+        assert result.content[0].text == json.dumps(
+            {
+                "success": True,
+                "kernel_id": "scratch",
+                "message": message,
+                "created": True,
+            }
+        )
+
+
+def test_routing_note_passes_other_replies_through():
+    for text in ("not json", '{"success": false, "message": "x"}', '{"success": true}'):
+        assert mcp_server._with_routing_note(text, "k") == text
+
+
+async def test_explicit_solver_reset_keeps_backend_packages(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "pysat"})
+        result = await session.call_tool(
+            "python_reset", {"kernel_id": "solver", "packages": ["numpy"]}
+        )
+        assert engine.calls[-1][1] == {
+            "kernel_id": "solver",
+            "packages": ["python-sat[pb]", "numpy"],
+        }
+        assert engine.kernels["solver"] == ["python-sat[pb]", "numpy"]
+        # The solving kernel's reply carries no routing note.
+        assert "mcp-solver-serve" not in result.content[0].text
+
+
+async def test_routed_reset_with_packages_keeps_backend_packages(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "pysat"})
+        await session.call_tool(
+            "python_reset", {"packages": ["numpy", "python-sat[pb]", "numpy"]}
+        )
+        assert engine.calls[-1][1] == {
+            "kernel_id": "solver",
+            "packages": ["python-sat[pb]", "numpy"],
+        }
+        assert engine.kernels["solver"] == ["python-sat[pb]", "numpy"]
+        # A later routed reset with other packages replaces the host's extras,
+        # never the backend's.
+        await session.call_tool("python_reset", {"packages": ["networkx"]})
+        assert engine.kernels["solver"] == ["python-sat[pb]", "networkx"]
+        # An empty list counts as no packages.
+        await session.call_tool("python_reset", {"packages": []})
+        assert engine.calls[-1][1] == {"kernel_id": "solver"}
+        # A backend switch installs exactly the new backend's packages.
+        await session.call_tool("select_backend", {"solver": "z3"})
+        assert engine.kernels["solver"] == ["z3-solver"]
+        await session.call_tool("python_reset", {"packages": ["numpy"]})
+        assert engine.kernels["solver"] == ["z3-solver", "numpy"]
+
+
+def test_merge_packages():
+    assert mcp_server._merge_packages(["a", "b"], ["b", "c", "c"]) == ["a", "b", "c"]
+    assert mcp_server._merge_packages(["a"], []) == ["a"]
 
 
 # --- engine replies pass through; reset is not blocked by a running exec ----
@@ -437,7 +656,7 @@ async def test_refused_exec_reply_reaches_client_unchanged(engine):
     # the host as the engine wrote it.
     refused = {
         "success": False,
-        "kernel_id": "k1",
+        "kernel_id": "solver",
         "error": "Kernel busy with earlier code; this code was not executed.",
         "executed": False,
         "kernel_busy": True,
@@ -461,9 +680,7 @@ async def test_reset_not_blocked_by_running_exec(engine):
         while ("start", "long()") not in engine.events:
             await asyncio.sleep(0.01)
         try:
-            await asyncio.wait_for(
-                session.call_tool("python_reset", {"kernel_id": "k1"}), 2
-            )
+            await asyncio.wait_for(session.call_tool("python_reset", {}), 2)
             await asyncio.wait_for(session.call_tool("python_interrupt", {}), 2)
             assert not running.done()
             assert ("end", "long()") not in engine.events
@@ -472,6 +689,7 @@ async def test_reset_not_blocked_by_running_exec(engine):
             await running
     names = [name for name, _ in engine.calls]
     assert names[-3:] == ["python_exec", "python_reset", "python_interrupt"]
+    assert all(args["kernel_id"] == "solver" for _, args in engine.calls[-3:])
 
 
 async def test_resource_error_text_reaches_client(engine):

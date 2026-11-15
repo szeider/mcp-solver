@@ -8,13 +8,18 @@ injected into the kernel, the modeling instructions (templates), and
 the compile-gated ``submit_code`` finish line. It calls no LLM and needs no
 API key.
 
-Kernel model: ``select_backend`` sets up ONE solving kernel and recycles it
-(state cleared, packages swapped) on every later call, so solving problem
-after problem never accumulates kernel processes. Bare ``python_exec``/
-``python_interrupt`` calls are routed to that kernel automatically; an
-explicit ``kernel_id`` overrides the routing. A manual ``python_reset``
-without ``kernel_id`` creates an additional, independent kernel (which then
-becomes the routing target) — those live until the server exits.
+Kernel model: the solving kernel has the fixed engine kernel id
+``"solver"`` (:data:`SOLVER_KERNEL`). Every ``select_backend`` call does one
+``python_reset(kernel_id="solver", packages=<backend packages>)``, which
+creates the kernel on first use and otherwise restarts it (state cleared,
+packages swapped, also after a crash), so solving problem after problem
+never accumulates kernel processes. Once a backend is selected,
+``python_exec``, ``python_status``, ``python_interrupt`` and ``python_reset``
+calls without ``kernel_id`` act on that kernel; a routed ``python_reset``
+with packages keeps the backend's solver libraries. An explicit
+``kernel_id`` is passed to the engine unchanged and never changes the
+routing. Before any ``select_backend``, calls without ``kernel_id`` reach the
+engine unchanged and act on its default kernel ``_default``.
 
 Successive revelation to the host:
 - Tier 0: tool descriptions — enough to start (call ``select_backend`` first).
@@ -111,12 +116,17 @@ rather than concluding the model is wrong.
 # Engine connection (one per server process; kernels persist across calls).
 _engine = None
 
-# The solving kernel: created by the first select_backend, recycled by later
-# ones. Bare python_exec/python_interrupt calls are routed here; a manual
-# python_reset that creates or resets a kernel retargets the routing.
-# The server dispatches tool calls concurrently, so every read-await-write of
-# _kernel_id happens under this lock.
-_kernel_id: str | None = None
+# The solving kernel's engine id. select_backend creates or restarts it with
+# python_reset; calls without kernel_id are routed to it once a backend is
+# selected.
+SOLVER_KERNEL = "solver"
+
+# Solver packages of the selected backend; None until the first successful
+# select_backend (no routing before that). The server dispatches tool calls
+# concurrently, so select_backend and a routed python_reset run under this
+# lock (python_exec does not take it, so a reset is never blocked by a
+# running exec).
+_backend_packages: list[str] | None = None
 _kernel_lock = asyncio.Lock()
 
 # Server-side execution cap of the engine's python_exec (seconds); clamp
@@ -222,7 +232,7 @@ def _dev_path() -> str | None:
 @asynccontextmanager
 async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     """Hold one engine (ipython_mcp) connection for the server's lifetime."""
-    global _engine, _kernel_id
+    global _engine, _backend_packages
     manager = await engine.start_engine()
     _engine = manager
     try:
@@ -230,7 +240,7 @@ async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     finally:
         _episode_close("shutdown")
         _engine = None
-        _kernel_id = None
+        _backend_packages = None
         await manager.__aexit__(None, None, None)
 
 
@@ -260,6 +270,19 @@ async def _engine_call(name: str, arguments: dict) -> str:
     if outcome.is_error:
         raise ToolError(outcome.text or f"engine tool {name!r} failed")
     return outcome.text
+
+
+def _route(kernel_id: str | None) -> str | None:
+    """The kernel id to send: an explicit id unchanged, else the solving
+    kernel once a backend is selected, else None (the engine's default)."""
+    if kernel_id:
+        return kernel_id
+    return SOLVER_KERNEL if _backend_packages is not None else None
+
+
+def _merge_packages(backend: list[str], extra: list[str]) -> list[str]:
+    """The backend's packages first, then *extra*, without duplicates."""
+    return list(dict.fromkeys([*backend, *extra]))
 
 
 def _parse_engine_json(text: str) -> dict:
@@ -300,7 +323,7 @@ def submission_resource(submission_id: str) -> str:
 
 @mcp.tool(description=SELECT_BACKEND_DESCRIPTION, structured_output=False)
 async def select_backend(solver: str) -> str:
-    global _kernel_id
+    global _backend_packages
     if solver not in SOLVERS:
         raise ToolError(f"unknown solver {solver!r}; expected one of {SOLVERS}")
 
@@ -310,28 +333,21 @@ async def select_backend(solver: str) -> str:
         raise ToolError(str(e)) from None
     packages = build_with_packages(solver)
 
-    # Recycle the existing solving kernel; fresh kernel on first call or
-    # when the stored one is gone (engine reports success=false for it).
-    recycled = False
-    parsed: dict = {}
+    # One reset creates the solving kernel (first use) or restarts it
+    # (backend switch, new problem, after a crash); "created" tells which.
     async with _kernel_lock:
-        if _kernel_id is not None:
-            parsed = _parse_engine_json(
-                await _engine_call(
-                    "python_reset", {"packages": packages, "kernel_id": _kernel_id}
-                )
+        parsed = _parse_engine_json(
+            await _engine_call(
+                "python_reset", {"kernel_id": SOLVER_KERNEL, "packages": packages}
             )
-            recycled = bool(parsed.get("success"))
-        if not recycled:
-            parsed = _parse_engine_json(
-                await _engine_call("python_reset", {"packages": packages})
+        )
+        if not parsed.get("success"):
+            raise ToolError(
+                f"kernel setup for {solver!r} failed:"
+                f" {parsed.get('error') or 'unknown engine error'}"
             )
-            if not parsed.get("success"):
-                raise ToolError(
-                    f"kernel setup for {solver!r} failed:"
-                    f" {parsed.get('error') or 'unknown engine error'}"
-                )
-        _kernel_id = parsed.get("kernel_id") or _kernel_id
+        recycled = parsed.get("created") is False
+        _backend_packages = packages
         _episode_open(solver)
         _episode_sync()
 
@@ -341,8 +357,10 @@ async def select_backend(solver: str) -> str:
         else "A fresh solving kernel is ready."
     )
     kernel_note = (
-        f"{state_note} Packages: {', '.join(packages)}. python_exec runs in"
-        " this kernel automatically."
+        f"{state_note} Kernel id: {SOLVER_KERNEL}. Packages:"
+        f" {', '.join(packages)}. python_exec,"
+        " python_status, python_interrupt and python_reset without kernel_id"
+        " act on this kernel."
         " Finish with submit_code(final verified self-contained program)."
     )
     template = get_template(solver, root=dev)
@@ -358,15 +376,16 @@ async def python_exec(
 ) -> str:
     """Execute Python code in the persistent solving kernel.
 
-    Runs in the kernel set up by select_backend unless kernel_id overrides
-    it. State persists across calls (variables, imports). Raise timeout
-    (seconds, max 300) for long solver runs.
+    Without kernel_id it runs in the kernel set up by select_backend; an
+    explicit kernel_id runs it in that kernel instead. State persists across
+    calls (variables, imports). Raise timeout (seconds, max 300) for long
+    solver runs.
     """
     _episode_count("python_exec")
     if not math.isfinite(timeout):
         timeout = 30.0
     args: dict = {"code": code, "timeout": max(1.0, min(timeout, _MAX_EXEC_TIMEOUT))}
-    target = kernel_id or _kernel_id
+    target = _route(kernel_id)
     if target:
         args["kernel_id"] = target
     text = await _engine_call("python_exec", args)
@@ -380,32 +399,66 @@ async def python_exec(
 async def python_reset(
     packages: list[str] | None = None, kernel_id: str | None = None
 ) -> str:
-    """Create a new kernel (no kernel_id) or reset one (with kernel_id).
+    """Restart the solving kernel: state cleared, solver packages kept.
 
-    Prefer select_backend, which installs the right solver packages for you.
-    The kernel created or reset here becomes the target of bare python_exec
-    calls.
+    Without kernel_id (or with kernel_id="solver") it acts on the kernel set
+    up by select_backend: a non-empty packages list is installed next to the
+    backend's solver libraries (replacing packages added by an earlier
+    reset); without it the current packages stay. Another kernel_id restarts
+    that kernel, or creates it under that name, with the packages as given;
+    it does not change which kernel calls without kernel_id use. To switch
+    backends, call select_backend instead.
     """
-    global _kernel_id
     _episode_count("python_reset")
-    args = {"packages": packages or []}
+    if _route(kernel_id) == SOLVER_KERNEL:
+        async with _kernel_lock:
+            backend = _backend_packages
+            if backend is not None:
+                args: dict = {"kernel_id": SOLVER_KERNEL}
+                if packages:
+                    args["packages"] = _merge_packages(backend, packages)
+                return await _engine_call("python_reset", args)
+    args = {}
     if kernel_id:
         args["kernel_id"] = kernel_id
-    async with _kernel_lock:
-        text = await _engine_call("python_reset", args)
-        parsed = _parse_engine_json(text)
-        if parsed.get("success") and parsed.get("kernel_id"):
-            _kernel_id = str(parsed["kernel_id"])
+    if packages:
+        args["packages"] = packages
+    text = await _engine_call("python_reset", args)
+    if kernel_id and _backend_packages is not None:
+        text = _with_routing_note(text, kernel_id)
     return text
+
+
+def _with_routing_note(text: str, kernel_id: str) -> str:
+    """Append the server's routing to a successful reset of another kernel.
+
+    The engine's message says that calls without kernel_id use its default
+    kernel; behind this server they go to the solving kernel once a backend
+    is selected. Other replies are returned unchanged.
+    """
+    parsed = _parse_engine_json(text)
+    message = parsed.get("message")
+    if parsed.get("success") is not True or not isinstance(message, str):
+        return text
+    parsed["message"] = (
+        f"{message} Through mcp-solver-serve, calls without kernel_id go to the"
+        f' solving kernel "{SOLVER_KERNEL}"; pass kernel_id="{kernel_id}" to use'
+        " this kernel."
+    )
+    return json.dumps(parsed)
 
 
 @mcp.tool(structured_output=False)
 async def python_status(kernel_id: str | None = None) -> str:
-    """Check kernel state: active kernels, defined variables, packages."""
+    """Check kernel state: active kernels, defined variables, packages.
+
+    Without kernel_id it reports the kernel set up by select_backend.
+    """
     _episode_count("python_status")
     args: dict = {}
-    if kernel_id:
-        args["kernel_id"] = kernel_id
+    target = _route(kernel_id)
+    if target:
+        args["kernel_id"] = target
     return await _engine_call("python_status", args)
 
 
@@ -414,7 +467,7 @@ async def python_interrupt(kernel_id: str | None = None) -> str:
     """Interrupt running code in the solving kernel (state is preserved)."""
     _episode_count("python_interrupt")
     args: dict = {}
-    target = kernel_id or _kernel_id
+    target = _route(kernel_id)
     if target:
         args["kernel_id"] = target
     return await _engine_call("python_interrupt", args)

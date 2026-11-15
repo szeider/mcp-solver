@@ -28,8 +28,11 @@ no API key:
   backend. Calling it again recycles the kernel for the next problem.
 - **Kernel tools** (`python_exec`, `python_reset`, `python_status`,
   `python_interrupt`) let the host write, run, and verify a real solver
-  program; bare `python_exec` calls are routed to the solving kernel
-  automatically.
+  program. After `select_backend`, calls without `kernel_id` act on the
+  solving kernel (engine kernel id `solver`). A `python_reset` of the
+  solving kernel (without `kernel_id` or with `kernel_id="solver"`) with
+  `packages` keeps the backend's solver libraries; another `kernel_id` is
+  passed to the engine unchanged, with the packages as given.
 - **`submit_code(code)`** is the finish line: the final self-contained
   program is syntax-checked and, on success, stored and linked back as an
   MCP resource (`mcp-solver://submissions/{id}`), with the verdict as

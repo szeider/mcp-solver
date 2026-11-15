@@ -876,3 +876,115 @@ def test_base_install_without_agent_extra(tmp_path):
     assert "SOLVE-RC 1" in proc.stdout
     assert "the agent layer is not installed" in proc.stderr
     assert "[agent]" in proc.stderr
+
+
+# --- CLI path under engine >=4: minion and the default kernel -----------------
+
+
+async def test_minion_continues_after_default_kernel_restart():
+    # Engine >=4 (rule X3): after the default kernel crashed, the next
+    # python_exec restarts it with its packages, does not run the code and
+    # replies with success false, executed false, kernel_restarted true. That
+    # reply is a normal result: minion must hand it to the model as plain
+    # text (no error prefix) and go on, and the model's resend then runs.
+    from types import SimpleNamespace
+
+    from mcp_minion import Agent, AgentConfig, ToolOutcome
+
+    restarted = {
+        "success": False,
+        "kernel_id": "_default",
+        "error": "The default kernel had crashed and was started again with"
+        " packages [python-sat[pb]]. Earlier variables, imports and definitions"
+        " are gone. This code was not executed; send it again.",
+        "executed": False,
+        "kernel_restarted": True,
+        "kernel_busy": False,
+        "timed_out": False,
+    }
+    ran = {"success": True, "kernel_id": "_default", "stdout": "1\n"}
+
+    class Engine:
+        def __init__(self):
+            self.calls = []
+            self.execs = [restarted, ran]
+
+        def has_tool(self, name):
+            return name in {"python_exec", "python_reset"}
+
+        def get_tools(self):
+            return []
+
+        def get_resources(self):
+            return []
+
+        def get_instructions(self):
+            return {}
+
+        def get_openai_tools(self):
+            return [
+                {"type": "function", "function": {"name": n, "parameters": {}}}
+                for n in ("python_exec", "python_reset")
+            ]
+
+        async def call_tool(self, name, arguments):
+            self.calls.append((name, dict(arguments)))
+            if name == "python_reset":
+                reply = {"success": True, "kernel_id": "_default", "created": True}
+            else:
+                reply = self.execs.pop(0)
+            return ToolOutcome(text=json.dumps(reply))
+
+    def response(content=None, code=None):
+        calls = None
+        if code is not None:
+            calls = [
+                SimpleNamespace(
+                    id="c1",
+                    function=SimpleNamespace(
+                        name="python_exec", arguments=json.dumps({"code": code})
+                    ),
+                )
+            ]
+        return SimpleNamespace(
+            id="r",
+            model="fake",
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=content, tool_calls=calls),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=1, completion_tokens=1, total_tokens=2, cost=None
+            ),
+        )
+
+    replies = [response(code="print(1)"), response(code="print(1)"), response("done")]
+    requests = []
+
+    async def create(**kwargs):
+        requests.append(list(kwargs["messages"]))
+        return replies.pop(0)
+
+    fake = Engine()
+    agent = Agent(
+        api_key="k",
+        tools=None,
+        config=AgentConfig(packages=["python-sat[pb]"], max_steps=5),
+        mcp_manager=fake,
+    )
+    agent.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    result = await agent.run_async("solve")
+    assert result.answer == "done"
+    # Kernel setup: one id-less reset; the engine names the default kernel,
+    # which minion then passes explicitly on every kernel call.
+    assert fake.calls[0] == ("python_reset", {"packages": ["python-sat[pb]"]})
+    assert [args.get("kernel_id") for _, args in fake.calls[1:]] == ["_default"] * 2
+    first = result.steps[0]["tool_calls"][0]
+    assert first["is_error"] is False
+    assert json.loads(first["result"]) == restarted
+    assert requests[1][-1]["content"] == json.dumps(restarted)  # no ERROR: prefix
+    assert result.steps[1]["tool_calls"][0]["result"] == json.dumps(ran)

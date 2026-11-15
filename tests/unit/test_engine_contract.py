@@ -99,9 +99,29 @@ async def test_reset_without_packages(kernel_id):
     assert isinstance(kernel_id, str)
 
 
-async def test_reset_unknown_kernel_fails(engine):
-    payload = await _call(engine, "python_reset", {"kernel_id": "no-such-kernel"})
+async def test_reset_without_kernel_id_targets_default(kernel_id):
+    # Engine >=4: an id-less reset acts on the default kernel.
+    assert kernel_id == "_default"
+
+
+async def test_reset_unknown_kernel_creates_it(engine):
+    # mcp-solver-serve relies on this: select_backend creates or restarts
+    # the solving kernel with one python_reset(kernel_id="solver").
+    first = await _call(engine, "python_reset", {"kernel_id": "contract-k"})
+    assert first["success"] is True, first
+    assert first["kernel_id"] == "contract-k"
+    assert first["created"] is True
+    second = await _call(engine, "python_reset", {"kernel_id": "contract-k"})
+    assert second["success"] is True, second
+    assert second["created"] is False
+
+
+async def test_exec_unknown_kernel_fails(engine):
+    payload = await _call(
+        engine, "python_exec", {"code": "print(1)", "kernel_id": "no-such-kernel"}
+    )
     assert payload["success"] is False
+    assert 'Kernel "no-such-kernel" not found' in payload["error"]
 
 
 async def test_exec_success_shape(engine, kernel_id):

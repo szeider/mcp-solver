@@ -1,5 +1,30 @@
 # Changelog
 
+### [4.5.0] - unreleased
+
+- **Behavior Change:** Requires agentic-python-coder >=4,<5 (its new
+  kernel-id rules; the CLI and the server stop at startup with a message
+  naming the required version when an older engine is installed).
+- **Behavior Change:** `mcp-solver-serve` gives the solving kernel the fixed
+  engine kernel id `solver`. Each `select_backend` call creates it (first
+  use) or restarts it (new problem, backend switch, after a crash) with one
+  `python_reset`; the note in its result says whether the kernel is fresh or
+  was recycled. Formerly the server used an engine-assigned id and created
+  a new kernel when that id was gone.
+- **Behavior Change:** After `select_backend`, `python_exec`,
+  `python_status`, `python_interrupt` and `python_reset` calls without
+  `kernel_id` act on the solving kernel. Formerly `python_status` reported
+  the engine's default kernel, and a `python_reset` without `kernel_id`
+  created an additional kernel that then received the calls without
+  `kernel_id`. An explicit `kernel_id` is passed to the engine unchanged and
+  no longer changes where calls without `kernel_id` go. Before the first
+  `select_backend`, calls without `kernel_id` act on the engine's default
+  kernel, as before.
+- **Fix:** A `python_reset` without `kernel_id` that carries `packages`
+  keeps the backend's solver libraries: the server installs the backend's
+  packages first, then the host's, without duplicates (formerly the host's
+  list replaced them). Without `packages` the kernel keeps its packages.
+
 ### [4.4.0] - 2026-11-14
 
 - **Major Change:** The helper library `mcp_solver.helpers` (modules for

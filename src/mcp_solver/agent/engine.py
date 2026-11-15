@@ -26,7 +26,7 @@ import mcp_solver
 
 # Minimum agentic-python-coder release; must equal the pin in the [agent]
 # extra of pyproject.toml (a unit test checks this).
-MIN_ENGINE_VERSION = "3.6.0"
+MIN_ENGINE_VERSION = "4.0.0rc1"
 
 # Name of the engine server in the MCPManager config.
 ENGINE_SERVER_NAME = "ipython"
