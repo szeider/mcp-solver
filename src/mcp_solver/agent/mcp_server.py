@@ -41,6 +41,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import tempfile
 import time
@@ -77,8 +78,10 @@ Backends:
 Unsure which backend fits? Read the resource mcp-solver://guide first.
 
 Then iterate with python_exec (write, run, verify against the problem
-statement), and finish by calling submit_code with the final, verified,
-self-contained program. UNSAT / "no solution exists" is a valid outcome.
+statement). Before calling submit_code, run the complete program (solve,
+verify, print) with python_exec and check its output; submit_code is for the
+finished, tested program, not for a first try. UNSAT / "no solution exists"
+is a valid outcome.
 """
 
 GUIDE = """\
@@ -90,8 +93,9 @@ right solver library and returns modeling instructions; (2) iterate
 solver, verify the result independently against the problem statement;
 (3) finish with `submit_code` (the final self-contained program in the
 template's shape: `solve()`, `verify(solution)`, a `__main__` guard that
-verifies before printing; the server runs it on its own and returns its
-output, and rejects it if verify() fails).
+verifies before printing). Before calling submit_code, run the complete
+program (solve, verify, print) with python_exec and check its output;
+submit_code is for the finished, tested program, not for a first try.
 
 Choosing a backend:
 - **pysat** — pure Boolean structure: placements, colorings, covers,
@@ -155,8 +159,8 @@ _STDERR_CAP = 3_000
 
 RUN_OK_MESSAGE = (
     "The server ran the program on its own in a clean environment with the"
-    ' backend\'s packages; its output is in "stdout", so there is no need to'
-    " run it anywhere else."
+    ' backend\'s packages; its output is in "stdout" and is the result, so'
+    " there is no need to run the program again outside these tools."
 )
 NOT_EXECUTED_MESSAGE = "Compile check only, not executed: no backend selected."
 
@@ -179,6 +183,9 @@ def _episode_open(solver: str) -> None:
         "exec_failures": 0,
         "submit_attempts": 0,
         "submit_ok": 0,
+        # python_exec calls before the first submit_code (None until then):
+        # 0 means the host submitted without running anything in the kernel.
+        "exec_before_first_submit": None,
         "code_bytes": None,
     }
 
@@ -239,6 +246,7 @@ def _episode_snapshot() -> dict | None:
         "exec_calls": _episode["tool_calls"].get("python_exec", 0),
         "exec_failures": _episode["exec_failures"],
         "submit_attempts": _episode["submit_attempts"],
+        "exec_before_first_submit": _episode["exec_before_first_submit"],
         "wall_seconds": round(time.monotonic() - _episode["t0"], 1),
     }
 
@@ -385,10 +393,10 @@ async def select_backend(solver: str) -> str:
         f"{state_note} Kernel id: {SOLVER_KERNEL}. Packages:"
         f" {', '.join(packages)}. python_exec,"
         " python_status, python_interrupt and python_reset without kernel_id"
-        " act on this kernel."
-        " Finish with submit_code(final self-contained program in the"
-        " template's shape: solve(), verify(solution), __main__ guard);"
-        " the server then runs it on its own and returns its output."
+        " act on this kernel. Before calling submit_code, run the complete"
+        " program (solve, verify, print) with python_exec and check its"
+        " output; submit_code is for the finished, tested program (the"
+        " template's shape, self-contained), not for a first try."
     )
     template = get_template(solver, root=dev)
     # Plain text on purpose: the template IS the payload, and clients that
@@ -528,31 +536,154 @@ def _tail(text: str | None, limit: int) -> tuple[str, bool]:
     return (text[-limit:], True) if len(text) > limit else (text, False)
 
 
-def _run_failure(run: ProgramRun) -> str | None:
-    """Why a standalone run failed (a clause), or None when it succeeded."""
-    if run.timed_out:
-        return f"it did not finish within {STANDALONE_TIMEOUT} s and was killed"
-    if run.exit_code != 0:
-        return f"exit code {run.exit_code}"
-    if not (run.stdout or "").strip():
-        return "it printed nothing"
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# clingo's own error lines, e.g. "<block>:3:5-9: error: syntax error, ..."
+_CLINGO_ERROR = re.compile(r"^\S.*?:\d+:\d+(?:-[\d:]+)?: error: .+$")
+_EXC_LINE = re.compile(r"^([A-Za-z_][\w.]*)(?::\s|$)")
+_FIX = "Fix it with python_exec and submit again."
+_MAX_EXC_LINE = 500
+
+
+def _final_exception(stderr: str) -> tuple[str, str, bool] | None:
+    """The propagated exception of a Python traceback in *stderr*.
+
+    Returns (exception type without module, its line, whether a frame of the
+    traceback is in a function named verify), or None without a traceback.
+    The last "Traceback" header is the exception that ended the program
+    (chained exceptions print theirs first); its exception line is the first
+    unindented line after the indented frames.
+    """
+    lines = _ANSI.sub("", stderr).splitlines()
+    starts = [i for i, ln in enumerate(lines) if ln.startswith("Traceback (most")]
+    if not starts:
+        return None
+    in_verify = False
+    for ln in lines[starts[-1] + 1 :]:
+        if not ln.strip():
+            continue
+        if ln[0].isspace():
+            frame = ln.strip()
+            if frame.startswith("File ") and frame.endswith(", in verify"):
+                in_verify = True
+            continue
+        match = _EXC_LINE.match(ln)
+        if not match:
+            return None
+        line = ln.strip()
+        if len(line) > _MAX_EXC_LINE:
+            line = line[:_MAX_EXC_LINE] + " ..."
+        return match.group(1).rsplit(".", 1)[-1], line, in_verify
     return None
+
+
+def _quoted_name(line: str) -> str | None:
+    """The first quoted name in an exception line ('x' in "name 'x' ...")."""
+    match = re.search(r"'([^']+)'", line)
+    return match.group(1) if match else None
+
+
+def _sentence(text: str) -> str:
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def _run_failure(run: ProgramRun, packages: list[str]) -> str | None:
+    """The rejection text for a failed standalone run, None when it succeeded.
+
+    Leads with what happened (for an exception its last traceback line),
+    then one sentence for that kind of failure; a cause is named only where
+    the failure shows it (kernel-session state only for NameError and
+    import failures).
+    """
+    if run.timed_out:
+        return (
+            f"Timed out: the program did not finish within {STANDALONE_TIMEOUT} s"
+            " when the server ran it on its own, and was killed. Run the"
+            " complete program with python_exec (raise its timeout) to find"
+            " where the time goes. " + _FIX
+        )
+    stderr = run.stderr or ""
+    if run.exit_code == 0:
+        if (run.stdout or "").strip():
+            return None
+        return (
+            "No output: the program exited with code 0 but printed nothing"
+            " when the server ran it on its own. It must print the solution"
+            " JSON. " + _FIX
+        )
+    exc = _final_exception(stderr)
+    if exc is None:
+        last = next((ln for ln in reversed(stderr.splitlines()) if ln.strip()), "")
+        what = (
+            f"Exit code {run.exit_code}"
+            if run.exit_code is not None
+            else "The run could not start"
+        )
+        detail = f" Last line of stderr: {last.strip()}" if last else ""
+        return f"{what} when the server ran the program on its own.{detail} " + _FIX
+    kind, line, in_verify = exc
+    head = _sentence(line)
+    if kind == "AssertionError":
+        why = (
+            "The program's own verify() rejected its solution, so the solution"
+            " or the check is wrong."
+            if in_verify
+            else "An assert in the program failed, so the computed result or"
+            " the assertion is wrong."
+        )
+    elif kind == "NameError":
+        name = _quoted_name(line)
+        why = (
+            f"The program uses {name!r} without defining or importing it: a typo,"
+            " or a variable, function or import from the kernel session, which"
+            " a submitted program cannot rely on."
+            if name
+            else "The program uses a name without defining or importing it."
+        )
+    elif kind in ("ModuleNotFoundError", "ImportError"):
+        name = _quoted_name(line)
+        what = repr(name) if name else "it"
+        why = (
+            f"The run has only the packages {', '.join(packages)}, without"
+            f" {what}; if the kernel session had it, add its package with"
+            " python_reset(packages=[...]), or do without it."
+        )
+    else:
+        errors = [ln.strip() for ln in stderr.splitlines() if _CLINGO_ERROR.match(ln)]
+        if errors:
+            shown = "; ".join(errors[:5]) + ("; ..." if len(errors) > 5 else "")
+            head += f" Clingo reported: {_sentence(shown)}"
+            why = (
+                "Clingo rejected the ASP program text; its positions are"
+                " line:column in that text, not in the Python file."
+            )
+        else:
+            why = (
+                f"The program raised {kind} when the server ran it on its own;"
+                ' the traceback is in "stderr".'
+            )
+    return f"{head} {why} {_FIX}"
 
 
 @mcp.tool()
 async def submit_code(code: str) -> CallToolResult:
     """Submit the final, verified, self-contained solver program.
 
-    Call when the program is complete and its verify() passes; if the reply
-    rejects it, fix it and call again.
+    Before calling submit_code, run the complete program (solve, verify,
+    print) with python_exec and check its output; submit_code is for the
+    finished, tested program, not for a first try.
     The server checks that it compiles and, once a backend is selected,
-    runs it on its own in a clean environment (no kernel state) and returns
-    its output; a program that fails there is rejected with the reason.
+    runs it once more on its own in a clean environment (no kernel state)
+    and returns its output; a program that fails there is rejected with the
+    reason and may be fixed and submitted again.
     Accepted programs are stored and linked as a resource (the last 50).
     """
     # Count the attempt BEFORE _episode_count syncs the .open snapshot, so a
     # failed submission (which never syncs again) is not lost on a host kill.
     if _episode is not None:
+        if _episode["submit_attempts"] == 0:
+            _episode["exec_before_first_submit"] = _episode["tool_calls"].get(
+                "python_exec", 0
+            )
         _episode["submit_attempts"] += 1
     _episode_count("submit_code")
     result_text = await _engine_call("submit_code", {"code": code})
@@ -573,7 +704,7 @@ async def submit_code(code: str) -> CallToolResult:
         run = await asyncio.to_thread(_run_standalone, code, list(packages))
         stdout, out_cut = _tail(run.stdout, _STDOUT_CAP)
         notes = [f"stdout cut to its last {_STDOUT_CAP} characters."] if out_cut else []
-        failure = _run_failure(run)
+        failure = _run_failure(run, list(packages))
         if failure is None:
             message = reply.get("message")
             reply.update(
@@ -594,13 +725,7 @@ async def submit_code(code: str) -> CallToolResult:
                 "timed_out": run.timed_out,
                 "stdout": stdout,
                 "stderr": stderr,
-                "error": (
-                    "The program compiles but failed when run on its own in a"
-                    f" clean environment ({failure}); the usual cause is that it"
-                    " relies on variables or imports from the kernel session,"
-                    " but a submitted program must be self-contained: fix it"
-                    " with python_exec and submit again."
-                ),
+                "error": failure,
             }
         if notes:
             reply["note"] = " ".join(notes)

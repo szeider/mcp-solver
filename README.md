@@ -38,7 +38,8 @@ no API key:
   on its own in a clean, isolated environment with the backend's packages
   (no kernel state, the same way the CLI re-executes it, 240 s limit). Its
   output comes back in the reply. A program that fails there (nonzero exit,
-  timeout, no output) is rejected; an accepted one is stored and linked
+  timeout, no output) is rejected with the failure (the exception's last
+  traceback line, or the timeout); an accepted one is stored and linked
   back as an MCP resource (`mcp-solver://submissions/{id}`), with the
   verdict as structured content. "Verified" thus means: the host checked
   the solution against the problem (the templates require every program
@@ -51,7 +52,8 @@ no API key:
   browsable without selecting).
 - **Statistics** (optional): set `MCP_SOLVER_STATS=/path/to/stats.jsonl` in
   the server's `env` to log one JSON line per solving episode — tool-call
-  counts, execution failures, submissions, wall time. Host tokens are
+  counts, execution failures, submissions, `python_exec` calls before the
+  first submission, wall time. Host tokens are
   invisible to the server by protocol design; tool usage is the comparable
   metric across hosts. (`submit_code` results also carry a compact stats
   snapshot as structured content; the CLI path reports tokens and actual

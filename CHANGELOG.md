@@ -59,6 +59,28 @@
 - **Change:** `submit_code` no longer warns when a program defines no
   `verify()` (a notice added earlier in this cycle); its description now
   says a rejected submission may be fixed and submitted again.
+- **Change:** A rejected `submit_code` reply's `error` reports the actual
+  failure of the standalone run: it starts with the last line of the
+  traceback (or the timeout, or "No output"), adds clingo's `error:` lines
+  for an ASP parse error, and gives one sentence for that kind of failure
+  (an `AssertionError` raised in `verify()`: the program's own check
+  rejected its solution). Only a `NameError` or an import failure mentions
+  reliance on the kernel session. Formerly every rejection named kernel
+  state as the usual cause; in a 458-session benchmark run none of the 16
+  rejections had that cause.
+- **Change:** The `submit_code` and `select_backend` descriptions, the
+  guide, the note in `select_backend`'s result and all six templates state
+  one rule: before calling `submit_code`, run the complete program (solve,
+  verify, print) with `python_exec` and check its output; `submit_code` is
+  for the finished, tested program, not for a first try. The templates' and
+  the success message's sentences that could be read as "submit_code tests
+  it for you" are removed or reworded. In the same benchmark run 102 of 229
+  Sonnet sessions submitted without any `python_exec`. The server does not
+  enforce the rule.
+- **Change:** The per-episode statistics (`MCP_SOLVER_STATS` rows and the
+  `stats` in `submit_code`'s structured content) add
+  `exec_before_first_submit`: the number of `python_exec` calls before the
+  episode's first `submit_code` (0: submitted untested; null: no submission).
 - **Fix:** The CLI re-executes the submitted program in an isolated uv
   environment (`uv run --isolated`). Formerly uv used an existing virtual
   environment as the base when the Python version matched (for example the

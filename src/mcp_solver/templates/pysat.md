@@ -193,7 +193,9 @@ swapped indices). Before submitting, you MUST:
    verifier is wrong, not the example. If the problem marks it as a dummy or
    says nothing about its validity, do not copy its values and do not test
    against them.
-4. **Execute the verification** via python_exec and confirm it passes.
+4. **Before calling `submit_code`, run the complete program** (solve,
+   verify, print) with python_exec and check its output; `submit_code` is
+   for the finished, tested program, not for a first try.
 5. **For an UNSAT answer**: list each clause group and the sentence of the
    problem statement that justifies it. If any clause lacks a justification,
    remove it and re-solve before reporting UNSAT. Also confirm the UNSAT is
@@ -201,8 +203,6 @@ swapped indices). Before submitting, you MUST:
    more unit of budget) and check the solver then returns SAT — if even the
    relaxation is UNSAT, suspect your encoding before the problem.
 
-Finish by calling `submit_code` with the final program in the shape above,
+Finish by calling `submit_code` with that tested program in the shape above,
 self-contained (all imports included, no reliance on session state; `pysat`
-and the standard library are available wherever it is re-executed). It runs
-as `__main__`, so a failing `verify()` exits nonzero and the submission is
-rejected: fix the encoding and submit again.
+and the standard library are available wherever it is re-executed).

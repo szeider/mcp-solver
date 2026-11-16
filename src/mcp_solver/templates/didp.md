@@ -231,7 +231,9 @@ submitting, you MUST:
    problem statement and re-derive every rule and quantity from its own
    parameters. If your model and your verifier share an assumption, a wrong
    assumption passes silently.
-3. **Execute the verification** via python_exec and confirm it passes.
+3. **Before calling `submit_code`, run the complete program** (solve,
+   verify, print) with python_exec and check its output; `submit_code` is
+   for the finished, tested program, not for a first try.
    `verify()` asserts silently; the program prints only the solution JSON.
 4. **Know what step 2 proves — and what it does not.** Replaying the
    solution proves feasibility and the reported cost; it can NEVER prove
@@ -276,10 +278,8 @@ infeasible problem. Before reporting "No solution exists":
 3. Only once every remaining restriction is grounded in the problem is
    infeasibility a valid answer.
 
-Finish by calling `submit_code` with the final program in the shape above,
-self-contained (all imports included, no reliance on session state). It runs
-as `__main__`, so a failing `verify()` exits nonzero and the submission is
-rejected: fix the model and submit again.
+Finish by calling `submit_code` with that tested program in the shape above,
+self-contained (all imports included, no reliance on session state).
 
 That's it. Read the problem carefully, design the state, let the solver
 search, verify independently — and never guess a dual bound.

@@ -200,14 +200,14 @@ independent of the encoding:
    hand (e.g. add the highest-value unselected item, dropping what blocks
    it) and confirm the objective does not improve while respecting hard
    constraints — a cheap smoke test against inverted polarity.
-5. **Execute the verification** via python_exec and confirm it passes.
+5. **Before calling `submit_code`, run the complete program** (solve,
+   verify, print) with python_exec and check its output; `submit_code` is
+   for the finished, tested program, not for a first try.
 6. **For an UNSAT answer**: justify every hard clause from the problem
    statement; if any clause lacks justification, remove it and re-solve
    before reporting UNSAT. Also relax one hard bound by a unit and check
    the instance becomes satisfiable — if not, suspect your encoding.
 
-Finish by calling `submit_code` with the final program in the shape above,
+Finish by calling `submit_code` with that tested program in the shape above,
 self-contained (all imports included, no reliance on session state; `pysat`
-and the standard library are available wherever it is re-executed). It runs
-as `__main__`, so a failing `verify()` exits nonzero and the submission is
-rejected: fix it and submit again.
+and the standard library are available wherever it is re-executed).

@@ -28,7 +28,7 @@ Before completing your solution, verify:
 ☐ 5. **Output format correct** - JSON output with appropriate structure
 ☐ 6. **Predicates meaningful** - Clear names that reflect the problem domain
 ☐ 7. **Constraints verified independently** - All problem constraints are encoded AND re-checked by a plain-Python verify(solution) in the submitted program, called before printing, whose expectations are re-derived from the problem text, not from your encoding's own interpretation
-☐ 8. **Program submitted** - Call `submit_code` with the self-contained program in the shape of 3.1; it runs as `__main__`, so a failing verify() exits nonzero and the submission is rejected: fix it and submit again
+☐ 8. **Program tested, then submitted** - Before calling `submit_code`, run the complete program (solve, verify, print) with python_exec and check its output; `submit_code` is for the finished, tested program (self-contained, shape of 3.1), not for a first try
 
 ## Section 2: Critical Rules of Engagement
 

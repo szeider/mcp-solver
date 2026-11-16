@@ -1,0 +1,114 @@
+[
+ {
+  "id": "01_haiku_asp_50_cellular_automata_easy",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:1:14-15: error: syntax error, unexpected \\\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 89, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 41, in solve\n    ctl.add(\"base\", [], \"\\\\n\".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "02_sonnet_asp_07_hamiltonian_path_weighted_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 107, in <module>\n    verify(s)\n    ~~~~~~^^^\n  File \"/tmp/run/submission.py\", line 92, in verify\n    assert sol[\"exists\"] and sol[\"count\"] == len(sol[\"paths\"]) >= 1\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+ },
+ {
+  "id": "03_sonnet_asp_14_cryptarithmetic_hard",
+  "exit_code": null,
+  "timed_out": true,
+  "stdout": "",
+  "stderr": ""
+ },
+ {
+  "id": "04_sonnet_asp_15_traveling_tournament_easy",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:5:53-55: error: syntax error, unexpected =, expecting )\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 75, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 33, in solve\n    ctl.add(\"base\", [], \" \".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "05_sonnet_asp_24_workflow_optimization_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:1:8-9: error: syntax error, unexpected <VARIABLE>, expecting <IDENTIFIER> or default or override\n\n<block>:10:28-32: error: syntax error, unexpected #max\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 82, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 28, in solve\n    ctl.add(\"base\", [], \" \".join(f) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "06_sonnet_asp_29_logic_grid_puzzle_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 95, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 59, in solve\n    ctl.ground([(\"base\", [])], context=type(\"C\", (), {\"ord\": staticmethod(lambda a: ord_(a))})())\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 566, in ground\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_ground(self._rep, c_parts, len(parts), c_cb, c_data),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        data,\n        ^^^^^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 77, in _handle_error\n    raise handler.error[0](handler.error[1]).with_traceback(handler.error[2])\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 185, in _pyclingo_ground_callback\n    c_symbols[i] = sym._rep\n                   ^^^^^^^^\nAttributeError: 'int' object has no attribute '_rep'\n"
+ },
+ {
+  "id": "07_sonnet_asp_31_network_flow_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:5:34-38: error: syntax error, unexpected #sum\n\n<block>:8:71-75: error: syntax error, unexpected #sum\n\n<block>:10:61-65: error: syntax error, unexpected #sum\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 62, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 29, in solve\n    ctl.add(\"base\", [], \" \".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "08_sonnet_asp_33_independent_set_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:7:38-44: error: syntax error, unexpected #count\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 52, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 27, in solve\n    ctl.add(\"base\", [], \" \".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "09_sonnet_asp_33_independent_set_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:8:38-44: error: syntax error, unexpected #count\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 54, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 28, in solve\n    ctl.add(\"base\", [], \" \".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "10_sonnet_asp_38_protein_structure_hard",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:9:19-25: error: syntax error, unexpected #count\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 57, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 26, in solve\n    ctl.add(\"base\", [], facts + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "11_sonnet_asp_45_prisoners_dilemma_easy",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:3:56-57: error: syntax error, unexpected +, expecting \",\" or . or ;\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 72, in <module>\n    s = solve()\n  File \"/tmp/run/submission.py\", line 47, in solve\n    ctl.add(\"base\", [], facts + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "12_sonnet_asp_51_ricochet_robots_easy",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "<block>:1:8-9: error: syntax error, unexpected <VARIABLE>, expecting <IDENTIFIER> or default or override\n\nTraceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 82, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 38, in solve\n    ctl.add(\"base\", [], \" \".join(facts) + PROGRAM)\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 321, in add\n    self._add2(*args, **kwargs)\n    ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/control.py\", line 332, in _add2\n    _handle_error(\n    ~~~~~~~~~~~~~^\n        _lib.clingo_control_add(\n        ^^^^^^^^^^^^^^^^^^^^^^^^\n            self._rep, name.encode(), c_params, len(parameters), program.encode()\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        )\n        ^\n    )\n    ^\n  File \"/uv-env/lib/python3.14/site-packages/clingo/_internal.py\", line 81, in _handle_error\n    raise RuntimeError(msg)\nRuntimeError: parsing failed\n"
+ },
+ {
+  "id": "13_sonnet_cp_001_car_seq",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 42, in <module>\n    verify(solution)\n    ~~~~~~^^^^^^^^^^\n  File \"/tmp/run/submission.py\", line 33, in verify\n    assert len(s) == 12\n           ^^^^^^^^^^^^\nAssertionError\n"
+ },
+ {
+  "id": "14_sonnet_cp_054_cmo_2012",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 36, in <module>\n    solution = solve()\n  File \"/tmp/run/submission.py\", line 14, in solve\n    primes = [q for q in range(2, 3001) if is_prime(q)]\n                                           ~~~~~~~~^^^\n  File \"/tmp/run/submission.py\", line 7, in is_prime\n    return p >= 2 and all(p % d for d in range(2, int(p**0.5) + 1))\n                      ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/cpmpy/expressions/python_builtins.py\", line 59, in all\n    raise Exception(\"Unexpected argument '{}' to 'all'\".format(elem))\nException: Unexpected argument '0' to 'all'\n"
+ },
+ {
+  "id": "15_sonnet_cp_058_covering_o",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 34, in <module>\n    verify(solution)\n    ~~~~~~^^^^^^^^^^\n  File \"/tmp/run/submission.py\", line 29, in verify\n    assert any(w[i-1] for i in t), \"task uncovered\"\n           ~~~^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/cpmpy/expressions/python_builtins.py\", line 99, in any\n    raise Exception(\"Unexpected argument '{}' to 'all'\".format(elem))\nException: Unexpected argument '0' to 'all'\n"
+ },
+ {
+  "id": "16_sonnet_cp_095_maximal_in",
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/tmp/run/submission.py\", line 32, in <module>\n    verify(solution)\n    ~~~~~~^^^^^^^^^^\n  File \"/tmp/run/submission.py\", line 28, in verify\n    assert any(s[j - 1] for j in ADJ[i]), \"not maximal\"\n           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/uv-env/lib/python3.14/site-packages/cpmpy/expressions/python_builtins.py\", line 99, in any\n    raise Exception(\"Unexpected argument '{}' to 'all'\".format(elem))\nException: Unexpected argument '1' to 'all'\n"
+ }
+]

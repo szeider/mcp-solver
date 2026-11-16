@@ -99,7 +99,9 @@ CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
    your model introduced — `assert len(x) == my_total` proves nothing if `my_total`
    encodes a misreading. If your model and your verifier share an assumption, a
    wrong assumption passes silently.
-3. **Execute the verification** via python_exec and confirm it passes
+3. **Before calling `submit_code`, run the complete program** (solve,
+   verify, print) with python_exec and check its output; `submit_code` is
+   for the finished, tested program, not for a first try.
 4. **For optimization**: `verify()` recomputes the objective value from the
    data. Optimality: `model.solve()` returns True also when a time limit
    stopped it with a merely feasible solution; the solution is optimal only
@@ -123,9 +125,7 @@ model than a genuinely infeasible problem. Before reporting "No solution":
    valid answer. Then trust the solver — do not try to prove *why* it is
    infeasible; report it.
 
-Finish by calling `submit_code` with the final program in the shape above,
-self-contained (all imports included, no reliance on session state). It runs
-as `__main__`, so a failing `verify()` exits nonzero and the submission is
-rejected: fix the model and submit again.
+Finish by calling `submit_code` with that tested program in the shape above,
+self-contained (all imports included, no reliance on session state).
 
 That's it. Read the problem carefully, model it declaratively, verify independently.

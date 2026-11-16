@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from mcp.client import Client
@@ -20,6 +21,7 @@ from mcp_minion import ToolOutcome
 
 from mcp_solver.agent import engine as engine_mod
 from mcp_solver.agent import mcp_server
+from mcp_solver.agent.cli import ProgramRun
 
 BACKENDS = ("pysat", "maxsat", "z3", "cpmpy", "clingo", "didp")
 
@@ -449,7 +451,31 @@ async def test_submit_stats_ride_along(engine):
         assert sc["stats"]["exec_calls"] == 2
         assert sc["stats"]["exec_failures"] == 0
         assert sc["stats"]["submit_attempts"] == 1
+        assert sc["stats"]["exec_before_first_submit"] == 2
         assert "wall_seconds" in sc["stats"]
+
+
+async def test_exec_before_first_submit(engine, monkeypatch, tmp_path):
+    # Counts the python_exec calls before the FIRST submit_code of an
+    # episode (0: submitted untested); later calls do not change it.
+    stats_file = tmp_path / "stats.jsonl"
+    monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        snap = json.loads((tmp_path / "stats.jsonl.open").read_text())
+        assert snap["exec_before_first_submit"] is None
+        result = await session.call_tool("submit_code", {"code": "print(1)"})
+        assert result.structured_content["stats"]["exec_before_first_submit"] == 0
+        await session.call_tool("python_exec", {"code": "1"})
+        result = await session.call_tool("submit_code", {"code": "print(1)"})
+        assert result.structured_content["stats"]["exec_before_first_submit"] == 0
+        # A new episode starts over.
+        await session.call_tool("select_backend", {"solver": "z3"})
+        await session.call_tool("python_exec", {"code": "1"})
+        await session.call_tool("submit_code", {"code": "print(1)"})
+    rows = [json.loads(ln) for ln in stats_file.read_text().splitlines()]
+    assert [r["exec_before_first_submit"] for r in rows] == [0, 1]
+    assert [r["submit_attempts"] for r in rows] == [2, 1]
 
 
 async def test_exec_timeout_clamped_to_valid_range(engine):
@@ -819,9 +845,11 @@ async def test_submit_failing_standalone_is_rejected_not_stored(
         assert payload["ok"] is False and payload["executed"] is True
         assert payload["exit_code"] == 1 and payload["timed_out"] is False
         assert "NameError" in payload["stderr"]
-        assert "compiles but failed when run on its own" in payload["error"]
-        assert "self-contained" in payload["error"]
-        assert "python_exec" in payload["error"]
+        assert payload["error"].startswith(
+            "NameError: name 'PLACEHOLDER' is not defined."
+        )
+        assert "kernel session" in payload["error"]
+        assert payload["error"].endswith(mcp_server._FIX)
         assert result.structured_content["ok"] is False
         assert _links(result) == []
         assert mcp_server._submissions == {}
@@ -933,3 +961,253 @@ async def test_standalone_run_does_not_block_kernel_tools(engine, tmp_path):
             result = await running
         assert not result.is_error
         assert result.structured_content["stdout"] == "1\n"
+
+
+# --- submit_code: the rejection text names the actual failure ----------------
+
+# The 16 rejected submissions of a 458-session benchmark run (round 2,
+# 2026-11): the standalone run's exit code, stdout and stderr as the server
+# returned them, environment paths shortened. All 16 were told "the usual
+# cause is that it relies on variables or imports from the kernel session";
+# none was.
+REJECTIONS = json.loads(
+    (Path(__file__).parent / "data" / "submit_rejections.json").read_text()
+)
+CLINGO_PARSE = "RuntimeError: parsing failed. Clingo reported: "
+VERIFY_REJECTED = "The program's own verify() rejected its solution"
+EXPECTED_START = {
+    "01": CLINGO_PARSE + "<block>:1:14-15: error: syntax error, unexpected \\.",
+    "02": "AssertionError. " + VERIFY_REJECTED,
+    "03": "Timed out: the program did not finish within 240 s",
+    "04": CLINGO_PARSE + "<block>:5:53-55: error: syntax error, unexpected =",
+    "05": CLINGO_PARSE + "<block>:1:8-9: error: syntax error, unexpected"
+    " <VARIABLE>, expecting <IDENTIFIER> or default or override; <block>:10:28-32:"
+    " error: syntax error, unexpected #max.",
+    "06": "AttributeError: 'int' object has no attribute '_rep'. The program"
+    " raised AttributeError",
+    "07": CLINGO_PARSE + "<block>:5:34-38: error: syntax error, unexpected #sum;",
+    "08": CLINGO_PARSE + "<block>:7:38-44: error: syntax error, unexpected #count.",
+    "09": CLINGO_PARSE + "<block>:8:38-44: error: syntax error, unexpected #count.",
+    "10": CLINGO_PARSE + "<block>:9:19-25: error: syntax error, unexpected #count.",
+    "11": CLINGO_PARSE + "<block>:3:56-57: error: syntax error, unexpected +",
+    "12": CLINGO_PARSE + "<block>:1:8-9: error: syntax error, unexpected <VARIABLE>",
+    "13": "AssertionError. " + VERIFY_REJECTED,
+    "14": "Exception: Unexpected argument '0' to 'all'. The program raised Exception",
+    "15": "Exception: Unexpected argument '0' to 'all'. The program raised Exception",
+    "16": "Exception: Unexpected argument '1' to 'all'. The program raised Exception",
+}
+
+
+def _failure(exit_code, stderr="", stdout="", timed_out=False, packages=("z3-solver",)):
+    run = ProgramRun(exit_code, stdout, stderr, timed_out)
+    return mcp_server._run_failure(run, list(packages))
+
+
+def test_rejection_texts_of_the_real_rejections():
+    assert len(REJECTIONS) == 16
+    for r in REJECTIONS:
+        text = _failure(
+            r["exit_code"], r["stderr"], r["stdout"], r["timed_out"], ("clingo",)
+        )
+        assert text.startswith(EXPECTED_START[r["id"][:2]]), (r["id"], text)
+        assert text.endswith(" " + mcp_server._FIX), r["id"]
+        assert "kernel" not in text, (r["id"], text)
+
+
+def _traceback(*frames_and_exc: str) -> str:
+    return "Traceback (most recent call last):\n" + "\n".join(frames_and_exc) + "\n"
+
+
+def test_rejection_succeeds_without_text():
+    assert _failure(0, stdout='{"x": 1}\n') is None
+
+
+def test_rejection_empty_stdout():
+    text = _failure(0, stdout="  \n")
+    assert text.startswith("No output: the program exited with code 0 but printed")
+    assert "kernel" not in text
+
+
+def test_rejection_assert_outside_verify():
+    stderr = _traceback(
+        '  File "/tmp/run/submission.py", line 9, in <module>',
+        "    assert solve() is not None, 'no model'",
+        "AssertionError: no model",
+    )
+    text = _failure(1, stderr)
+    assert text.startswith("AssertionError: no model. An assert in the program")
+    assert "verify()" not in text
+
+
+def test_rejection_name_error_names_kernel_state_and_the_name():
+    stderr = _traceback(
+        '  File "/tmp/run/submission.py", line 4, in solve',
+        "    return {'n': N_ITEMS}",
+        "NameError: name 'N_ITEMS' is not defined",
+    )
+    text = _failure(1, stderr)
+    assert text.startswith("NameError: name 'N_ITEMS' is not defined. The program")
+    assert "'N_ITEMS' without defining or importing it" in text
+    assert "kernel session" in text
+
+
+def test_rejection_unbound_local_is_not_blamed_on_the_kernel():
+    stderr = _traceback(
+        '  File "/tmp/run/submission.py", line 4, in solve',
+        "UnboundLocalError: cannot access local variable 'best' where it is"
+        " not associated with a value",
+    )
+    text = _failure(1, stderr)
+    assert text.startswith("UnboundLocalError: cannot access local variable 'best'")
+    assert "kernel" not in text
+
+
+def test_rejection_module_not_found_names_module_and_packages():
+    stderr = _traceback(
+        '  File "/tmp/run/submission.py", line 2, in <module>',
+        "    import networkx as nx",
+        "ModuleNotFoundError: No module named 'networkx'",
+    )
+    text = _failure(1, stderr, packages=("cpmpy", "numpy"))
+    assert text.startswith("ModuleNotFoundError: No module named 'networkx'. ")
+    assert "only the packages cpmpy, numpy, without 'networkx'" in text
+    assert "kernel session" in text and "python_reset" in text
+
+
+def test_rejection_chained_exception_reports_the_last_one():
+    stderr = (
+        _traceback(
+            '  File "/tmp/run/submission.py", line 5, in verify',
+            "    total = solution['cost']",
+            "KeyError: 'cost'",
+        )
+        + "\nDuring handling of the above exception, another exception occurred:\n\n"
+        + _traceback(
+            '  File "/tmp/run/submission.py", line 9, in <module>',
+            "    raise ValueError('bad solution') from None",
+            "ValueError: bad solution",
+        )
+    )
+    text = _failure(1, stderr)
+    assert text.startswith("ValueError: bad solution. The program raised ValueError")
+    # The verify frame belongs to the earlier exception, and only an
+    # AssertionError is reported as verify() rejecting the solution.
+    assert "verify()" not in text
+
+
+def test_rejection_assertion_in_verify_after_other_output():
+    # Output after the traceback (here a clingo info line) does not hide it.
+    stderr = (
+        _traceback(
+            '  File "/tmp/run/submission.py", line 30, in <module>',
+            "    verify(solution)",
+            '  File "/tmp/run/submission.py", line 22, in verify',
+            '    assert len(s) == 12, "wrong length"',
+            "AssertionError: wrong length",
+        )
+        + "<block>:2:1-9: info: atom does not occur in any rule head:\n  b\n"
+    )
+    text = _failure(1, stderr)
+    assert text.startswith("AssertionError: wrong length. " + VERIFY_REJECTED)
+
+
+def test_rejection_exit_without_traceback():
+    text = _failure(3, "warming up\nno feasible schedule\n")
+    assert text.startswith(
+        "Exit code 3 when the server ran the program on its own. Last line of"
+        " stderr: no feasible schedule"
+    )
+    assert _failure(2).startswith("Exit code 2 when the server ran the program")
+    assert _failure(None, "uv not found on PATH").startswith("The run could not start")
+
+
+def test_rejection_strips_color_codes():
+    stderr = _traceback(
+        '  File "/tmp/run/submission.py", line 2, in <module>',
+        "\x1b[1;35mZeroDivisionError\x1b[0m: \x1b[35mdivision by zero\x1b[0m",
+    )
+    assert _failure(1, stderr).startswith("ZeroDivisionError: division by zero.")
+
+
+def test_rejection_long_exception_line_is_cut():
+    text = _failure(1, _traceback("ValueError: " + "x" * 2000))
+    assert len(text) < 1000 and "x ..." in text
+
+
+# Reduced versions of the real programs, run end to end under the fake uv.
+PROGRAM_VERIFY_FAILS = """\
+import json
+SLOTS = 12
+
+def solve():
+    return {"sequence": list(range(SLOTS - 1))}
+
+def verify(solution):
+    assert len(solution["sequence"]) == SLOTS
+
+if __name__ == "__main__":
+    solution = solve()
+    verify(solution)
+    print(json.dumps(solution))
+"""
+PROGRAM_CLINGO_PARSE = """\
+import sys
+sys.stderr.write("<block>:3:5-11: error: syntax error, unexpected #count\\n\\n")
+raise RuntimeError("parsing failed")
+"""
+PROGRAM_MISSING_MODULE = "import json\nimport no_such_module_mcp_solver\nprint(1)\n"
+
+
+async def test_submit_rejection_texts_end_to_end(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "clingo"})
+        texts = []
+        for code in (
+            PROGRAM_VERIFY_FAILS,
+            PROGRAM_CLINGO_PARSE,
+            PROGRAM_MISSING_MODULE,
+        ):
+            result = await session.call_tool("submit_code", {"code": code})
+            assert result.is_error
+            payload = json.loads(result.content[0].text)
+            assert payload["ok"] is False and payload["exit_code"] == 1
+            assert "Traceback" in payload["stderr"]
+            texts.append(payload["error"])
+    verify_text, clingo_text, module_text = texts
+    assert verify_text.startswith("AssertionError. " + VERIFY_REJECTED)
+    assert clingo_text.startswith(
+        CLINGO_PARSE + "<block>:3:5-11: error: syntax error, unexpected #count."
+    )
+    assert module_text.startswith(
+        "ModuleNotFoundError: No module named 'no_such_module_mcp_solver'."
+        " The run has only the packages clingo, without"
+    )
+
+
+TEST_FIRST_RULE = (
+    "run the complete program (solve, verify, print) with python_exec and check"
+    " its output;"
+)
+
+
+def test_test_first_rule_stated_everywhere():
+    # One rule in every text the solving host reads: run the complete program
+    # in the kernel before submitting; submit_code is not for a first try.
+    texts = {
+        "description": mcp_server.SELECT_BACKEND_DESCRIPTION,
+        "guide": mcp_server.GUIDE,
+        "submit_code": mcp_server.submit_code.__doc__,
+        **{solver: mcp_server.get_template(solver) for solver in BACKENDS},
+    }
+    for name, text in texts.items():
+        flat = " ".join(text.replace("*", "").replace("`", "").split())
+        assert TEST_FIRST_RULE in flat, name
+        assert "not for a first try" in flat, name
+        assert "submit again" not in flat, name
+
+
+async def test_kernel_note_states_test_first_rule(engine):
+    async with _session() as session:
+        result = await session.call_tool("select_backend", {"solver": "z3"})
+        note = result.content[0].text.split("\n\n---\n\n")[-1]
+        assert TEST_FIRST_RULE in note and "not for a first try" in note
