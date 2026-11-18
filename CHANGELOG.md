@@ -41,14 +41,59 @@
 - **Behavior Change:** All six templates prescribe one program shape:
   `solve()` returns the solution as a dict, `verify(solution)` re-checks it
   in plain Python against module-level instance data (every constraint and
-  the objective value) and raises `AssertionError` on a failure, and a
-  `__main__` guard runs `solve()`, `verify()` and prints the JSON; importing
-  the program does nothing. `verify()` is part of the submitted program, so
-  a failing check makes the program exit nonzero and `submit_code` (server
-  path) and the CLI's re-execution reject it. Each template's example
-  program is rewritten into this shape. Formerly the templates kept
-  `verify()` in the kernel session and some examples printed "All checks
-  passed".
+  the objective value) and raises `AssertionError` on a failure,
+  `main(check: bool = False)` runs `solve()`, runs `verify()` only when
+  `check` is true, and prints the JSON, and a `__main__` guard calls
+  `main()`; importing the program does nothing. The self-check is a
+  heuristic, not a requirement: the plain run does not call `verify()`, so
+  a wrong `verify()` cannot fail a program whose answer is right (in a
+  benchmark run one program had the right answer and a wrong check). In
+  the kernel the host develops with `solve()` and `verify()` and runs
+  `main(check=True)` as the final test; the templates add that the check
+  must hold for every solution of the model, not only the one the solver
+  happened to return. The cpmpy template adds that OR-Tools CP-SAT searches
+  with parallel workers, so two runs may return different solutions, and
+  that `model.solve("ortools", num_workers=1)` makes a run reproducible
+  unless a time limit stops it. Each template's example program is
+  rewritten into this shape. Formerly the templates kept `verify()` in the
+  kernel session and some examples printed "All checks passed"; earlier in
+  this cycle the `__main__` guard called `verify()` before printing.
+- **Behavior Change:** `mcp-solver-serve`'s `submit_code` accepts or
+  rejects a program on its plain run alone (`python submission.py`, as the
+  CLI re-executes it). After an accepted run it loads the program as a
+  module and calls `main(check=True)` in a separate fresh isolated
+  environment with the same packages and filtered environment variables,
+  with the time left of the 240 s budget measured right before the check
+  starts, and reports the outcome under `self_check`: `passed` only when
+  `main(check=True)` returned (or exited with code 0), `failed` with the
+  exception line (or the capped last line of stderr, or more than 4 MB of
+  output), and `not_available` when the program has no `main()` that
+  accepts `check=True`, exits with code 0 before `main(check=True)`
+  returned (for example during its import), when less than 5 s are left,
+  when the check does not finish in time, or when its run cannot be set up
+  or started. A failed or unavailable self-check does not reject the
+  submission. The per-episode statistics add `self_check`, the status of
+  the episode's last accepted submission (null: none); a rejected
+  submission leaves it unchanged. The CLI is unchanged: it re-executes the
+  plain program.
+- **Change:** All six templates state that the self-check is a heuristic
+  (when it fails, the solution or `verify()` is wrong; a wrong `verify()`
+  does not make a correct solution wrong) and that the `__main__` guard
+  stays `main()`: in the kernel the check runs as a separate
+  `main(check=True)` statement after the program text. In a live solve a
+  host had edited the guard to call `main(check=True)` and submitted it.
+  The headings "Verification Requirement (MANDATORY)" read "Verification
+  Workflow (MANDATORY steps)".
+- **Change:** The templates no longer mirror benchmark problems. The
+  clingo template drops section 4.7 (a pattern for keyed paths and keyless
+  return paths written for one map-generation problem) and section 4.10
+  (ordered reachability with the target reached last, with a claim about
+  the intended reading of such problems); later sections are renumbered.
+  Its Tower of Hanoi example is the plain three-peg puzzle (it carried
+  four pegs, 19 moves and a "pilgrim's journey" constraint), and the
+  examples of sections 5.2 and 5.3 use neutral names instead of rooms,
+  keys and a "Goal" room, and no longer name the benchmark task they came
+  from.
 - **Behavior Change:** Optimality rules per backend, each checked by
   experiment: cpmpy and z3 no longer re-solve with a stricter bound (hosts
   skipped it in 28 of 31 optimization sessions); a cpmpy solution is optimal
@@ -74,9 +119,9 @@
   rejections had that cause.
 - **Change:** The `submit_code` and `select_backend` descriptions, the
   guide, the note in `select_backend`'s result and all six templates state
-  one rule: before calling `submit_code`, run the complete program (solve,
-  verify, print) with `python_exec` and check its output; `submit_code` is
-  for the finished, tested program, not for a first try. The templates' and
+  one rule: before calling `submit_code`, run the complete program with
+  `python_exec`, calling `main(check=True)`, and check its output;
+  `submit_code` is for the finished, tested program, not for a first try. The templates' and
   the success message's sentences that could be read as "submit_code tests
   it for you" are removed or reworded. In the same benchmark run 102 of 229
   Sonnet sessions submitted without any `python_exec`. The server does not

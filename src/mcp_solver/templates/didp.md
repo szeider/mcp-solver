@@ -14,7 +14,8 @@ sequencing/scheduling, knapsack and packing.
 2. Output ONLY valid JSON using `json.dumps()` - no other text
 3. Always `import json` if outputting JSON
 4. Check the exact output format required
-5. Verify the solution independently before submitting
+5. Write an independent `verify()` and run `main(check=True)` before
+   submitting
 
 ## The DIDP modeling recipe
 
@@ -88,14 +89,28 @@ def verify(solution: dict) -> None:
     cost = sum(TRAVEL[a][b] for a, b in zip(tour, tour[1:]))
     assert solution["cost"] == cost, "wrong cost"
 
-if __name__ == "__main__":
+def main(check: bool = False) -> None:
     solution = solve()
-    verify(solution)
+    if check:
+        verify(solution)
     print(json.dumps(solution))
+
+if __name__ == "__main__":
+    main()
 ```
 
 `verify()` takes only the solution and reads the data from module-level
-constants; importing the module must not solve or print.
+constants; importing the module must not solve or print. `main()` prints
+the solution without checking it, `main(check=True)` runs `verify()` first.
+In the kernel, develop with `solve()` and `verify()`, then run
+`main(check=True)` as the final test. The check must hold for every
+solution of the model, not only the one the solver happened to return.
+The self-check is a heuristic: when it fails, either the solution or
+`verify()` is wrong, so check both against the problem statement; a wrong
+`verify()` does not make a correct solution wrong. The guard stays
+`main()`: to run the check in the kernel, call `main(check=True)` in a
+separate statement after the program text, never by changing the guard;
+the submitted program is the text with the guard `main()`.
 
 ## API Essentials
 
@@ -215,7 +230,7 @@ negative-profit item never forces its way into an upper bound).
 - If infeasible, output the format's UNSAT form (or
   `{"error": "No solution exists"}` if none is specified)
 
-## Verification Requirement (MANDATORY)
+## Verification Workflow (MANDATORY steps)
 
 DP models fail subtly: a state variable too few, a precondition too weak, an
 inadmissible bound — and the solver still returns a confident answer. Before
@@ -224,7 +239,7 @@ submitting, you MUST:
 1. **Solve and decode** the transition sequence into a concrete solution
    (tour, packing, schedule).
 2. **Write a `verify(solution)` function** (part of the submitted program,
-   called before printing) that replays that solution with plain Python —
+   called by `main(check=True)`) that replays that solution with plain Python —
    independent of your DIDP model: recompute times/loads/costs step by step
    from the problem data, assert every stated constraint holds, and assert
    the recomputed objective equals the reported cost.
@@ -233,8 +248,8 @@ submitting, you MUST:
    problem statement and re-derive every rule and quantity from its own
    parameters. If your model and your verifier share an assumption, a wrong
    assumption passes silently.
-3. **Before calling `submit_code`, run the complete program** (solve,
-   verify, print) with python_exec and check its output; `submit_code` is
+3. **Before calling `submit_code`, run the complete program** with
+   python_exec, calling `main(check=True)`, and check its output; `submit_code` is
    for the finished, tested program, not for a first try.
    `verify()` asserts silently; the program prints only the solution JSON.
 4. **Know what step 2 proves — and what it does not.** Replaying the

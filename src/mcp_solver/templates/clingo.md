@@ -19,7 +19,7 @@ Produce a solution using Answer Set Programming (ASP) that correctly models and 
 - For UNSAT, output the format's UNSAT form (or `{"error": "No solution exists"}` if none is specified)
 
 ### 1.4 Final Checklist
-Before completing your solution, verify:
+Before completing your solution, go through this checklist:
 ☐ 1. **Uses clingo API** - Solution uses `clingo.Control()` and ASP rules
 ☐ 2. **Model solves correctly** - At least one answer set is found (or UNSAT handled)
 ☐ 3. **Optimization applied** - #minimize/#maximize for the objective; a bound stated in the problem is added as a hard constraint as well (see the requirement above)
@@ -27,8 +27,8 @@ Before completing your solution, verify:
 ☐ 4b. **No Model escapes on_model** - All solution data extracted to plain Python objects inside the callback (touching a Model after solve() returns segfaults)
 ☐ 5. **Output format correct** - JSON output with appropriate structure
 ☐ 6. **Predicates meaningful** - Clear names that reflect the problem domain
-☐ 7. **Constraints verified independently** - All problem constraints are encoded AND re-checked by a plain-Python verify(solution) in the submitted program, called before printing, whose expectations are re-derived from the problem text, not from your encoding's own interpretation
-☐ 8. **Program tested, then submitted** - Before calling `submit_code`, run the complete program (solve, verify, print) with python_exec and check its output; `submit_code` is for the finished, tested program (self-contained, shape of 3.1), not for a first try
+☐ 7. **Independent check written and run** - All problem constraints are encoded AND re-checked by a plain-Python verify(solution) in the submitted program, called by main(check=True), whose expectations are re-derived from the problem text, not from your encoding's own interpretation
+☐ 8. **Program tested, then submitted** - Before calling `submit_code`, run the complete program with python_exec, calling `main(check=True)`, and check its output; `submit_code` is for the finished, tested program (self-contained, shape of 3.1), not for a first try
 
 ## Section 2: Critical Rules of Engagement
 
@@ -355,14 +355,28 @@ def verify(solution: dict) -> None:
     assert len(set(a.values())) == len(a), "a worker with two tasks"
     assert solution["cost"] == sum(COST[t, w] for t, w in a.items()), "wrong cost"
 
-if __name__ == "__main__":
+def main(check: bool = False) -> None:
     solution = solve()
-    verify(solution)
+    if check:
+        verify(solution)
     print(json.dumps(solution))
+
+if __name__ == "__main__":
+    main()
 ```
 
 `verify()` takes only the solution and reads the data from module-level
-constants; importing the module must not solve or print.
+constants; importing the module must not solve or print. `main()` prints
+the solution without checking it, `main(check=True)` runs `verify()` first.
+In the kernel, develop with `solve()` and `verify()`, then run
+`main(check=True)` as the final test. The check must hold for every
+solution of the model, not only the one the solver happened to return.
+The self-check is a heuristic: when it fails, either the solution or
+`verify()` is wrong, so check both against the problem statement; a wrong
+`verify()` does not make a correct solution wrong. The guard stays
+`main()`: to run the check in the kernel, call `main(check=True)` in a
+separate statement after the program text, never by changing the guard;
+the submitted program is the text with the guard `main()`.
 
 ### 3.2 CRITICAL: Finding One vs. All Solutions (Solver Configuration)
 
@@ -639,36 +653,7 @@ row(1..n). col(1..n).
 :- queen(R1,C1), queen(R2,C2), R1 != R2, |R1-R2| == |C1-C2|.
 ```
 
-### 4.7 Enforcing Dependent Properties (A implies B)
-
-A common task is to enforce that if one property `P` exists, a corresponding property `Q` must also exist. A frequent mistake is to only forbid the case `P and not Q` using complex joins, which can be brittle. A more robust pattern is to state the implication directly as a constraint.
-
-**Pattern: If a keyed path exists, a keyless return MUST exist.**
-
-Let's say for a connection `conn(R1, R2, Key)`, we must ensure `conn(R2, R1, "null")` exists.
-
-**Incorrect Attempt (Brittle):**
-This attempts to join all possibilities and forbid the bad ones. It fails if multiple return paths exist or if the solver simply avoids creating a bidirectional link.
-```asp
-% Fails to enforce generation; only prunes specific bad combinations.
-:- conn(R1, R2, Req1), conn(R2, R1, Req2), key(Req1), Req2 != "null".
-```
-
-**Correct Pattern (Robust Logic):**
-This pattern forbids the state where the premise (`keyed path exists`) is true but the conclusion (`keyless return path exists`) is false. This forces the solver to generate the conclusion to satisfy the constraint.
-
-```asp
-% Define the premise: a keyed path exists from R1 to R2.
-keyed_path(R1, R2) :- conn(R1, R2, Req), key(Req).
-
-% Enforce the conclusion: if a keyed path exists, a keyless return MUST exist.
-% This translates to: "It is an error if a keyed path from R1 to R2 exists
-% AND a keyless path from R2 to R1 does NOT exist."
-:- keyed_path(R1, R2), not conn(R2, R1, "null").
-```
-This approach correctly models the logical implication `keyed_path(R1, R2) -> conn(R2, R1, "null")` and is the standard way to express such dependencies in ASP.
-
-### 4.8 Default Logic with Negation as Failure
+### 4.7 Default Logic with Negation as Failure
 
 **Pattern: Default Property with Exceptions**
 
@@ -695,7 +680,7 @@ disproven(Statement) :- contradicts(Statement, Fact), proven(Fact).
 
 **Key Insight**: The `not` operator implements Closed World Assumption - what cannot be proven true is assumed false.
 
-### 4.9 Sequential Planning Problems (Tower of Hanoi, Blocks World)
+### 4.8 Sequential Planning Problems (Tower of Hanoi, Blocks World)
 
 **Critical for**: Multi-step sequential planning where exactly ONE action occurs per timestep.
 
@@ -708,7 +693,7 @@ This is the most common mistake in planning problems:
 { move(D, P1, P2, T) : peg(P1), peg(P2), P1 != P2 } 1 :- disk(D), time(T), T < max_time.
 
 % Then uses slow global constraint to force total count
-:- #count { D, P1, P2, T : move(D, P1, P2, T) } != 19.
+:- #count { D, P1, P2, T : move(D, P1, P2, T) } != max_time.
 ```
 
 **Why this is catastrophically slow:**
@@ -727,12 +712,12 @@ The key principles:
 **Complete Tower of Hanoi Example:**
 
 ```asp
-#const max_time = 19.
-disk(1..4). peg(a;b;c;d).
-time(0..max_time-1).  % Action timesteps (0..18 for 19 moves)
+#const max_time = 7.
+disk(1..3). peg(a;b;c).
+time(0..max_time-1).  % Action timesteps (0..6 for 7 moves)
 
 % INITIAL STATE
-on_peg(1,a,0). on_peg(2,a,0). on_peg(3,a,0). on_peg(4,a,0).
+on_peg(1,a,0). on_peg(2,a,0). on_peg(3,a,0).
 
 % --- 1. DEFINE WHAT CAN BE MOVED ---
 % A disk is "top" if no smaller disk is on the same peg
@@ -759,15 +744,9 @@ on_peg(D, P, T+1) :- on_peg(D, P, T), T < max_time, not move(D, P, _, T).
 % Disk cannot be on two pegs
 :- on_peg(D, P1, T), on_peg(D, P2, T), P1 != P2.
 
-% --- 7. DOMAIN-SPECIFIC CONSTRAINTS ---
-% Pilgrim's journey: every disk must visit both B and C
-visited(D, P) :- move(D, _, P, _).
-:- disk(D), not visited(D, b).
-:- disk(D), not visited(D, c).
-
-% --- 8. GOAL ---
-% All disks on peg D at final timestep
-:- disk(D), not on_peg(D, d, max_time).
+% --- 7. GOAL ---
+% All disks on peg c at final timestep
+:- disk(D), not on_peg(D, c, max_time).
 ```
 
 **Why this is fast:**
@@ -801,37 +780,7 @@ on_table_space(T) :- time(T), #count { B : on_table(B,T) } < max_table_slots.
 - Avoid generate-and-filter patterns in choice rules
 - Eliminate global #count constraints over entire plans
 
-### 4.10 "Reachable Only After" / Ordered Reachability Constraints
-
-When a problem requires that some target element become reachable only after all
-other elements (or only after specific ones) under an evolving reachability process,
-do NOT model it as an existential ordering — guessing a permutation with the target
-pinned last only proves that SOME order exists, which is weaker than what such
-problems ask. The intended reading is almost always about the actual reachability
-process: everything reachable gets reached as soon as it is reachable.
-
-Model the process directly with a time-indexed fixpoint and constrain first-reach
-times:
-
-```asp
-step(0..max_step).
-reached(S, 0) :- start(S).
-reached(Y, T+1) :- edge(X, Y), reached(X, T), step(T+1), unlocked(X, Y, T).
-reached(X, T+1) :- reached(X, T), step(T+1).                    % persistence
-first_reached(X, 0) :- reached(X, 0).
-first_reached(X, T) :- reached(X, T), not reached(X, T-1), T > 0, step(T).
-
-% target must not become reachable before (or together with) any other element:
-:- first_reached(target, Tg), first_reached(X, Tx), X != target, Tx >= Tg.
-```
-
-Adapt `unlocked/3` to whatever gates progression (collected items, satisfied
-prerequisites, ...). Verify with a plain-Python simulation of the same process:
-repeatedly add everything currently reachable, one step at a time, and check the
-required ordering of first-reach steps against the problem text — do not reuse
-your encoding's ordering predicates in the verifier.
-
-### 4.11 Runs in Line Puzzles (Nonograms)
+### 4.9 Runs in Line Puzzles (Nonograms)
 
 Two errors recur. (1) A gap between every pair of consecutive runs: only runs of the *same* color need one; runs of different colors may touch, and a colored clue can fill its line exactly (3+2+3 in 8 cells), so a gap rule for all runs is UNSAT. (2) Optional runs (`{...} 1`) or free cells outside the runs: unless the problem says otherwise, the clue lists all runs, so place each run exactly once and make every other cell background.
 
@@ -902,13 +851,13 @@ When counting relationships between pairs of entities (connections, edges, paths
 A common mistake is to define a relationship symmetrically, which causes each instance to be counted multiple times:
 
 ```asp
-% INCORRECT: Double-counts one-way paths
-% If R3 -> R4 is one-way, this creates BOTH oneway("R3","R4") AND oneway("R4","R3")
-oneway(R1, R2) :- conn(R1, R2, _), not conn(R2, R1, _), R2 != "Goal".
-oneway(R1, R2) :- conn(R2, R1, _), not conn(R1, R2, _), R2 != "Goal".
+% INCORRECT: Double-counts one-way links
+% If a -> b is one-way, this creates BOTH oneway(a,b) AND oneway(b,a)
+oneway(X, Y) :- link(X, Y), not link(Y, X).
+oneway(X, Y) :- link(Y, X), not link(X, Y).
 
-% This constraint expects count=1, but gets count=2 for a single path!
-:- #count { R1, R2 : oneway(R1, R2) } != 1.
+% This constraint expects count=1, but gets count=2 for a single link!
+:- #count { X, Y : oneway(X, Y) } != 1.
 ```
 
 **The Solution: Canonical Ordering**
@@ -917,19 +866,19 @@ Establish a canonical representation for each pair by enforcing an ordering cons
 
 ```asp
 % CORRECT: Canonical counting with ordering
-% A one-way path between R1 and R2 (where R1 < R2) creates exactly ONE atom
-oneway_pair(R1, R2) :- R1 < R2, conn(R1, R2, _), not conn(R2, R1, _).
-oneway_pair(R1, R2) :- R1 < R2, conn(R2, R1, _), not conn(R1, R2, _).
+% A one-way link between X and Y (where X < Y) creates exactly ONE atom
+oneway_pair(X, Y) :- X < Y, link(X, Y), not link(Y, X).
+oneway_pair(X, Y) :- X < Y, link(Y, X), not link(X, Y).
 
 % Now the constraint works correctly
-:- #count { R1, R2 : oneway_pair(R1, R2) } != 1.
+:- #count { X, Y : oneway_pair(X, Y) } != 1.
 ```
 
 **Pattern Examples:**
 
 ```asp
 % Bidirectional connections (canonical form)
-bidirectional(R1, R2) :- R1 < R2, conn(R1, R2, _), conn(R2, R1, _).
+bidirectional(X, Y) :- X < Y, link(X, Y), link(Y, X).
 
 % Counting edges in undirected graphs
 edge_count(N) :- N = #count { V1, V2 : V1 < V2, edge(V1, V2) }.
@@ -954,16 +903,16 @@ While Section 5.1 focuses on filtering the *domain* of a choice rule, it is equa
 
 #### Anti-Pattern: Unbounded Choice for Relationships
 
-This mistake was observed in a Metroidvania map generation task where the goal was to create at most one connection between any two rooms.
+Suppose the goal is at most one link between any two nodes, each link of some type.
 
 **The Code:**
 ```asp
-% For each room pair, choose a requirement for a connection
-{ conn(R1, R2, Req) : requirement(Req) } :- room_pair(R1, R2).
+% For each pair, choose a type for a link
+{ link(X, Y, T) : link_type(T) } :- pair(X, Y).
 ```
 
 **The Problem:**
-This rule allows the solver to generate **multiple** connections between the same two rooms, e.g., `conn(r1,r2,"null")` and `conn(r1,r2,"RedKey")` simultaneously. This is logically incorrect for the problem and creates a combinatorial explosion in the search space, often leading to `grounding stopped` errors or timeouts.
+This rule allows the solver to generate **multiple** links between the same two nodes, e.g., `link(a,b,plain)` and `link(a,b,locked)` simultaneously. This is logically incorrect for the problem and creates a combinatorial explosion in the search space, often leading to `grounding stopped` errors or timeouts.
 
 #### Correct Pattern: Bounded Choice for Unique Relationships
 
@@ -971,12 +920,12 @@ By adding bounds, you enforce the intended logic directly and efficiently.
 
 **The Code:**
 ```asp
-% For each room pair, choose AT MOST ONE requirement for a connection
-0 { conn(R1, R2, Req) : requirement(Req) } 1 :- room_pair(R1, R2).
+% For each pair, choose AT MOST ONE type for a link
+0 { link(X, Y, T) : link_type(T) } 1 :- pair(X, Y).
 ```
 
 **The Solution:**
-This rule correctly states: "For any pair of rooms (R1, R2), choose **zero or one** requirement for a connection." This enforces the intended unique relationship, drastically reduces the search space, and prevents logical errors.
+This rule correctly states: "For any pair (X, Y), choose **zero or one** type for a link." This enforces the intended unique relationship, drastically reduces the search space, and prevents logical errors.
 
 #### General Patterns for Cardinality Control
 

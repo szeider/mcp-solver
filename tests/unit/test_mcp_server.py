@@ -806,14 +806,32 @@ async def test_select_backend_unpublished_version_without_checkout(engine, monke
 
 # --- submit_code: standalone run of the accepted program --------------------
 
-VERIFIED = (
-    "import json\n"
-    "def verify(sol):\n"
-    "    return sol['x'] == 3\n"
-    "sol = {'x': 3}\n"
-    "assert verify(sol)\n"
-    "print(json.dumps(sol))\n"
-)
+
+def _shaped(solve_body: str = "    return {'x': 3}\n", check: str = "x == 3") -> str:
+    """A program in the templates' shape: solve(), verify(), main(check).
+
+    Its output differs between the plain run and the self-check ("checked"
+    is false, resp. true), so a test can tell which one was recorded.
+    """
+    return (
+        "import json\n"
+        "def solve():\n"
+        f"{solve_body}"
+        "def verify(sol):\n"
+        f"    x = sol['x']\n"
+        f"    assert {check}, 'wrong x'\n"
+        "def main(check: bool = False):\n"
+        "    sol = solve()\n"
+        "    if check:\n"
+        "        verify(sol)\n"
+        "    print(json.dumps(dict(sol, checked=check)))\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n"
+    )
+
+
+VERIFIED = _shaped()
+PLAIN_OUT = '{"x": 3, "checked": false}\n'
 
 
 def _links(result):
@@ -830,18 +848,26 @@ async def test_submit_runs_program_standalone(engine):
             "ok": True,
             "executed": True,
             "exit_code": 0,
-            "stdout": '{"x": 3}\n',
+            "stdout": PLAIN_OUT,
             "message": mcp_server.RUN_OK_MESSAGE,
+            "self_check": {
+                "status": "passed",
+                "message": "Self-check passed: main(check=True) ran and returned"
+                " without error.",
+            },
         }
         sc = result.structured_content
-        assert sc["stdout"] == '{"x": 3}\n'
+        assert sc["stdout"] == PLAIN_OUT
         assert sc["stats"]["submit_attempts"] == 1
+        assert sc["stats"]["self_check"] == "passed"
         assert len(_links(result)) == 1
         assert list(mcp_server._submissions.values()) == [VERIFIED]
         assert mcp_server._episode["submit_ok"] == 1
-    args = engine.uv_log.read_text().split()
-    assert args[:4] == ["run", "--no-project", "--isolated", "--python"]
-    assert args[5:7] == ["--with", "cpmpy"] and args[-1].endswith("submission.py")
+    # The plain run, then the self-check in the same kind of environment.
+    plain, check = (ln.split() for ln in engine.uv_log.read_text().splitlines())
+    assert plain[:4] == ["run", "--no-project", "--isolated", "--python"]
+    assert plain[5:7] == ["--with", "cpmpy"] and plain[-1].endswith("submission.py")
+    assert check[:-1] == plain[:-1] and check[-1].endswith("self_check.py")
 
 
 async def test_submit_failing_standalone_is_rejected_not_stored(
@@ -956,9 +982,11 @@ async def test_submit_run_uses_packages_added_by_routed_reset(engine):
         # A backend switch resets the list to the new backend's packages.
         await session.call_tool("select_backend", {"solver": "z3"})
         await session.call_tool("submit_code", {"code": VERIFIED})
-    first, second = engine.uv_log.read_text().splitlines()
-    assert "--with python-sat[pb] --with numpy python" in first
-    assert "--with z3-solver python" in second
+    # Each submission: the plain run and the self-check, same packages.
+    runs = engine.uv_log.read_text().splitlines()
+    assert len(runs) == 4
+    assert all("--with python-sat[pb] --with numpy python" in r for r in runs[:2])
+    assert all("--with z3-solver python" in r for r in runs[2:])
 
 
 async def test_standalone_run_does_not_block_kernel_tools(engine, tmp_path):
@@ -994,6 +1022,311 @@ async def test_standalone_run_does_not_block_kernel_tools(engine, tmp_path):
             result = await running
         assert not result.is_error
         assert result.structured_content["stdout"] == "1\n"
+
+
+# --- submit_code: the self-check main(check=True) is information only -------
+
+INFO = mcp_server._SELF_CHECK_INFO
+
+
+def _self_check(result) -> dict:
+    return json.loads(result.content[0].text)["self_check"]
+
+
+def _not_available(what: str) -> dict:
+    return {
+        "status": "not_available",
+        "message": "Self-check not available: " + what + INFO,
+    }
+
+
+async def test_self_check_failure_is_reported_not_rejected(
+    engine, monkeypatch, tmp_path
+):
+    # The plain run prints a solution; verify() rejects it. The submission
+    # is accepted and stored, the failure reported with the assertion line.
+    stats_file = tmp_path / "stats.jsonl"
+    monkeypatch.setenv("MCP_SOLVER_STATS", str(stats_file))
+    code = _shaped(check="x == 4")
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": code})
+        assert not result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["ok"] is True and payload["stdout"] == PLAIN_OUT
+        check = payload["self_check"]
+        assert check["status"] == "failed"
+        assert check["message"] == (
+            "Self-check failed: main(check=True) raised AssertionError: wrong x."
+            " Either the solution or verify() is wrong: check both against the"
+            " problem statement, and if the solution is wrong, fix the program"
+            " and submit it again." + INFO
+        )
+        assert result.structured_content["stats"]["self_check"] == "failed"
+        assert len(_links(result)) == 1
+        assert list(mcp_server._submissions.values()) == [code]
+        snap = json.loads((tmp_path / "stats.jsonl.open").read_text())
+        assert snap["submit_ok"] == 1 and snap["self_check"] == "failed"
+    row = json.loads(stats_file.read_text())
+    assert row["self_check"] == "failed"
+
+
+async def test_self_check_not_available_without_main_accepting_check(engine):
+    no_main = "print('{\"x\": 3}')\n"
+    main_without_check = (
+        "def main():\n    print('{\"x\": 3}')\nif __name__ == '__main__':\n    main()\n"
+    )
+    expected = _not_available("the program has no main() that accepts check=True.")
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        for code in (no_main, main_without_check):
+            result = await session.call_tool("submit_code", {"code": code})
+            assert not result.is_error
+            assert _self_check(result) == expected
+            assert result.structured_content["stats"]["self_check"] == "not_available"
+    assert len(mcp_server._submissions) == 2
+
+
+async def test_exit_during_import_is_not_a_passed_check(engine):
+    # Exit code 0 before main(check=True) was called (here: no main at all,
+    # the import itself exits) is no evidence of a check.
+    exits_on_import = "import sys\nprint('{\"x\": 3}')\nsys.exit(0)\n"
+    # main(check=True) that ends with sys.exit(0) did run: passed.
+    exits_in_main = (
+        "import sys\n"
+        "def main(check=False):\n"
+        "    print('{\"x\": 3}')\n"
+        "    sys.exit(0)\n"
+        "if __name__ == '__main__':\n    main()\n"
+    )
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": exits_on_import})
+        assert not result.is_error
+        assert _self_check(result) == _not_available(
+            "the program exited with code 0 before main(check=True) returned"
+            " (for example during its import)."
+        )
+        result = await session.call_tool("submit_code", {"code": exits_in_main})
+        assert not result.is_error
+        assert _self_check(result)["status"] == "passed"
+
+
+async def test_failing_plain_run_is_rejected_without_self_check(engine):
+    code = _shaped(solve_body="    raise ValueError('no model')\n")
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": code})
+        assert result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["ok"] is False and "self_check" not in payload
+        assert payload["error"].startswith("ValueError: no model.")
+        assert result.structured_content["stats"]["self_check"] is None
+    assert mcp_server._submissions == {}
+    # Only the plain run was started.
+    assert len(engine.uv_log.read_text().splitlines()) == 1
+
+
+async def test_rejection_keeps_the_last_accepted_self_check(engine):
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": VERIFIED})
+        assert result.structured_content["stats"]["self_check"] == "passed"
+        result = await session.call_tool("submit_code", {"code": "PLACEHOLDER"})
+        assert result.is_error
+        assert result.structured_content["stats"]["self_check"] == "passed"
+        assert mcp_server._episode["self_check"] == "passed"
+        result = await session.call_tool(
+            "submit_code", {"code": _shaped(check="x == 4")}
+        )
+        assert not result.is_error
+        assert result.structured_content["stats"]["self_check"] == "failed"
+        assert mcp_server._episode["submit_ok"] == 2
+
+
+async def test_self_check_setup_error_keeps_the_submission(engine, monkeypatch):
+    # Any failure to set up the check (here PermissionError when starting
+    # it) is reported; the plain run's acceptance stands.
+    original = mcp_server._run_standalone
+
+    def broken_check(*args, **kwargs):
+        if kwargs.get("check"):
+            raise PermissionError("denied")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_server, "_run_standalone", broken_check)
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": VERIFIED})
+        assert not result.is_error
+        payload = json.loads(result.content[0].text)
+        assert payload["ok"] is True and payload["stdout"] == PLAIN_OUT
+        assert payload["self_check"] == _not_available(
+            "its run could not start (PermissionError: denied)."
+        )
+        assert len(_links(result)) == 1
+        assert list(mcp_server._submissions.values()) == [VERIFIED]
+        assert mcp_server._episode["submit_ok"] == 1
+        assert mcp_server._episode["self_check"] == "not_available"
+
+
+async def test_self_check_skipped_when_plain_run_used_the_budget(engine, monkeypatch):
+    # The plain run takes about 2 s of a 4 s budget; with 2.5 s required for
+    # the check, none is started.
+    monkeypatch.setattr(mcp_server, "STANDALONE_TIMEOUT", 4)
+    monkeypatch.setattr(mcp_server, "_MIN_CHECK_SECONDS", 2.5)
+    code = _shaped(solve_body="    import time; time.sleep(2)\n    return {'x': 3}\n")
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": code})
+    assert not result.is_error
+    assert _self_check(result) == _not_available(
+        "less than 2.5 s of the 4 s budget were left for main(check=True) after"
+        " the plain run."
+    )
+    assert len(engine.uv_log.read_text().splitlines()) == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_self_check_gets_only_the_rest_of_the_budget(engine, monkeypatch):
+    # The plain run takes about 2 s of a 4 s budget and verify() hangs: the
+    # check is killed when the 4 s are over (a check with a fresh budget
+    # would end only after about 6 s) and reported as not available; the
+    # submission stands.
+    monkeypatch.setattr(mcp_server, "STANDALONE_TIMEOUT", 4)
+    monkeypatch.setattr(mcp_server, "_MIN_CHECK_SECONDS", 0.5)
+    code = _shaped(
+        solve_body="    import time; time.sleep(2)\n    return {'x': 3}\n",
+        check="__import__('time').sleep(600)",
+    )
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        start = time.monotonic()
+        result = await session.call_tool("submit_code", {"code": code})
+        elapsed = time.monotonic() - start
+    assert elapsed < 5.2, elapsed
+    assert not result.is_error
+    assert _self_check(result) == _not_available(
+        "main(check=True) did not finish before the 4 s budget ran out."
+    )
+
+
+def test_check_time_is_measured_right_before_the_start(monkeypatch):
+    # The check gets the time left until the deadline when its process
+    # starts, not a value computed before the worker thread ran; past the
+    # deadline (less than _MIN_CHECK_SECONDS left) it does not start.
+    timeouts = []
+
+    def fake_run(program, packages, timeout, **kwargs):
+        timeouts.append(timeout)
+        return ProgramRun(0, "", "", False)
+
+    monkeypatch.setattr(mcp_server, "run_isolated", fake_run)
+    deadline = time.monotonic() + 30
+    time.sleep(0.3)
+    run = mcp_server._run_standalone("print(1)", [], deadline=deadline, check=True)
+    assert run is not None and 29 - 0.5 < timeouts[0] <= 29.7 + 0.01
+    late = time.monotonic() + mcp_server._MIN_CHECK_SECONDS - 0.1
+    assert mcp_server._run_standalone("print(1)", [], deadline=late, check=True) is None
+    assert len(timeouts) == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_self_check_over_output_budget_is_failed_even_on_exit_0(engine):
+    # verify() writes 5 MB to stdout and returns: the check exits 0 (or is
+    # killed for its output), and either way it is no passed check.
+    code = _shaped(check="__import__('sys').stdout.write('x' * 5_000_000)")
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": code})
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["stdout"] == PLAIN_OUT
+    check = payload["self_check"]
+    assert check["status"] == "failed"
+    assert check["message"].startswith(
+        "Self-check failed: main(check=True) wrote more than 4,000,000 bytes"
+    )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_cancelled_submission_kills_its_self_check(engine, tmp_path):
+    pid_file = tmp_path / "pid"
+    # verify() writes its pid, then hangs (a list evaluates both).
+    hang = (
+        f"[open({str(pid_file)!r}, 'w').write(str(__import__('os').getpid())),"
+        " __import__('time').sleep(600)]"
+    )
+    pids = []
+    try:
+        async with _session() as session:
+            await session.call_tool("select_backend", {"solver": "z3"})
+            task = asyncio.create_task(mcp_server.submit_code(_shaped(check=hang)))
+            pids.append(await _read_pid(pid_file))
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert _pid_gone(pids[0])
+            assert not mcp_server._standalone_runs
+    finally:
+        _kill(pids)
+
+
+def test_self_check_outcomes_of_other_runs():
+    outcome = mcp_server._self_check_outcome
+    done = mcp_server._CHECK_DONE_MARKER
+    status, text = outcome(ProgramRun(2, "", "warning\nboom\n", False))
+    assert status == "failed"
+    assert text.startswith(
+        "Self-check failed: main(check=True) ended with exit code 2 (last line"
+        " of stderr: boom)."
+    )
+    assert text.endswith(INFO)
+    # Over the output budget is a failure, also when the run exited 0.
+    for exit_code in (None, 0):
+        status, text = outcome(ProgramRun(exit_code, "", done, False, True))
+        assert status == "failed" and "wrote more than 4,000,000 bytes" in text
+    status, text = outcome(ProgramRun(None, None, "uv not found on PATH", False))
+    assert (status, text) == (
+        "not_available",
+        "Self-check not available: its run could not start (uv not found on"
+        " PATH)." + INFO,
+    )
+    # A program that exits 86 on its own is not mistaken for a missing main.
+    status, _ = outcome(ProgramRun(86, "", "", False))
+    assert status == "failed"
+    # Exit 0 counts as passed only with the driver's completion marker.
+    assert outcome(ProgramRun(0, "", "", False))[0] == "not_available"
+    assert outcome(ProgramRun(0, "", f"x\n{done}\n", False))[0] == "passed"
+    # A huge last line of stderr (sys.exit("e" * 100_000)) is cut.
+    status, text = outcome(ProgramRun(1, "", "e" * 100_000, False))
+    assert status == "failed" and len(text) < 1_000
+    assert "e" * mcp_server._MAX_EXC_LINE + " ...)." in text
+
+
+def test_self_check_messages_end_alike():
+    # Every not-available and failed message ends with the same sentence.
+    runs = [
+        None,
+        ProgramRun(None, "", "", True),
+        ProgramRun(None, None, "uv not found on PATH", False),
+        ProgramRun(86, "", mcp_server._NO_CHECK_MARKER, False),
+        ProgramRun(0, "", "", False),
+        ProgramRun(1, "", "Traceback (most recent call last):\nValueError: v\n", False),
+        ProgramRun(None, "", "", False, True),
+    ]
+    for run in runs:
+        status, text = mcp_server._self_check_outcome(run)
+        assert status in ("not_available", "failed"), run
+        assert text.endswith(INFO), run
+
+
+def test_submit_description_states_the_self_check_is_information():
+    flat = " ".join(mcp_server.submit_code.__doc__.split())
+    assert "main(check=True)" in flat
+    assert "the self-check does not decide acceptance" in flat
+    assert "separate fresh isolated environment" in flat
+    assert "same environment" not in flat
 
 
 # --- submit_code: the rejection text names the actual failure ----------------
@@ -1218,8 +1551,8 @@ async def test_submit_rejection_texts_end_to_end(engine):
 
 
 TEST_FIRST_RULE = (
-    "run the complete program (solve, verify, print) with python_exec and check"
-    " its output;"
+    "run the complete program with python_exec, calling main(check=True), and"
+    " check its output;"
 )
 
 
@@ -1237,6 +1570,29 @@ def test_test_first_rule_stated_everywhere():
         assert TEST_FIRST_RULE in flat, name
         assert "not for a first try" in flat, name
         assert "submit again" not in flat, name
+
+
+SELF_CHECK_SENTENCES = (
+    "The self-check is a heuristic: when it fails, either the solution or"
+    " verify() is wrong, so check both against the problem statement; a wrong"
+    " verify() does not make a correct solution wrong.",
+    "The guard stays main(): to run the check in the kernel, call"
+    " main(check=True) in a separate statement after the program text, never"
+    " by changing the guard; the submitted program is the text with the guard"
+    " main().",
+)
+
+
+def test_templates_state_self_check_heuristic_and_guard_rule():
+    # The self-check does not gate a correct solution, and the guard is not
+    # edited to get the check in the kernel (a live solve submitted a guard
+    # calling main(check=True)).
+    for solver in BACKENDS:
+        text = mcp_server.get_template(solver)
+        flat = " ".join(text.replace("`", "").split())
+        for sentence in SELF_CHECK_SENTENCES:
+            assert sentence in flat, (solver, sentence[:30])
+        assert "Verification Requirement" not in flat, solver
 
 
 async def test_kernel_note_states_test_first_rule(engine):

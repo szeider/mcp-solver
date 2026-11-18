@@ -6,7 +6,8 @@ verifies solver programs itself against a persistent IPython kernel. The
 server contributes the solver value: backend selection, solver packages
 injected into the kernel, the modeling instructions (templates), and
 the ``submit_code`` finish line (compile check, then one standalone run of
-the program). It calls no LLM and needs no API key.
+the program, then its self-check as information). It calls no LLM and needs
+no API key.
 
 Kernel model: the solving kernel has the fixed engine kernel id
 ``"solver"`` (:data:`SOLVER_KERNEL`). Every ``select_backend`` call does one
@@ -37,6 +38,7 @@ across the host's tool calls.
 
 import asyncio
 import contextlib
+import functools
 import json
 import logging
 import math
@@ -85,10 +87,10 @@ Backends:
 Unsure which backend fits? Read the resource mcp-solver://guide first.
 
 Then iterate with python_exec (write, run, verify against the problem
-statement). Before calling submit_code, run the complete program (solve,
-verify, print) with python_exec and check its output; submit_code is for the
-finished, tested program, not for a first try. UNSAT / "no solution exists"
-is a valid outcome.
+statement). Before calling submit_code, run the complete program with
+python_exec, calling main(check=True), and check its output; submit_code is
+for the finished, tested program, not for a first try. UNSAT / "no solution
+exists" is a valid outcome.
 """
 
 GUIDE = """\
@@ -99,10 +101,13 @@ right solver library and returns modeling instructions; (2) iterate
 `python_exec` (it runs in that kernel automatically): encode, run the real
 solver, verify the result independently against the problem statement;
 (3) finish with `submit_code` (the final self-contained program in the
-template's shape: `solve()`, `verify(solution)`, a `__main__` guard that
-verifies before printing). Before calling submit_code, run the complete
-program (solve, verify, print) with python_exec and check its output;
-submit_code is for the finished, tested program, not for a first try.
+template's shape: `solve()`, `verify(solution)`, `main(check=False)` that
+runs `verify()` only when `check` is true and prints the solution, and a
+`__main__` guard that calls `main()`). Before calling submit_code, run the
+complete program with python_exec, calling `main(check=True)`, and check its
+output; submit_code is for the finished, tested program, not for a first
+try. The self-check is a heuristic: it must hold for every solution of the
+model, not only the one the solver happened to return.
 
 Choosing a backend:
 - **pysat** — pure Boolean structure: placements, colorings, covers,
@@ -183,6 +188,47 @@ RUN_OK_CUT_MESSAGE = (
 )
 NOT_EXECUTED_MESSAGE = "Compile check only, not executed: no backend selected."
 
+# After an accepted plain run, submit_code runs the program's self-check,
+# main(check=True), as information: it never decides acceptance. The driver
+# below loads the program as a module (so its __main__ guard does not run)
+# and calls main(check=True); without a main() that accepts check=True it
+# exits with _NO_CHECK_EXIT after writing _NO_CHECK_MARKER, and once
+# main(check=True) has returned (or exited with code 0) it writes
+# _CHECK_DONE_MARKER, so an exit during the import is not taken for a
+# passed check. The check runs within what is left of STANDALONE_TIMEOUT,
+# measured right before its process starts; with less than
+# _MIN_CHECK_SECONDS left it is not run.
+_MIN_CHECK_SECONDS = 5
+_NO_CHECK_EXIT = 86
+_NO_CHECK_MARKER = "mcp-solver: no main() that accepts check=True"
+_CHECK_DONE_MARKER = "mcp-solver: main(check=True) returned"
+_CHECK_DRIVER = f"""\
+import importlib.util
+import inspect
+import sys
+from pathlib import Path
+
+_path = Path(__file__).resolve().parent / "submission.py"
+_spec = importlib.util.spec_from_file_location("submission", _path)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules["submission"] = _module
+_spec.loader.exec_module(_module)
+_main = getattr(_module, "main", None)
+try:
+    inspect.signature(_main).bind(check=True)
+except (TypeError, ValueError):
+    sys.stderr.write({_NO_CHECK_MARKER!r} + "\\n")
+    sys.exit({_NO_CHECK_EXIT})
+try:
+    _main(check=True)
+except SystemExit as _exit:
+    if _exit.code not in (None, 0):
+        raise
+sys.stdout.flush()
+sys.stderr.write("\\n" + {_CHECK_DONE_MARKER!r} + "\\n")
+sys.stderr.flush()
+"""
+
 # Solve statistics per episode (episode = one select_backend up to the next
 # one, or server shutdown). The host's tokens are invisible to the server,
 # but its tool usage is not: counts, exec failures, submissions, wall time.
@@ -206,6 +252,9 @@ def _episode_open(solver: str) -> None:
         # 0 means the host submitted without running anything in the kernel.
         "exec_before_first_submit": None,
         "code_bytes": None,
+        # Self-check of the last accepted submission (None: none accepted
+        # after a standalone run): passed, failed or not_available.
+        "self_check": None,
     }
 
 
@@ -266,6 +315,7 @@ def _episode_snapshot(episode: dict | None) -> dict | None:
         "exec_failures": episode["exec_failures"],
         "submit_attempts": episode["submit_attempts"],
         "exec_before_first_submit": episode["exec_before_first_submit"],
+        "self_check": episode["self_check"],
         "wall_seconds": round(time.monotonic() - episode["t0"], 1),
     }
 
@@ -416,7 +466,7 @@ async def select_backend(solver: str) -> str:
         f" {', '.join(packages)}. python_exec,"
         " python_status, python_interrupt and python_reset without kernel_id"
         " act on this kernel. Before calling submit_code, run the complete"
-        " program (solve, verify, print) with python_exec and check its"
+        " program with python_exec, calling main(check=True), and check its"
         " output; submit_code is for the finished, tested program (the"
         " template's shape, self-contained), not for a first try."
     )
@@ -534,21 +584,41 @@ async def python_interrupt(kernel_id: str | None = None) -> str:
     return await _engine_call("python_interrupt", args)
 
 
-def _run_standalone(code: str, packages: list[str], on_start=None) -> ProgramRun:
+def _run_standalone(
+    code: str,
+    packages: list[str],
+    on_start=None,
+    *,
+    deadline: float | None = None,
+    check: bool = False,
+) -> ProgramRun | None:
     """Run *code* once on its own: a fresh temporary directory, an isolated
     uv environment with *packages*, the filtered environment, its own
-    process group, STANDALONE_TIMEOUT. Blocking; submit_code calls it in a
-    worker thread (*on_start* receives the Popen, see run_isolated)."""
+    process group, STANDALONE_TIMEOUT. With *check* it runs the self-check
+    driver instead, which imports the program and calls main(check=True).
+    With *deadline* (a time.monotonic() value) the run gets the time left
+    until then, measured right before it starts; None is returned without a
+    run when less than _MIN_CHECK_SECONDS are left. Blocking; submit_code
+    calls it in a worker thread (*on_start* receives the Popen, see
+    run_isolated)."""
     with tempfile.TemporaryDirectory(
         prefix="mcp-solver-run-", ignore_cleanup_errors=True
     ) as tmp:
         program = Path(tmp) / "submission.py"
         program.write_text(code, encoding="utf-8")
+        if check:
+            program = Path(tmp) / "self_check.py"
+            program.write_text(_CHECK_DRIVER, encoding="utf-8")
+        timeout = STANDALONE_TIMEOUT
+        if deadline is not None:
+            timeout = deadline - time.monotonic()
+            if timeout < _MIN_CHECK_SECONDS:
+                return None
         try:
             return run_isolated(
                 program,
                 packages,
-                STANDALONE_TIMEOUT,
+                timeout,
                 capture=True,
                 cwd=tmp,
                 on_start=on_start,
@@ -707,19 +777,95 @@ def _run_failure(run: ProgramRun, packages: list[str]) -> str | None:
     return f"{head} {why} {_FIX}"
 
 
+SELF_CHECK_PASSED = "passed"
+SELF_CHECK_FAILED = "failed"
+SELF_CHECK_NOT_AVAILABLE = "not_available"
+# The last sentence of every not-available and failed self-check message.
+_SELF_CHECK_INFO = (
+    " The submission is accepted on its plain run; the self-check is information only."
+)
+
+
+def _capped(text: str) -> str:
+    """*text* cut to _MAX_EXC_LINE characters, marked with " ..." if cut."""
+    return text if len(text) <= _MAX_EXC_LINE else text[:_MAX_EXC_LINE] + " ..."
+
+
+def _self_check_outcome(run: ProgramRun | None) -> tuple[str, str]:
+    """The self-check's status and message for the reply.
+
+    *run* is the run of main(check=True), None when it was not run because
+    less than _MIN_CHECK_SECONDS of the budget were left. "passed" needs the
+    driver's completion marker: main(check=True) returned or exited with
+    code 0.
+    """
+    budget = f"{STANDALONE_TIMEOUT} s budget"
+    not_available = "Self-check not available: "
+    stderr = (run.stderr or "") if run is not None else ""
+    if run is None:
+        what = (
+            f"less than {_MIN_CHECK_SECONDS} s of the {budget} were left for"
+            " main(check=True) after the plain run."
+        )
+    elif run.output_exceeded:
+        return SELF_CHECK_FAILED, _self_check_failed(
+            f"wrote more than {CAPTURE_BUDGET_BYTES:,} bytes of output"
+        )
+    elif run.timed_out:
+        what = f"main(check=True) did not finish before the {budget} ran out."
+    elif run.exit_code is None:
+        reason = _capped((stderr.strip() or "unknown reason").rstrip("."))
+        what = f"its run could not start ({reason})."
+    elif run.exit_code == _NO_CHECK_EXIT and _NO_CHECK_MARKER in stderr:
+        what = "the program has no main() that accepts check=True."
+    elif run.exit_code == 0 and _CHECK_DONE_MARKER in stderr:
+        return SELF_CHECK_PASSED, (
+            "Self-check passed: main(check=True) ran and returned without error."
+        )
+    elif run.exit_code == 0:
+        what = (
+            "the program exited with code 0 before main(check=True) returned"
+            " (for example during its import)."
+        )
+    else:
+        exc = _final_exception(stderr)
+        if exc is not None:
+            return SELF_CHECK_FAILED, _self_check_failed(f"raised {exc[1]}")
+        last = next(
+            (ln.strip() for ln in reversed(stderr.splitlines()) if ln.strip()), ""
+        )
+        detail = f"ended with exit code {run.exit_code}"
+        if last:
+            detail += f" (last line of stderr: {_capped(last)})"
+        return SELF_CHECK_FAILED, _self_check_failed(detail)
+    return SELF_CHECK_NOT_AVAILABLE, not_available + what + _SELF_CHECK_INFO
+
+
+def _self_check_failed(what: str) -> str:
+    return (
+        f"Self-check failed: main(check=True) {_sentence(what)} Either the"
+        " solution or verify() is wrong: check both against the problem"
+        " statement, and if the solution is wrong, fix the program and submit"
+        " it again." + _SELF_CHECK_INFO
+    )
+
+
 @mcp.tool()
 async def submit_code(code: str) -> CallToolResult:
     """Submit the final, verified, self-contained solver program.
 
-    Before calling submit_code, run the complete program (solve, verify,
-    print) with python_exec and check its output; submit_code is for the
+    Before calling submit_code, run the complete program with python_exec,
+    calling main(check=True), and check its output; submit_code is for the
     finished, tested program, not for a first try.
     The server checks that it compiles and, once a backend is selected,
     runs it once more on its own in a clean environment (no kernel state,
     at most 240 s including environment setup, at most 4 MB of output) and
-    returns its output; a
-    program that fails there is rejected with the reason and may be fixed
-    and submitted again.
+    returns its output; a program that fails there is rejected with the
+    reason and may be fixed and submitted again. After an accepted run the
+    server calls main(check=True) in a separate fresh isolated environment
+    with the same packages and filtered environment variables, within what
+    is left of the 240 s, and reports the self-check as passed, failed or
+    not available; the self-check does not decide acceptance.
     Accepted programs are stored and linked as a resource (the last 50).
     """
     # The episode and the packages of the backend this submission is made
@@ -761,10 +907,33 @@ async def submit_code(code: str) -> CallToolResult:
             if cancelled:
                 signal_process_group(proc, signal.SIGKILL)
 
+        # The plain run decides acceptance. After an accepted one, the
+        # self-check, main(check=True), runs within what is left of the
+        # budget and is only reported: no failure of it, its setup
+        # included, rejects the submission (cancellation still propagates).
+        check_run = None
         try:
+            deadline = time.monotonic() + STANDALONE_TIMEOUT
             run = await asyncio.to_thread(
                 _run_standalone, code, list(packages), started
             )
+            failure = _run_failure(run, list(packages))
+            if failure is None:
+                try:
+                    check_run = await asyncio.to_thread(
+                        functools.partial(
+                            _run_standalone,
+                            code,
+                            list(packages),
+                            started,
+                            deadline=deadline,
+                            check=True,
+                        )
+                    )
+                except Exception as e:
+                    check_run = ProgramRun(
+                        None, None, f"{type(e).__name__}: {e}", False
+                    )
         except asyncio.CancelledError:
             cancelled = True
             for proc in procs:
@@ -774,16 +943,19 @@ async def submit_code(code: str) -> CallToolResult:
             _standalone_runs.difference_update(procs)
         stdout, out_cut = _tail(run.stdout, _STDOUT_CAP)
         notes = [f"stdout cut to its last {_STDOUT_CAP} characters."] if out_cut else []
-        failure = _run_failure(run, list(packages))
         if failure is None:
             message = reply.get("message")
             ran = RUN_OK_CUT_MESSAGE if out_cut else RUN_OK_MESSAGE
+            status, check_message = _self_check_outcome(check_run)
             reply.update(
                 executed=True,
                 exit_code=0,
                 stdout=stdout,
                 message=f"{message} {ran}" if message else ran,
+                self_check={"status": status, "message": check_message},
             )
+            if episode is not None:
+                episode["self_check"] = status
         else:
             accepted = False
             stderr, err_cut = _tail(run.stderr, _STDERR_CAP)

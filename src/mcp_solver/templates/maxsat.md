@@ -53,14 +53,28 @@ def verify(solution: dict) -> None:
     assert sum(WEIGHTS[i] for i in items) <= CAPACITY, "over capacity"
     assert solution["value"] == sum(VALUES[i] for i in items), "wrong value"
 
-if __name__ == "__main__":
+def main(check: bool = False) -> None:
     solution = solve()
-    verify(solution)
+    if check:
+        verify(solution)
     print(json.dumps(solution))
+
+if __name__ == "__main__":
+    main()
 ```
 
 `verify()` takes only the solution and reads the data from module-level
-constants; importing the module must not solve or print. RC2 is exact:
+constants; importing the module must not solve or print. `main()` prints
+the solution without checking it, `main(check=True)` runs `verify()` first.
+In the kernel, develop with `solve()` and `verify()`, then run
+`main(check=True)` as the final test. The check must hold for every
+solution of the model, not only the one the solver happened to return.
+The self-check is a heuristic: when it fails, either the solution or
+`verify()` is wrong, so check both against the problem statement; a wrong
+`verify()` does not make a correct solution wrong. The guard stays
+`main()`: to run the check in the kernel, call `main(check=True)` in a
+separate statement after the program text, never by changing the guard;
+the submitted program is the text with the guard `main()`. RC2 is exact:
 `compute()` returns a proven optimum, no re-solve needed.
 
 ## The Polarity Rule (CRITICAL — #1 source of errors)
@@ -178,14 +192,14 @@ weights to the underlying variables again.
   with a short explanation of the conflicting constraints if the format
   permits one.
 
-## Verification Requirement (MANDATORY)
+## Verification Workflow (MANDATORY steps)
 
 Polarity errors produce confident wrong answers, so verification must be
 independent of the encoding:
 
 1. **Decode** the model into problem-level selections/assignments.
 2. **Write a `verify(solution)` function** (part of the submitted program,
-   called before printing) from the problem TEXT alone:
+   called by `main(check=True)`) from the problem TEXT alone:
    - re-check every hard constraint with plain Python;
    - recompute the objective (total value/cost) directly from the decoded
      solution — never from solver internals;
@@ -203,8 +217,8 @@ independent of the encoding:
    hand (e.g. add the highest-value unselected item, dropping what blocks
    it) and confirm the objective does not improve while respecting hard
    constraints — a cheap smoke test against inverted polarity.
-5. **Before calling `submit_code`, run the complete program** (solve,
-   verify, print) with python_exec and check its output; `submit_code` is
+5. **Before calling `submit_code`, run the complete program** with
+   python_exec, calling `main(check=True)`, and check its output; `submit_code` is
    for the finished, tested program, not for a first try.
 6. **For an UNSAT answer**: justify every hard clause from the problem
    statement; if any clause lacks justification, remove it and re-solve

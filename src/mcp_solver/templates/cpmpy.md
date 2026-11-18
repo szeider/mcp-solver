@@ -33,13 +33,28 @@ def verify(solution: dict) -> None:
     assert sum(WEIGHTS[i] for i in items) <= CAPACITY, "over capacity"
     assert solution["value"] == sum(VALUES[i] for i in items), "wrong value"
 
-if __name__ == "__main__":
+def main(check: bool = False) -> None:
     solution = solve()
-    verify(solution)
+    if check:
+        verify(solution)
     print(json.dumps(solution))
+
+if __name__ == "__main__":
+    main()
 ```
 `verify()` takes only the solution and reads the data from module-level
-constants; importing the module must not solve or print.
+constants; importing the module must not solve or print. `main()` prints
+the solution without checking it, `main(check=True)` runs `verify()` first.
+In the kernel, develop with `solve()` and `verify()`, then run
+`main(check=True)` as the final test (more than once with a parallel
+solver, see Verification Workflow 3). The check must hold for every
+solution of the model, not only the one the solver happened to return.
+The self-check is a heuristic: when it fails, either the solution or
+`verify()` is wrong, so check both against the problem statement; a wrong
+`verify()` does not make a correct solution wrong. The guard stays
+`main()`: to run the check in the kernel, call `main(check=True)` in a
+separate statement after the program text, never by changing the guard;
+the submitted program is the text with the guard `main()`.
 
 ## Essential Constraints
 - `AllDifferent(vars)` - all different values
@@ -77,12 +92,12 @@ constants; importing the module must not solve or print.
 - Check array dimensions and value ranges match the spec before submitting
 - For UNSAT, output the format's UNSAT form (or `{"error": "No solution"}` if none is specified)
 
-## Verification Requirement (MANDATORY)
+## Verification Workflow (MANDATORY steps)
 
 CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
 
 1. **Solve and extract** the solution values
-2. **Write a `verify(solution)` function** (part of the submitted program, called before printing) that checks every constraint from the problem statement using plain Python loops and asserts — independent of your CPMpy model:
+2. **Write a `verify(solution)` function** (part of the submitted program, called by `main(check=True)`) that checks every constraint from the problem statement using plain Python loops and asserts — independent of your CPMpy model:
    ```python
    def verify(result):
        # Check array shapes — sizes re-derived from the problem text,
@@ -101,9 +116,13 @@ CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
    your model introduced — `assert len(x) == my_total` proves nothing if `my_total`
    encodes a misreading. If your model and your verifier share an assumption, a
    wrong assumption passes silently.
-3. **Before calling `submit_code`, run the complete program** (solve,
-   verify, print) with python_exec and check its output; `submit_code` is
-   for the finished, tested program, not for a first try.
+3. **Before calling `submit_code`, run the complete program** with
+   python_exec, calling `main(check=True)`, and check its output; `submit_code` is
+   for the finished, tested program, not for a first try. The default
+   solver, OR-Tools CP-SAT, searches with parallel workers, so two runs may
+   return different solutions: run `main(check=True)` more than once, or
+   solve with `model.solve("ortools", num_workers=1)` (solver parameters
+   need the solver name) for a reproducible run, unless a time limit stops it.
 4. **For optimization**: `verify()` recomputes the objective value from the
    data. Optimality: `model.solve()` returns True also when a time limit
    stopped it with a merely feasible solution; the solution is optimal only

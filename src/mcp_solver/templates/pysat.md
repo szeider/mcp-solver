@@ -56,14 +56,28 @@ def verify(solution: dict) -> None:
     for u, v in EDGES:
         assert col[u] != col[v], f"edge {u}-{v} has one color"
 
-if __name__ == "__main__":
+def main(check: bool = False) -> None:
     solution = solve()
-    verify(solution)
+    if check:
+        verify(solution)
     print(json.dumps(solution))
+
+if __name__ == "__main__":
+    main()
 ```
 
 `verify()` takes only the solution and reads the data from module-level
-constants; importing the module must not solve or print.
+constants; importing the module must not solve or print. `main()` prints
+the solution without checking it, `main(check=True)` runs `verify()` first.
+In the kernel, develop with `solve()` and `verify()`, then run
+`main(check=True)` as the final test. The check must hold for every
+solution of the model, not only the one the solver happened to return.
+The self-check is a heuristic: when it fails, either the solution or
+`verify()` is wrong, so check both against the problem statement; a wrong
+`verify()` does not make a correct solution wrong. The guard stays
+`main()`: to run the check in the kernel, call `main(check=True)` in a
+separate statement after the program text, never by changing the guard;
+the submitted program is the text with the guard `main()`.
 
 ## SAT Variables — the two numbering systems
 
@@ -162,14 +176,14 @@ formula.extend(PBEnc.atmost(lits=cells[:3], weights=[3, 2, 4], bound=5,
   `{"satisfiable": false}` if none is specified) — do not weaken or drop
   constraints to force satisfiability.
 
-## Verification Requirement (MANDATORY)
+## Verification Workflow (MANDATORY steps)
 
 SAT encodings easily contain subtle bugs (wrong polarity, missing clauses,
 swapped indices). Before submitting, you MUST:
 
 1. **Solve and decode** the model into problem-level values.
 2. **Write a `verify(solution)` function** (part of the submitted program,
-   called before printing) that checks every constraint from the problem
+   called by `main(check=True)`) that checks every constraint from the problem
    statement using plain Python — independent of your CNF encoding:
    ```python
    import itertools
@@ -196,8 +210,8 @@ swapped indices). Before submitting, you MUST:
    verifier is wrong, not the example. If the problem marks it as a dummy or
    says nothing about its validity, do not copy its values and do not test
    against them.
-4. **Before calling `submit_code`, run the complete program** (solve,
-   verify, print) with python_exec and check its output; `submit_code` is
+4. **Before calling `submit_code`, run the complete program** with
+   python_exec, calling `main(check=True)`, and check its output; `submit_code` is
    for the finished, tested program, not for a first try.
 5. **For an UNSAT answer**: list each clause group and the sentence of the
    problem statement that justifies it. If any clause lacks a justification,
