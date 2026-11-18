@@ -1,0 +1,119 @@
+# MCP Solver architecture (README figure).
+# Render: d2 --layout elk --pad 12 architecture.d2 architecture.svg  (d2 v0.9.0)
+# Colors are D2 theme codes (overridden below for light and dark), so the
+# SVG carries a prefers-color-scheme switch: B* structure, AA4 backends
+# (package shape), AB4 problem and results (document and page shapes).
+
+vars: {
+  d2-config: {
+    theme-id: 0
+    dark-theme-id: 200
+    theme-overrides: {
+      N1: "#1f2933"
+      N2: "#3e4c59"
+      N3: "#52606d"
+      N4: "#7b8794"
+      N5: "#cbd2d9"
+      N6: "#e4e7eb"
+      N7: "#ffffff"
+      B1: "#34536e"
+      B2: "#4a6b88"
+      B3: "#9fb6cb"
+      B4: "#e6eef5"
+      B5: "#f1f5f9"
+      B6: "#f8fafc"
+      AA2: "#3f6b4f"
+      AA4: "#e3f0e6"
+      AA5: "#f1f8f2"
+      AB4: "#f7ecd6"
+      AB5: "#fbf5ea"
+    }
+    dark-theme-overrides: {
+      N1: "#e6edf3"
+      N2: "#c9d1d9"
+      N3: "#9aa5b1"
+      N4: "#7b8794"
+      N5: "#3a4450"
+      N6: "#252c35"
+      N7: "#0d1117"
+      B1: "#8fb3d1"
+      B2: "#7aa0c0"
+      B3: "#4a6b88"
+      B4: "#1e2a36"
+      B5: "#1a232d"
+      B6: "#222d39"
+      AA2: "#8cc19c"
+      AA4: "#1f3427"
+      AA5: "#1a2a20"
+      AB4: "#3b311f"
+      AB5: "#2e2719"
+    }
+  }
+}
+
+
+grid-rows: 3
+vertical-gap: 92
+
+classes: {
+  step: {style.font-size: 19; style.stroke-width: 2}
+  tool: {style.font-size: 20; width: 262; height: 96}
+  be: {shape: package; style.font-size: 19; width: 130; height: 96}
+  cont: {style.font-size: 20}
+  doc: {shape: page; style.font-size: 19; width: 100; height: 80}
+  clear: {style.fill: transparent; style.stroke: transparent}
+  gap: {label: ""; style.opacity: 0; width: 76; height: 10}
+}
+
+upper: "" {
+  class: clear
+  grid-columns: 5
+  horizontal-gap: 12
+  vertical-gap: 4
+  minion: "mcp-minion: the project's scripted\nagent (needs an LLM API key)" {
+    class: cont
+    style.stroke-dash: 4
+    grid-columns: 2
+    grid-gap: 12
+    prog: "program" {class: doc}
+    sol: "solution\nJSON" {class: doc}
+  }
+  g1: {class: gap}
+  problem: "your problem\nin plain words" {shape: document; style.font-size: 20; width: 180; height: 104}
+  g2: {class: gap}
+  host: "an MCP host, such as\nClaude Desktop\nor Claude Code" {
+    class: cont
+    grid-columns: 2
+    grid-gap: 12
+    prog: "program" {class: doc}
+    sol: "solution\nJSON" {class: doc}
+  }
+  problem -> host: "describe" {class: step}
+  problem -> minion: "task" {class: step; style.stroke-dash: 4}
+}
+
+server: "mcp-solver-serve (no LLM of its own)" {
+  class: cont
+  grid-columns: 3
+  horizontal-gap: 22
+  vertical-gap: 26
+  t1: "select_backend\nkernel and\ntemplate" {class: tool}
+  t2: "python_exec\nrun and check\nthe program" {class: tool}
+  t3: "submit_code\nrun it once more\non its own" {class: tool}
+}
+
+kernel: "kernel: a Python process with the solver library of the chosen backend" {
+  class: cont
+  grid-columns: 6
+  grid-gap: 10
+  pysat: "pysat\nSAT\npython-sat" {class: be}
+  maxsat: "maxsat\nMaxSAT\npython-sat" {class: be}
+  z3: "z3\nSMT\nz3-solver" {class: be}
+  cpmpy: "cpmpy\nCP\nCPMpy" {class: be}
+  clingo: "clingo\nASP\nclingo" {class: be}
+  didp: "didp\nDP\ndidppy" {class: be}
+}
+
+upper.host <-> server: "MCP calls,\naccepted program\nand output" {class: step}
+upper.minion <-> server: "MCP calls,\naccepted program\nand output" {class: step; style.stroke-dash: 4}
+server -> kernel: "run" {class: step}
