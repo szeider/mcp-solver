@@ -371,6 +371,10 @@ the solution without checking it, `main(check=True)` runs `verify()` first.
 In the kernel, develop with `solve()` and `verify()`, then run
 `main(check=True)` as the final test. The check must hold for every
 solution of the model, not only the one the solver happened to return.
+`verify()` checks the solution against the statement's own definitions by
+direct computation in plain Python (simulate the process, recount,
+recompute), not by repeating the derivation the model used; a `verify()`
+that mirrors the encoding passes whatever the encoding gets wrong.
 The self-check is a heuristic: when it fails, either the solution or
 `verify()` is wrong, so check both against the problem statement; a wrong
 `verify()` does not make a correct solution wrong. The guard stays
@@ -780,7 +784,47 @@ on_table_space(T) :- time(T), #count { B : on_table(B,T) } < max_table_slots.
 - Avoid generate-and-filter patterns in choice rules
 - Eliminate global #count constraints over entire plans
 
-### 4.9 Runs in Line Puzzles (Nonograms)
+### 4.9 State-Dependent Reachability (Abilities That Grow Along a Walk)
+
+**Critical for**: one agent on directed edges where crossing an edge needs something picked up or done earlier on the same walk (keys, tools, switches, prerequisites).
+
+**ANTI-PATTERN: the pooled fixpoint** `reach(Y) :- reach(X), edge(X,Y,I), has(I).` with `has(I)` true once the node holding `I` is reached. It lets every reached node start a step with every collected item. Every node a walk enters is in this set, but the set may contain nodes no walk enters: after a one-way edge into a dead end that holds the key, the key is still used at the start. It is sound only when the agent can return, e.g. every edge X->Y has a reverse edge Y->X needing no item beyond what X->Y needs.
+
+**CORRECT PATTERN: reachability over states (node, items held).** A node is reachable if some single walk from the start enters it. Give each item its own bit; a mask is the set held:
+
+```asp
+% item(I,V): V = 1,2,4,... one bit per item. at(I,N): item I lies at node N.
+% edge(X,Y,R): X->Y needs every item in mask R (0 = none). start(S). node(N).
+gain(N,K) :- node(N), K = #sum { V,I : at(I,N), item(I,V) }.
+st(S,K) :- start(S), gain(S,K).
+st(Y,M?K) :- st(X,M), edge(X,Y,R), M & R = R, gain(Y,K).   % ? = bitwise or
+reachable(N) :- st(N,_).
+```
+
+With `edge(s,a,0). edge(a,b,0). edge(s,c,1).` and the only item at `b`, the pooled fixpoint reaches `c` and this model does not; add `edge(b,s,0)` and both reach all four nodes.
+
+**Choosing the bound.** On fixed data the mask model needs no horizon and no search: the grounder computes it, with at most |nodes| * 2^k states for k items, and grounds only the masks that occur. Prefer it to decide which nodes are reachable. A time-indexed walk (`at(N,T)`, `holds(I,T)`, as in 4.5 and 4.8) is one walk and proves reachable only the nodes it enters: prefer it when the walk is the answer (a route, fewest moves). If items are used up (single-use keys, fuel), the state holds counts, not a set.
+
+**In a generator** (the layout is guessed and every node must be reachable), keep these rules and add `:- node(N), not reachable(N).` No saturation is needed: `st/2` is positive recursion, so in each answer set it is exactly the reachable states of that layout, and constraints may require or forbid reachability. The grounder then grounds every mask the candidate edges can produce, so keep the item count small.
+
+**verify()** simulates the walk over (node, items held) in Python, not the pooled fixpoint:
+
+```python
+def walk_reach(start, edges, items_at):  # edges: (x, y, frozenset needed)
+    s0 = (start, frozenset(items_at.get(start, ())))
+    seen, todo = {s0}, [s0]
+    while todo:
+        x, held = todo.pop()
+        for a, y, need in edges:
+            if a == x and need <= held:
+                s = (y, held | frozenset(items_at.get(y, ())))
+                if s not in seen:
+                    seen.add(s)
+                    todo.append(s)
+    return {n for n, _ in seen}
+```
+
+### 4.10 Runs in Line Puzzles (Nonograms)
 
 Two errors recur. (1) A gap between every pair of consecutive runs: only runs of the *same* color need one; runs of different colors may touch, and a colored clue can fill its line exactly (3+2+3 in 8 cells), so a gap rule for all runs is UNSAT. (2) Optional runs (`{...} 1`) or free cells outside the runs: unless the problem says otherwise, the clue lists all runs, so place each run exactly once and make every other cell background.
 

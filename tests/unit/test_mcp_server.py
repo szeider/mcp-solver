@@ -1595,6 +1595,22 @@ def test_templates_state_self_check_heuristic_and_guard_rule():
         assert "Verification Requirement" not in flat, solver
 
 
+VERIFY_METHOD_SENTENCE = (
+    "verify() checks the solution against the statement's own definitions by"
+    " direct computation in plain Python (simulate the process, recount,"
+    " recompute), not by repeating the derivation the model used; a verify()"
+    " that mirrors the encoding passes whatever the encoding gets wrong."
+)
+
+
+def test_templates_state_verify_tests_by_direct_computation():
+    # A verify() that repeats the model's derivation passes the model's error
+    # (live runs: a pooled reachability fixpoint in both model and verify()).
+    for solver in BACKENDS:
+        flat = " ".join(mcp_server.get_template(solver).replace("`", "").split())
+        assert VERIFY_METHOD_SENTENCE in flat, solver
+
+
 async def test_kernel_note_states_test_first_rule(engine):
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "z3"})

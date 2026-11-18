@@ -72,6 +72,10 @@ the solution without checking it, `main(check=True)` runs `verify()` first.
 In the kernel, develop with `solve()` and `verify()`, then run
 `main(check=True)` as the final test. The check must hold for every
 solution of the model, not only the one the solver happened to return.
+`verify()` checks the solution against the statement's own definitions by
+direct computation in plain Python (simulate the process, recount,
+recompute), not by repeating the derivation the model used; a `verify()`
+that mirrors the encoding passes whatever the encoding gets wrong.
 The self-check is a heuristic: when it fails, either the solution or
 `verify()` is wrong, so check both against the problem statement; a wrong
 `verify()` does not make a correct solution wrong. The guard stays

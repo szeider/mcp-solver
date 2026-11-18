@@ -94,6 +94,14 @@
   examples of sections 5.2 and 5.3 use neutral names instead of rooms,
   keys and a "Goal" room, and no longer name the benchmark task they came
   from.
+- **Change:** All six templates state that `verify()` checks the solution
+  against the statement's definitions by direct computation (simulate,
+  recount, recompute), not by repeating the model's derivation. The clingo
+  template adds section 4.9 on reachability where crossing an edge needs
+  items collected earlier on the same walk (the pooled reached-set fixpoint,
+  sound only when the agent can return; reachability over (node, items
+  held) states; use in a generator; a Python check), and the z3 and cpmpy
+  templates a short pointer to the same pitfall; Nonograms is now 4.10.
 - **Behavior Change:** Optimality rules per backend, each checked by
   experiment: cpmpy and z3 no longer re-solve with a stricter bound (hosts
   skipped it in 28 of 31 optimization sessions); a cpmpy solution is optimal
