@@ -178,6 +178,15 @@ weights to the underlying variables again.
 - Encoders return an object: add its `.clauses` with `wcnf.extend(...)`,
   don't append the object or the list as one clause.
 - Building the WCNF without instantiating RC2 solves nothing.
+- A program that stops the solver before it finishes (time limit, cancel,
+  solution or conflict limit) reads the solver's proof status and reports
+  a result as optimal, or the problem as unsatisfiable, only if the solver
+  proved it; otherwise it raises, or reports the status if the output
+  format has a place for it. RC2's
+  `compute()` returns only when finished. A time limit needs
+  `compute(expect_interrupt=True)` and `solver.interrupt()` from a timer;
+  then `None` also means stopped (`solver.interrupted` is True), not that
+  the hard part is unsatisfiable.
 - Each `python_exec` call stops after 30 seconds by default; for longer
   solver runs pass its `timeout` argument (at most 300 seconds).
   The submitted program must finish within 240 seconds when run on its own,

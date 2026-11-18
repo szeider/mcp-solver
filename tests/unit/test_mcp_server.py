@@ -1611,6 +1611,34 @@ def test_templates_state_verify_tests_by_direct_computation():
         assert VERIFY_METHOD_SENTENCE in flat, solver
 
 
+PROOF_STATUS_SENTENCE = (
+    "A program that stops the solver before it finishes (time limit, cancel,"
+    " solution or conflict limit) reads the solver's proof status and reports"
+    " a result as optimal, or the problem as unsatisfiable, only if the solver"
+    " proved it; otherwise it raises, or reports the status if the output"
+    " format has a place for it."
+)
+PROOF_STATUS_CALLS = {
+    "clingo": ("exhausted", "interrupted"),
+    "cpmpy": ("ExitStatus.OPTIMAL", "ExitStatus.UNKNOWN"),
+    "z3": ("unknown",),
+    "pysat": ("solve_limited()", "None"),
+    "maxsat": ("expect_interrupt=True", "interrupted"),
+    "didp": ("time_out", "is_optimal", "is_infeasible"),
+}
+
+
+def test_templates_state_proof_status_rule():
+    # Programs that stopped the solver reported unproven optima (five of 229
+    # benchmark programs); each template states the rule and its status call.
+    assert set(PROOF_STATUS_CALLS) == set(BACKENDS)
+    for solver in BACKENDS:
+        flat = " ".join(mcp_server.get_template(solver).replace("`", "").split())
+        assert PROOF_STATUS_SENTENCE in flat, solver
+        for call in PROOF_STATUS_CALLS[solver]:
+            assert call in flat, (solver, call)
+
+
 async def test_kernel_note_states_test_first_rule(engine):
     async with _session() as session:
         result = await session.call_tool("select_backend", {"solver": "z3"})

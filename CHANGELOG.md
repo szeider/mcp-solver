@@ -98,10 +98,15 @@
   against the statement's definitions by direct computation (simulate,
   recount, recompute), not by repeating the model's derivation. The clingo
   template adds section 4.9 on reachability where crossing an edge needs
-  items collected earlier on the same walk (the pooled reached-set fixpoint,
-  sound only when the agent can return; reachability over (node, items
-  held) states; use in a generator; a Python check), and the z3 and cpmpy
-  templates a short pointer to the same pitfall; Nonograms is now 4.10.
+  items collected earlier on the same walk (the pooled reached-set fixpoint
+  and a sufficient condition for its soundness; reachability over (node,
+  items held) states as a bitmask of at most 31 items; consumables; use in
+  a generator; a Python check); Nonograms is now 4.10. The z3 and cpmpy
+  templates point to the same pitfall: one witness walk per target, all
+  over the same layout variables in one model, |nodes| * 2^k - 1 steps with
+  a stay-in-place step. The clingo safety rule (2.2) admits variables bound
+  by an assignment (`K = #sum { ... }`, `Y = X+1`); prose in 3.2 and 4.8 is
+  shortened to stay within the template size budget.
 - **Behavior Change:** Optimality rules per backend, each checked by
   experiment: cpmpy and z3 no longer re-solve with a stricter bound (hosts
   skipped it in 28 of 31 optimization sessions); a cpmpy solution is optimal
@@ -112,7 +117,14 @@
   after a timeout `check()` returns `unknown` and the model may be missing,
   empty or the best found so far), a clingo result only if the solve result is
   `exhausted`; didp keeps `is_optimal`; maxsat notes that RC2's `compute()`
-  is exact. A solution not proven optimal is marked so in a program comment.
+  is exact. All six templates state one rule: a program that stops the
+  solver before it finishes reports a result as optimal, or the problem as
+  unsatisfiable, only if the solver proved it, and otherwise raises or
+  reports the status where the output format has a place for it; each
+  names its status call (clingo `exhausted`/`interrupted`, cpmpy
+  `ExitStatus`, z3 `unknown`, pysat `solve_limited()` returning `None`, RC2
+  `interrupted`, didppy `time_out`/`is_optimal`/`is_infeasible`). Formerly an
+  unproven optimum was only marked in a program comment.
 - **Change:** `submit_code` no longer warns when a program defines no
   `verify()` (a notice added earlier in this cycle); its description now
   says a rejected submission may be fixed and submitted again.

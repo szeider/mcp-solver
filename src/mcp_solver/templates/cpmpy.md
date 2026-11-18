@@ -75,7 +75,7 @@ the submitted program is the text with the guard `main()`.
 - Do NOT call `.implies()` on integer variables — only on boolean expressions/constraints
 - If an operator/method fails, fall back to explicit OR/AND over individual equality constraints
 - When in doubt, use simple comparisons and loops instead of advanced abstractions
-- Reachability where an edge needs an item picked up earlier on the same walk (keys, tools, switches): a fixpoint over reached nodes that pools every collected item over-approximates once edges are one-way, since the agent may not get back. Model one walk instead (`boolvar` arrays `at[n,t]`, `holds[i,t]` per step up to a horizon) and ask per target whether some walk enters it.
+- Reachability where an edge needs an item picked up earlier on the same walk (keys, tools, switches): a fixpoint over reached nodes that pools every collected item over-approximates once edges are one-way, since the agent may not get back. Model walks instead (`boolvar` arrays `at[n,t]`, `holds[i,t]`) with |nodes| * 2^k - 1 steps for k items and a stay-in-place step, so a walk may stop early. For "every node reachable", give each target its own witness walk, all over the same layout variables in one model: not one walk through all targets, and not one solver call per target with a generated layout left free.
 
 ## Optimization
 - Use `model.minimize(objective)` or `model.maximize(objective)`
@@ -132,8 +132,16 @@ CPMpy models can easily contain subtle logic bugs. Before submitting, you MUST:
    data. Optimality: `model.solve()` returns True also when a time limit
    stopped it with a merely feasible solution; the solution is optimal only
    if `model.status().exitstatus == ExitStatus.OPTIMAL` (import `ExitStatus`
-   from `cpmpy.solvers.solver_interface`); if it is `FEASIBLE`, say so in a
-   program comment and do not claim optimality.
+   from `cpmpy.solvers.solver_interface`); if it is `FEASIBLE`, optimality
+   is not proven. `model.solve()` returns False also when the limit stopped
+   it before any solution (`ExitStatus.UNKNOWN`); only
+   `ExitStatus.UNSATISFIABLE` proves that no solution exists. Without
+   `time_limit` the solve returns only when finished.
+   A program that stops the solver before it finishes (time limit, cancel,
+   solution or conflict limit) reads the solver's proof status and reports
+   a result as optimal, or the problem as unsatisfiable, only if the solver
+   proved it; otherwise it raises, or reports the status if the output
+   format has a place for it.
 5. **Example outputs**: an example output in the problem statement fixes the output format (keys, nesting, types). Its values count as a solution only if the problem says so. If the problem presents the example as a valid or expected solution, run it through `verify()`: if it fails, your model or verifier is wrong, not the example. If the problem marks it as a dummy or says nothing about its validity, do not copy its values and do not test against them.
 
 ### If the model reports no solution

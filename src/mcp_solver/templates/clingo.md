@@ -111,7 +111,7 @@ is_in_france(X) :- city(X), X == "paris".
 
 ### 2.2 MANDATORY RULE: Variable Safety
 
-**FUNDAMENTAL RULE**: Every variable appearing in a rule MUST be grounded by appearing in at least one positive, non-aggregate, non-arithmetic literal in the rule's body.
+**FUNDAMENTAL RULE**: Every variable appearing in a rule MUST be grounded by appearing in at least one positive, non-aggregate, non-arithmetic literal in the rule's body, or be assigned from bound variables (`K = #sum { ... }`, `Y = X+1`).
 
 **Why this matters**: ASP needs to know which values to check. Unsafe variables have no defined domain.
 
@@ -251,9 +251,12 @@ carrying(R,I,T+1) :- pickup(R,I,T).
 - Verify solution satisfies constraints
 - Handle UNSAT cases gracefully. A justified UNSAT is a correct final
   answer — verify only that every integrity constraint is warranted by the
-  problem text; do not try to prove *why* it is unsatisfiable. Optimality:
-  trust the solver when the solve finished (`exhausted`); if it was stopped
-  early, say so in a program comment and do not claim optimality.
+  problem text; do not try to prove *why* it is unsatisfiable.
+- A program that stops the solver before it finishes (time limit, cancel, solution or conflict limit) reads the solver's proof status and reports a result as optimal, or the problem as unsatisfiable, only if the solver proved it; otherwise it raises, or reports the status if the output format has a place for it. In clingo the
+  limit is `ctl.solve(async_=True)` with `handle.wait(t)` and
+  `handle.cancel()`; the proof of an optimum or of UNSAT is `result.exhausted` (a stopped solve has
+  `interrupted` True). `ctl.solve()` without a limit returns only when
+  finished.
 
 ### 2.6 How to Express Constraints - The Eliminative Mindset
 
@@ -384,15 +387,15 @@ the submitted program is the text with the guard `main()`.
 
 ### 3.2 CRITICAL: Finding One vs. All Solutions (Solver Configuration)
 
-A frequent and critical error is misconfiguring the solver to search for all possible solutions when only one is required. This is a leading cause of timeouts on moderately complex problems. The number of models to find is controlled by the first argument to `clingo.Control()`.
+Searching for all solutions when one is required is a leading cause of timeouts. The number of models to find is controlled by the first argument to `clingo.Control()`.
 
 > **Fundamental Rule:** If the problem asks for *a* feasible solution, you MUST limit the solver to find only one.
 
 | Configuration | Behavior | Use Case | Consequence of Misuse |
 | :--- | :--- | :--- | :--- |
-| `ctl = clingo.Control()` | **Stops after the first solution (model) is found; with `#minimize`/`#maximize` it continues until the optimum (the last model is proven optimal only if the solve result's `exhausted` is True; a solve stopped early has `interrupted` True).** | **This should be your default for most tasks.** Use when the problem asks for *any* valid solution. | (Safe) |
+| `ctl = clingo.Control()` | **Stops after the first solution (model) is found; with `#minimize`/`#maximize` it continues until the optimum (the last model is proven optimal only if `exhausted`, see 2.5).** | **This should be your default for most tasks.** Use when the problem asks for *any* valid solution. | (Safe) |
 | `ctl = clingo.Control(["1"])` | **Stops after the first solution, also with `#minimize`/`#maximize` ("optimality of last model not guaranteed").** | Satisfaction problems only. | **Non-optimal answers** for optimization problems. |
-| `ctl = clingo.Control(["0"])` | **Finds all possible solutions.** | Use **only** when the problem explicitly requires enumerating every single valid combination. | **Leads to timeouts.** The solver will continue working long after finding a valid solution, needlessly exploring the entire search space. |
+| `ctl = clingo.Control(["0"])` | **Finds all possible solutions.** | Use **only** when the problem explicitly requires enumerating every single valid combination. | **Leads to timeouts**: the solver explores the entire search space. |
 
 
 ### 3.3 The Three-Step Action Modeling Pattern (CRITICAL for temporal problems)
@@ -700,11 +703,7 @@ This is the most common mistake in planning problems:
 :- #count { D, P1, P2, T : move(D, P1, P2, T) } != max_time.
 ```
 
-**Why this is catastrophically slow:**
-1. Generates moves for ALL disks from ANY peg to ANY peg (even illegal ones)
-2. Allows up to N simultaneous moves per timestep (one per disk)
-3. Uses expensive #count over entire plan to enforce sequence length
-4. Creates massive search space that times out
+**Why this is catastrophically slow:** it generates moves for ALL disks between ANY pegs (illegal ones too), up to one per disk per timestep, and enforces the plan length with a #count over the entire plan: a massive search space that times out.
 
 **CORRECT PATTERN: Sequential Actions with Validity Checking**
 
@@ -753,11 +752,7 @@ on_peg(D, P, T+1) :- on_peg(D, P, T), T < max_time, not move(D, P, _, T).
 :- disk(D), not on_peg(D, c, max_time).
 ```
 
-**Why this is fast:**
-- Only generates valid moves (from top disks only)
-- Exactly one move per timestep (correctly models sequential plan)
-- No expensive global #count constraint
-- Search space is minimal and focused
+**Why this is fast:** only valid moves (top disks) are generated, exactly one per timestep, with no global #count.
 
 **Key Pattern Elements:**
 
@@ -778,17 +773,13 @@ on_table_space(T) :- time(T), #count { B : on_table(B,T) } < max_table_slots.
     move_to_table(B, T) : clear(B,T), on_table_space(T) } 1 :- time(T).
 ```
 
-**General Takeaway:** For sequential planning, always:
-- Define valid actions via auxiliary predicates
-- Use `1 { ... } 1 :- time(T)` for exactly one action per timestep
-- Avoid generate-and-filter patterns in choice rules
-- Eliminate global #count constraints over entire plans
+**General Takeaway:** for sequential planning, define valid actions via auxiliary predicates, choose exactly one action per timestep with `1 { ... } 1 :- time(T)`, and avoid generate-and-filter choice rules and global #count constraints over entire plans.
 
 ### 4.9 State-Dependent Reachability (Abilities That Grow Along a Walk)
 
-**Critical for**: one agent on directed edges where crossing an edge needs something picked up or done earlier on the same walk (keys, tools, switches, prerequisites).
+**Critical for**: one agent on directed edges where an edge needs something picked up or done earlier on the same walk (keys, tools, switches).
 
-**ANTI-PATTERN: the pooled fixpoint** `reach(Y) :- reach(X), edge(X,Y,I), has(I).` with `has(I)` true once the node holding `I` is reached. It lets every reached node start a step with every collected item. Every node a walk enters is in this set, but the set may contain nodes no walk enters: after a one-way edge into a dead end that holds the key, the key is still used at the start. It is sound only when the agent can return, e.g. every edge X->Y has a reverse edge Y->X needing no item beyond what X->Y needs.
+**ANTI-PATTERN: the pooled fixpoint** `reach(Y) :- reach(X), edge(X,Y,I), has(I).` with `has(I)` true once the node holding `I` is reached. It uses every collected item at every reached node, so the set may contain nodes no walk enters: after a one-way edge into a dead end that holds the key, the key still opens edges at the start. A sufficient condition for soundness is that every edge X->Y has a reverse edge Y->X needing no item beyond what X->Y needs; without such an argument, use the state model.
 
 **CORRECT PATTERN: reachability over states (node, items held).** A node is reachable if some single walk from the start enters it. Give each item its own bit; a mask is the set held:
 
@@ -801,11 +792,11 @@ st(Y,M?K) :- st(X,M), edge(X,Y,R), M & R = R, gain(Y,K).   % ? = bitwise or
 reachable(N) :- st(N,_).
 ```
 
-With `edge(s,a,0). edge(a,b,0). edge(s,c,1).` and the only item at `b`, the pooled fixpoint reaches `c` and this model does not; add `edge(b,s,0)` and both reach all four nodes.
+Example: `edge(s,a,0). edge(a,b,0). edge(s,c,1).`, the only item at `b`: the pooled fixpoint reaches `c`, this model does not; with `edge(b,s,0)` both reach all nodes.
 
-**Choosing the bound.** On fixed data the mask model needs no horizon and no search: the grounder computes it, with at most |nodes| * 2^k states for k items, and grounds only the masks that occur. Prefer it to decide which nodes are reachable. A time-indexed walk (`at(N,T)`, `holds(I,T)`, as in 4.5 and 4.8) is one walk and proves reachable only the nodes it enters: prefer it when the walk is the answer (a route, fewest moves). If items are used up (single-use keys, fuel), the state holds counts, not a set.
+**Choosing the bound.** On fixed data the grounder computes this model without horizon or search, at most |nodes| * 2^k states for k items. Use at most 31 items (bit values up to 2^30): clingo integers are 32-bit and wrap silently, so 2^32 becomes 0 and its edge needs nothing. Prefer this model to decide which nodes are reachable, and a time-indexed walk (`at(N,T)`, `holds(I,T)`, as in 4.5 and 4.8) when the walk is the answer (a route, fewest moves); a walk proves reachable only the nodes it enters. For consumables (single-use keys, fuel) the state holds the remaining quantities and, for pickups that do not respawn, whether each is still there.
 
-**In a generator** (the layout is guessed and every node must be reachable), keep these rules and add `:- node(N), not reachable(N).` No saturation is needed: `st/2` is positive recursion, so in each answer set it is exactly the reachable states of that layout, and constraints may require or forbid reachability. The grounder then grounds every mask the candidate edges can produce, so keep the item count small.
+**In a generator** (layout guessed, every node reachable), add `:- node(N), not reachable(N).` No saturation is needed: `st/2` is positive recursion, so each answer set holds exactly the reachable states of its layout, and constraints may require or forbid reachability. The grounder then grounds every mask the candidate edges allow: keep k small.
 
 **verify()** simulates the walk over (node, items held) in Python, not the pooled fixpoint:
 

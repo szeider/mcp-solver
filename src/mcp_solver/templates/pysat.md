@@ -164,6 +164,14 @@ formula.extend(PBEnc.atmost(lits=cells[:3], weights=[3, 2, 4], bound=5,
 - Do NOT print anything except the final JSON in the submitted program.
 - Solvers: `Glucose3` is the default; `Cadical153` is a good alternative for
   harder instances (`from pysat.solvers import Cadical153`).
+- A program that stops the solver before it finishes (time limit, cancel,
+  solution or conflict limit) reads the solver's proof status and reports
+  a result as optimal, or the problem as unsatisfiable, only if the solver
+  proved it; otherwise it raises, or reports the status if the output
+  format has a place for it. In pysat a
+  conflict budget (`solver.conf_budget(n)`) goes with `solver.solve_limited()`,
+  which returns `None` when stopped: that is not UNSAT. `solve()` returns
+  only when finished.
 - Each `python_exec` call stops after 30 seconds by default; for longer
   solver runs pass its `timeout` argument (at most 300 seconds).
   The submitted program must finish within 240 seconds when run on its own,

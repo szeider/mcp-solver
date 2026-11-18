@@ -211,9 +211,16 @@ negative-profit item never forces its way into an upper bound).
      optimality NOT proven. If the problem asks for the optimum, do not
      stop here: tighten the model (justified bounds/dominance), raise the
      time budget, or scale the model down — an unproven incumbent may fail
-     validation; if you submit it anyway, say so in a program comment;
+     validation;
   3. `cost is None` with `is_infeasible=False` — the search simply ran out
      of time before finding anything. This is NOT "no solution exists".
+- A program that stops the solver before it finishes (time limit, cancel,
+  solution or conflict limit) reads the solver's proof status and reports
+  a result as optimal, or the problem as unsatisfiable, only if the solver
+  proved it; otherwise it raises, or reports the status if the output
+  format has a place for it. In didppy
+  `time_out=True` says the search stopped; `is_optimal` and
+  `is_infeasible` are the proofs.
 - Give the solver room: `time_limit` well under the `python_exec` timeout
   (default 30 s; pass `timeout` up to 300 for hard instances and leave
   ~30 s margin for the rest of the script). The submitted program must
