@@ -30,7 +30,10 @@ def _engine_pin() -> str:
 
 
 def test_min_engine_version_matches_pyproject_pin():
-    assert _engine_pin() == engine.MIN_ENGINE_VERSION
+    # PEP 440 equality: the pin ">=4" and "4.0.0" name the same version.
+    from packaging.version import Version
+
+    assert Version(_engine_pin()) == Version(engine.MIN_ENGINE_VERSION)
 
 
 # --- kernel environment ----------------------------------------------------
@@ -104,14 +107,30 @@ def test_require_engine_names_missing_tools_and_version():
 def test_require_engine_version():
     engine.require_engine_version(engine.MIN_ENGINE_VERSION)
     engine.require_engine_version("99.0.0.dev1")
-    # The release candidate and the final release both pass; the last 3.x
+    # The final release passes, its release candidates do not; the last 3.x
     # release (old kernel-id rules) is refused with the required version.
-    engine.require_engine_version("4.0.0rc1")
     engine.require_engine_version("4.0.0")
+    with pytest.raises(engine.EngineError, match="too old"):
+        engine.require_engine_version("4.0.0rc3")
     with pytest.raises(engine.EngineError) as info:
         engine.require_engine_version("3.6.1")
     assert "3.6.1 is too old" in str(info.value)
     assert f">={engine.MIN_ENGINE_VERSION}" in str(info.value)
+
+
+def test_require_engine_version_orders_prereleases(monkeypatch):
+    # PEP 440 order: dev < alpha < beta < rc < final < post.
+    monkeypatch.setattr(engine, "MIN_ENGINE_VERSION", "4.0.0rc1")
+    for older in ("4.0.0rc0", "4.0.0b2", "4.0.0a1", "4.0.0.dev0", "4.0.0rc1.dev3"):
+        with pytest.raises(engine.EngineError, match="too old"):
+            engine.require_engine_version(older)
+    for newer in ("4.0.0rc1", "4.0.0rc2", "4.0.0", "4.0.0.post1", "4.0.1.dev0"):
+        engine.require_engine_version(newer)
+    # Once the minimum is the final release, its candidates are refused.
+    monkeypatch.setattr(engine, "MIN_ENGINE_VERSION", "4.0.0")
+    with pytest.raises(engine.EngineError, match="too old"):
+        engine.require_engine_version("4.0.0rc2")
+    engine.require_engine_version("4.0")
 
 
 def test_installed_engine_meets_minimum():

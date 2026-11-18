@@ -162,6 +162,9 @@ weights to the underlying variables again.
 - Building the WCNF without instantiating RC2 solves nothing.
 - Each `python_exec` call stops after 30 seconds by default; for longer
   solver runs pass its `timeout` argument (at most 300 seconds).
+  The submitted program must finish within 240 seconds when run on its own,
+  environment setup included; a solver time limit in it should be at most
+  about 200 seconds.
 - Do NOT print anything except the final JSON in the submitted program.
 
 ## Output Format Rules

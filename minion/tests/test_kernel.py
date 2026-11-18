@@ -170,7 +170,10 @@ async def test_failed_model_reset_keeps_tracked_kernel() -> None:
     assert agent._kernel_id == "k1"
 
 
-async def test_no_packages_means_no_auto_reset_but_tracking() -> None:
+async def test_no_packages_means_no_auto_reset_and_no_tracking() -> None:
+    # Without configured packages minion did not set up a kernel: the server
+    # routes calls without kernel_id itself (mcp-solver-serve), so minion
+    # neither tracks reset results nor injects a kernel_id.
     mcp = FakeMCPManager(ALL_KERNEL_TOOLS, [_ok("k7")])
     agent = make_agent(mcp, packages=[])
     await agent.run_async("task")
@@ -179,8 +182,38 @@ async def test_no_packages_means_no_auto_reset_but_tracking() -> None:
     await agent._execute_tool("python_exec", {"code": "a"})
     assert "kernel_id" not in mcp.calls[0][1]
     await agent._execute_tool("python_reset", {})
+    assert agent._kernel_id is None
     await agent._execute_tool("python_exec", {"code": "b"})
-    assert mcp.calls[-1][1]["kernel_id"] == "k7"
+    assert "kernel_id" not in mcp.calls[-1][1]
+
+
+async def test_self_routing_server_reset_of_another_kernel_injects_nothing() -> None:
+    # Review finding 8a: select_backend, then a reset of a scratch kernel;
+    # a later python_exec without kernel_id must reach the server without
+    # one (the server sends it to its solving kernel).
+    tools = ALL_KERNEL_TOOLS | {"select_backend"}
+    mcp = FakeMCPManager(tools, [_ok("scratch")])
+    agent = make_agent(mcp, packages=[])
+    await agent._execute_tool("select_backend", {"solver": "z3"})
+    await agent._execute_tool(
+        "python_reset", {"kernel_id": "scratch", "packages": ["numpy"]}
+    )
+    for name in ("python_exec", "python_status", "python_interrupt"):
+        await agent._execute_tool(name, {})
+    assert [c[1].get("kernel_id") for c in mcp.calls[2:]] == [None] * 3
+    assert agent._kernel_id is None
+
+
+async def test_self_routing_server_reset_before_backend_injects_nothing() -> None:
+    # Review finding 8b: a python_reset() before select_backend reaches the
+    # engine's default kernel; minion must not pin "_default" on later calls.
+    tools = ALL_KERNEL_TOOLS | {"select_backend"}
+    mcp = FakeMCPManager(tools, [_ok("_default")])
+    agent = make_agent(mcp, packages=[])
+    await agent._execute_tool("python_reset", {})
+    await agent._execute_tool("select_backend", {"solver": "z3"})
+    await agent._execute_tool("python_exec", {"code": "x = 1"})
+    assert mcp.calls[-1] == ("python_exec", {"code": "x = 1"})
 
 
 async def test_no_reset_tool_available() -> None:

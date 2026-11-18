@@ -11,7 +11,9 @@ server over stdio. The agent must submit its final program via the server's
 its solution (JSON) to stdout.
 
 Exit status:
-    0    the submitted program ran and exited 0
+    0    the submitted program ran and exited 0 (its output is not checked:
+         also when it printed nothing, which mcp-solver-serve's submit_code
+         rejects)
     1    setup or agent failure (agent layer missing, no API key, engine
          error, kernel setup failure, an exception from the solve, or an
          agent error before any submission)
@@ -22,7 +24,7 @@ Exit status:
          after an accepted submission; that submission was saved and ran
          with exit 0, but it may not be the agent's final, verified program
     124  the re-executed program did not finish within ``RERUN_TIMEOUT``
-         seconds and was killed with its descendants
+         seconds and was killed with its process group
     127  ``uv`` not found when re-executing the program
     143  SIGTERM arrived during re-execution; the program was killed
     any other code is the submitted program's own nonzero exit code
@@ -63,8 +65,9 @@ RERUN_TIMEOUT = 360
 EXIT_RERUN_TIMEOUT = 124
 
 # On POSIX, children that run solver code start in their own session (and
-# process group), so a timeout kills them with all their descendants (uv,
-# python, kernels); elsewhere only the direct child is killed.
+# process group), so a timeout kills them with every process left in that
+# group (uv, python, kernels; a descendant that starts a session of its own
+# escapes); elsewhere only the direct child is killed.
 NEW_SESSION = os.name == "posix"
 
 # Default cap on the total (input + output) tokens of one run.
@@ -422,19 +425,27 @@ def print_stats(stats: dict) -> None:
 class ProgramRun(NamedTuple):
     """Outcome of :func:`run_isolated`.
 
-    ``exit_code`` is None when the run timed out; ``stdout`` and ``stderr``
-    are None unless the output was captured (then at most the last
-    ``CAPTURE_TAIL_BYTES`` bytes of each, decoded as UTF-8).
+    ``exit_code`` is None when the run timed out or was killed for its
+    output; ``stdout`` and ``stderr`` are None unless the output was captured
+    (then at most the last ``CAPTURE_TAIL_BYTES`` bytes of each, decoded as
+    UTF-8). ``output_exceeded``: the captured output passed
+    ``CAPTURE_BUDGET_BYTES`` (the run was killed then, unless it had already
+    exited).
     """
 
     exit_code: int | None
     stdout: str | None
     stderr: str | None
     timed_out: bool
+    output_exceeded: bool = False
 
 
 # Captured output keeps at most this many trailing bytes per stream.
 CAPTURE_TAIL_BYTES = 1_000_000
+# A captured run is killed once stdout and stderr together pass this many
+# bytes on disk (checked every _CAPTURE_POLL seconds while it runs).
+CAPTURE_BUDGET_BYTES = 4 * CAPTURE_TAIL_BYTES
+_CAPTURE_POLL = 0.05
 
 
 def run_isolated(
@@ -444,17 +455,24 @@ def run_isolated(
     *,
     capture: bool = False,
     cwd: str | Path | None = None,
+    on_start: Any = None,
 ) -> ProgramRun:
     """Run *program* on its own in an isolated uv environment.
 
     ``uv run --no-project --isolated --python PYTHON_VERSION`` with one
     ``--with`` per package, under ``engine.kernel_env()`` (API keys
-    withheld), in its own session. After *timeout* seconds the program and
-    its descendants are killed. Without *capture* its stdout and stderr are
-    inherited; with it they go to temporary files (no pipe, so a background
-    child holding the stream cannot stall the wait) and come back in the
-    result. Raises FileNotFoundError when ``uv`` is not on PATH; on any
-    other exception (Ctrl-C, SystemExit) the program is killed first.
+    withheld), in its own session. After *timeout* seconds the program is
+    killed with every process in its group; when it exits on its own, the
+    processes it left in its group are killed (on POSIX; a descendant that
+    starts a session of its own escapes both). Without *capture* its stdout
+    and stderr are inherited; with it they go to temporary files (no pipe,
+    so a background child holding the stream cannot stall the wait) and come
+    back in the result; a captured run whose output passes
+    CAPTURE_BUDGET_BYTES is killed like a timed-out one. *on_start*, if
+    given, is called with the Popen right after the start (from the calling
+    thread), so a caller can kill the run from elsewhere. Raises
+    FileNotFoundError when ``uv`` is not on PATH; on any other exception
+    (Ctrl-C, SystemExit) the program is killed first.
     """
     # --isolated: without it uv layers the packages on an existing virtual
     # environment (VIRTUAL_ENV, or a .venv in the cwd or a parent) when the
@@ -478,18 +496,43 @@ def run_isolated(
                 stderr=err,
                 start_new_session=NEW_SESSION,
             )
-            try:
-                exit_code, timed_out = proc.wait(timeout=timeout), False
-            except subprocess.TimeoutExpired:
+            if on_start is not None:
+                on_start(proc)
+            exit_code, timed_out, exceeded = None, False, False
+            deadline = time.monotonic() + timeout
+            while exit_code is None and not (timed_out or exceeded):
+                left = deadline - time.monotonic()
+                try:
+                    exit_code = proc.wait(
+                        timeout=min(left, _CAPTURE_POLL) if capture else timeout
+                    )
+                except subprocess.TimeoutExpired:
+                    exceeded = capture and _captured_bytes(out, err) > (
+                        CAPTURE_BUDGET_BYTES
+                    )
+                    timed_out = not exceeded and time.monotonic() >= deadline
+            if exit_code is None:
                 kill_process_group(proc)
-                exit_code, timed_out = None, True
+            else:
+                # Also a run that wrote too much before the first check.
+                exceeded = capture and _captured_bytes(out, err) > CAPTURE_BUDGET_BYTES
+            if exit_code is not None and NEW_SESSION:
+                # Background children the program left in its group.
+                signal_process_group(proc, signal.SIGKILL)
         except BaseException:
             # In its own session the program no longer receives the
             # terminal's Ctrl-C, so take it down on any interruption.
             if proc is not None:
                 kill_process_group(proc)
             raise
-        return ProgramRun(exit_code, _read_tail(out), _read_tail(err), timed_out)
+        return ProgramRun(
+            exit_code, _read_tail(out), _read_tail(err), timed_out, exceeded
+        )
+
+
+def _captured_bytes(*files: Any) -> int:
+    """The bytes written so far to the capture files."""
+    return sum(os.fstat(fh.fileno()).st_size for fh in files)
 
 
 def _read_tail(fh: Any) -> str | None:
@@ -501,10 +544,38 @@ def _read_tail(fh: Any) -> str | None:
     return fh.read().decode("utf-8", errors="replace")
 
 
+def rerun_packages(steps: list[dict], backend: list[str]) -> list[str]:
+    """The packages to re-execute the submission with: those of the last
+    successful python_reset with a non-empty ``packages`` list, else
+    *backend*.
+
+    This mirrors mcp-minion's kernel tracking on the CLI path: minion merges
+    the configured (backend) packages into a model reset's list, and the
+    step record holds the list it sent, so the last successful reset with
+    packages names what the solving kernel had at the end of the run.
+    """
+    packages = backend
+    for step in steps:
+        for call in step.get("tool_calls") or []:
+            args = call.get("arguments")
+            if call.get("name") != "python_reset" or call.get("is_error"):
+                continue
+            requested = args.get("packages") if isinstance(args, dict) else None
+            if not (isinstance(requested, list) and requested):
+                continue
+            try:
+                reply = json.loads(call.get("result") or "")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(reply, dict) and reply.get("success") is True:
+                packages = [str(p) for p in requested]
+    return packages
+
+
 def run_program(program: Path, with_packages: list[str]) -> int:
     """Execute the saved program in a uv kernel; return its exit code.
 
-    After ``RERUN_TIMEOUT`` seconds the program and its descendants are
+    After ``RERUN_TIMEOUT`` seconds the program and its process group are
     killed and ``EXIT_RERUN_TIMEOUT`` is returned.
 
     The program runs under ``engine.kernel_env()``, the environment the
@@ -712,7 +783,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     print(f"mcp-solver: running {program}", file=sys.stderr)
-    rc = run_program(program, with_packages)
+    rc = run_program(program, rerun_packages(result.steps, with_packages))
     if agent_error and rc == 0:
         return EXIT_AGENT_ERROR_WITH_SUBMISSION
     return rc

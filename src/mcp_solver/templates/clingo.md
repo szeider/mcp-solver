@@ -7,7 +7,7 @@ Produce a solution using Answer Set Programming (ASP) that correctly models and 
 
 ### 1.2 Non-Negotiable Requirements
 1. **Tool**: You MUST use the clingo Python API for modeling and solving
-2. **Execution Time**: Each `python_exec` call stops after 30 seconds by default; for longer solver runs pass its `timeout` argument (at most 300 seconds)
+2. **Execution Time**: Each `python_exec` call stops after 30 seconds by default; for longer solver runs pass its `timeout` argument (at most 300 seconds). The submitted program must finish within 240 seconds when run on its own, environment setup included; a solver time limit in it should be at most about 200 seconds.
    - **Stated bounds**: If the problem states a bound or an expected optimal value (e.g., "expected minimum cost: 50"), add it as a hard constraint and keep `#minimize`/`#maximize`: the constraint prunes the search, the objective still proves the optimum.
    - **Example**: `:- total_cost(Cost), Cost > 50.` next to `#minimize { Cost : total_cost(Cost) }`. If the optimization does not finish within the time limit, solve without the objective and submit the solution that meets the stated value, with a program comment that optimality rests on the problem statement, not on a proof.
 3. **Output Format**: Print the final solution as a single JSON object to stdout

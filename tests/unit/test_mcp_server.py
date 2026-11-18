@@ -46,7 +46,7 @@ class FakeEngine:
         self.unresolvable: set[str] = set()
         # canned python_exec replies by code
         self.exec_replies: dict[str, dict] = {}
-        # python_exec codes that wait for `gate` before replying
+        # python_exec and submit_code codes that wait for `gate` before replying
         self.gated_codes: set[str] = set()
         self.gate = asyncio.Event()
         self.events: list[tuple[str, str]] = []  # (start|end, code)
@@ -68,7 +68,7 @@ class FakeEngine:
         self.calls.append((name, dict(arguments)))
         code = arguments.get("code", name)
         self.events.append(("start", code))
-        if name == "python_exec" and code in self.gated_codes:
+        if name in ("python_exec", "submit_code") and code in self.gated_codes:
             await self.gate.wait()
         self.events.append(("end", code))
         return ToolOutcome(text=json.dumps(self._respond(name, arguments)))
@@ -233,6 +233,20 @@ def test_templates_share_time_limit_and_example_rule():
     assert mcp_server._MAX_EXEC_TIMEOUT == 300
     for solver in BACKENDS:
         assert _template_rules_problems(mcp_server.get_template(solver)) == [], solver
+
+
+def test_templates_and_guide_state_the_submit_time_limit():
+    # submit_code runs the program with STANDALONE_TIMEOUT, below the 300 s
+    # python_exec maximum, so every text that advises raising the python_exec
+    # timeout also states the limit of the submitted program's own run.
+    limit = re.compile(rf"(?<!\d){mcp_server.STANDALONE_TIMEOUT}(?!\d)")
+    texts = {"guide": mcp_server.GUIDE, "submit_code": mcp_server.submit_code.__doc__}
+    texts.update({solver: mcp_server.get_template(solver) for solver in BACKENDS})
+    for name, text in texts.items():
+        flat = " ".join(text.replace("`", "").split())
+        assert any(
+            "submit" in s and limit.search(s) for s in re.split(r"(?<=\.)\s+", flat)
+        ), name
 
 
 def test_guide_and_description_mention_every_backend():
@@ -889,6 +903,25 @@ async def test_submit_standalone_timeout(engine, monkeypatch):
         assert mcp_server._submissions == {}
 
 
+async def test_submit_without_uv_is_rejected_as_not_executed(
+    engine, monkeypatch, tmp_path
+):
+    # Without uv on PATH the program never started: the rejection must not
+    # claim that it was executed.
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        result = await session.call_tool("submit_code", {"code": VERIFIED})
+    assert result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["ok"] is False and payload["executed"] is False
+    assert payload["exit_code"] is None and payload["timed_out"] is False
+    assert "uv not found on PATH" in payload["error"]
+    assert mcp_server._submissions == {}
+
+
 async def test_submit_output_capped_keeping_the_end(engine):
     program = "print('x' * 30000)\nprint('{\"end\": 1}')\n"
     failing = "import sys\nprint('y' * 30000)\nsys.stderr.write('e' * 5000 + 'LAST')\nsys.exit(3)\n"
@@ -1211,3 +1244,211 @@ async def test_kernel_note_states_test_first_rule(engine):
         result = await session.call_tool("select_backend", {"solver": "z3"})
         note = result.content[0].text.split("\n\n---\n\n")[-1]
         assert TEST_FIRST_RULE in note and "not for a first try" in note
+
+
+# --- submit_code: cancellation, backend switch, output budget ----------------
+
+
+def _pid_gone(pid, wait=3.0):
+    """True once *pid* no longer exists."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        time.sleep(0.05)
+    return False
+
+
+def _kill(pids):
+    """Kill whatever a failed test left running."""
+    import contextlib
+    import signal
+
+    for pid in pids:
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
+async def _read_pid(path, limit=10):
+    deadline = time.monotonic() + limit
+    while not path.exists() or not path.read_text():
+        assert time.monotonic() < deadline, "program did not start"
+        await asyncio.sleep(0.02)
+    return int(path.read_text())
+
+
+def _sleeper(pid_file):
+    return (
+        "import os, time\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "time.sleep(600)\n"
+        "print(1)\n"
+    )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_cancelled_submission_kills_its_program(engine, tmp_path):
+    pid_file = tmp_path / "pid"
+    pids = []
+    try:
+        async with _session() as session:
+            await session.call_tool("select_backend", {"solver": "z3"})
+            # The tool coroutine, as the server's request handler runs it.
+            task = asyncio.create_task(mcp_server.submit_code(_sleeper(pid_file)))
+            pids.append(await _read_pid(pid_file))
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert _pid_gone(pids[0])
+            assert not mcp_server._standalone_runs
+    finally:
+        _kill(pids)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_disconnect_during_submission_kills_its_program(engine, tmp_path):
+    pid_file = tmp_path / "pid"
+    pids = []
+    try:
+        async with _session() as session:
+            await session.call_tool("select_backend", {"solver": "z3"})
+            task = asyncio.create_task(
+                session.call_tool("submit_code", {"code": _sleeper(pid_file)})
+            )
+            pids.append(await _read_pid(pid_file))
+            task.cancel()
+        assert _pid_gone(pids[0])
+    finally:
+        _kill(pids)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups")
+async def test_shutdown_kills_registered_runs(engine):
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(600)"],
+        start_new_session=True,
+    )
+    try:
+        async with _session():
+            mcp_server._standalone_runs.add(proc)
+        assert proc.wait(timeout=5) is not None
+        assert not mcp_server._standalone_runs
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+async def test_backend_switch_during_compile_check_keeps_packages(engine):
+    # The engine's compile check of a z3 submission is held while the host
+    # selects cpmpy: the program still runs with z3's packages.
+    code = "print('{\"z3 program\": 1}')"
+    engine.gated_codes = {code}
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        task = asyncio.create_task(session.call_tool("submit_code", {"code": code}))
+        deadline = time.monotonic() + 10
+        while ("start", code) not in engine.events:
+            assert time.monotonic() < deadline
+            await asyncio.sleep(0.01)
+        await session.call_tool("select_backend", {"solver": "cpmpy"})
+        engine.gate.set()
+        result = await task
+    assert not result.is_error
+    assert "--with z3-solver python" in engine.uv_log.read_text()
+
+
+async def test_backend_switch_during_run_credits_the_submitting_episode(
+    engine, tmp_path
+):
+    # A z3 run is in flight when the host selects cpmpy: its success is not
+    # credited to the cpmpy episode (which has no submission).
+    started, release = tmp_path / "started", tmp_path / "release"
+    code = (
+        "import os, time\n"
+        f"open({str(started)!r}, 'w').close()\n"
+        "deadline = time.monotonic() + 20\n"
+        f"while not os.path.exists({str(release)!r}) and time.monotonic() < deadline:\n"
+        "    time.sleep(0.02)\n"
+        "print('{}')\n"
+    )
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        z3_episode = mcp_server._episode
+        task = asyncio.create_task(session.call_tool("submit_code", {"code": code}))
+        deadline = time.monotonic() + 10
+        while not started.exists():
+            assert time.monotonic() < deadline
+            await asyncio.sleep(0.02)
+        await session.call_tool("select_backend", {"solver": "cpmpy"})
+        release.touch()
+        result = await task
+        assert not result.is_error
+        cpmpy_episode = mcp_server._episode
+        assert cpmpy_episode["solver"] == "cpmpy"
+        assert cpmpy_episode["submit_attempts"] == 0
+        assert cpmpy_episode["submit_ok"] == 0
+        assert z3_episode["submit_attempts"] == 1 and z3_episode["submit_ok"] == 1
+        assert result.structured_content["stats"]["submit_attempts"] == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+async def test_submit_output_over_budget_is_killed_and_rejected(engine, monkeypatch):
+    from mcp_solver.agent import cli
+
+    # 1 MB chunks, at most about 100 MB/s, 40 MB in all, then it waits (so
+    # without the budget the run would end only at the time limit).
+    monkeypatch.setattr(mcp_server, "STANDALONE_TIMEOUT", 20)
+    code = (
+        "import sys, time\nchunk = 'x' * 1_000_000 + '\\n'\n"
+        "for _ in range(40):\n    sys.stdout.write(chunk)\n    sys.stdout.flush()\n"
+        "    time.sleep(0.01)\ntime.sleep(600)\n"
+    )
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        start = time.monotonic()
+        result = await session.call_tool("submit_code", {"code": code})
+        assert time.monotonic() - start < 30
+    assert result.is_error
+    payload = json.loads(result.content[0].text)
+    assert payload["ok"] is False and payload["executed"] is True
+    assert payload["timed_out"] is False
+    assert payload["error"].startswith("Too much output:")
+    assert f"{cli.CAPTURE_BUDGET_BYTES:,} bytes" in payload["error"]
+    assert mcp_server._submissions == {}
+
+
+def test_submit_description_states_the_output_budget():
+    from mcp_solver.agent import cli
+
+    assert cli.CAPTURE_BUDGET_BYTES == 4 * cli.CAPTURE_TAIL_BYTES
+    flat = " ".join(mcp_server.submit_code.__doc__.split())
+    assert "4 MB of output" in flat
+
+
+async def test_submit_cut_output_is_not_called_the_result(engine):
+    code = "import json\nprint(json.dumps({'schedule': list(range(10000))}))\n"
+    async with _session() as session:
+        await session.call_tool("select_backend", {"solver": "z3"})
+        result = await session.call_tool("submit_code", {"code": code})
+    assert not result.is_error
+    payload = json.loads(result.content[0].text)
+    assert len(payload["stdout"]) == mcp_server._STDOUT_CAP
+    message = payload["message"]
+    assert mcp_server.RUN_OK_MESSAGE not in message
+    assert "is the result" not in message
+    assert f"longer than {mcp_server._STDOUT_CAP:,} characters" in message
+    assert "only its end" in message
+    assert "run the program" in message
+
+
+def test_rejection_without_uv_names_the_setup_not_the_program():
+    text = _failure(None, "uv not found on PATH")
+    assert text.startswith("The run could not start: uv not found on PATH.")
+    assert "python_exec" not in text
+    assert "install uv" in text

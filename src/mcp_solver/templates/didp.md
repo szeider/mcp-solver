@@ -197,7 +197,9 @@ negative-profit item never forces its way into an upper bound).
      of time before finding anything. This is NOT "no solution exists".
 - Give the solver room: `time_limit` well under the `python_exec` timeout
   (default 30 s; pass `timeout` up to 300 for hard instances and leave
-  ~30 s margin for the rest of the script).
+  ~30 s margin for the rest of the script). The submitted program must
+  finish within 240 seconds when run on its own, environment setup
+  included, so its `time_limit` should be at most about 200 seconds.
 - If search is slow: add a justified dual bound (see safety rule), declare
   justified resource variables, tighten preconditions (e.g. prune moves
   that can never be completed), or scale floats to integers.

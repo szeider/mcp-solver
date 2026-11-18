@@ -191,6 +191,13 @@ Your installed `agentic-python-coder` is older than 4.0.0, or missing from
 the environment the server runs in. Upgrade it:
 `uv pip install "agentic-python-coder>=4,<5"` (or `-e` from a checkout).
 
+**The CLI exits 0 but prints no solution.**
+The submitted program ran, exited 0 and printed nothing. The CLI's exit
+status reports the program's exit code only; it does not check the output.
+Through `mcp-solver-serve`, `submit_code` rejects such a program ("No
+output"), so a host there has to fix it before it is accepted. Look at the
+saved `<basename>_code.py`.
+
 **`uv: command not found` (or the solve fails to start a kernel).**
 uv is missing from your PATH. Install it (see Prerequisites) and make sure its
 install directory (usually `~/.local/bin`) is on your `PATH`. uv is mandatory —

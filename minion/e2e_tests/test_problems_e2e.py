@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
+from mcp_solver.agent.harness import SOLVER_MODULES, imports_solver_library
 from mcp_solver.agent.runfolder import (
     DEFAULT_MODEL,
     SOLVER_MARKERS,
@@ -68,6 +69,36 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
+def validate(solver: str, problem: str, solution: dict) -> dict:
+    """The problem's ground-truth verdict on *solution*."""
+    validator = PROBLEMS_ROOT / solver / f"{problem}_ground_truth.py"
+    proc = subprocess.run(
+        [sys.executable, str(validator)],
+        input=json.dumps(solution),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def last_accepted_submit_reply(steps: list[dict]) -> dict | None:
+    """The server's reply to the last accepted submit_code call, or None.
+
+    The step's result is the reply's JSON text followed by a line for the
+    submission's resource_link.
+    """
+    reply = None
+    for step in steps:
+        for call in step.get("tool_calls") or []:
+            if call.get("name") == "submit_code" and not call.get("is_error"):
+                try:
+                    reply, _ = json.JSONDecoder().raw_decode(call.get("result") or "")
+                except json.JSONDecodeError:
+                    reply = {}
+    return reply
+
+
 def make_run_folder(tmp_path: Path, solver: str, problem: str) -> Path:
     problem_text = (PROBLEMS_ROOT / solver / f"{problem}.md").read_text(
         encoding="utf-8"
@@ -92,25 +123,30 @@ def test_problem_end_to_end(solver: str, problem: str, tmp_path: Path) -> None:
     assert solution is not None, f"no JSON object in answer: {result.answer!r}"
 
     # ...which the problem's independent ground-truth validator accepts.
-    validator = PROBLEMS_ROOT / solver / f"{problem}_ground_truth.py"
-    proc = subprocess.run(
-        [sys.executable, str(validator)],
-        input=json.dumps(solution),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    verdict = json.loads(proc.stdout.strip().splitlines()[-1])
+    verdict = validate(solver, problem, solution)
     assert verdict["valid"], f"validator rejected {solution}: {verdict['message']}"
 
-    # The submitted program lands on disk and genuinely used the requested
-    # backend's library (no silent backend substitution).
+    # The accepted program's own run (submit_code ran it on its own) printed
+    # a solution the validator accepts too; the final answer alone could
+    # come from somewhere other than the submitted program.
+    reply = last_accepted_submit_reply(result.steps)
+    assert reply is not None, "no accepted submission in the run"
+    assert reply.get("executed") is True, f"submission was not executed: {reply}"
+    run_solution = extract_json(reply.get("stdout") or "")
+    assert run_solution is not None, f"no JSON in the run's stdout: {reply!r}"
+    verdict = validate(solver, problem, run_solution)
+    assert verdict["valid"], (
+        f"validator rejected the program's output {run_solution}: {verdict['message']}"
+    )
+
+    # The submitted program lands on disk and imports the requested
+    # backend's library (an import statement, not a comment or a string;
+    # no silent backend substitution).
     submission_path = save_submission(result.steps, folder)
     assert submission_path is not None, "no accepted submission in the run"
-    code = submission_path.read_text(encoding="utf-8").lower()
-    markers = SOLVER_MARKERS[solver]
-    assert any(m in code for m in markers), (
-        f"submission does not look like {solver} code (markers {markers})"
+    code = submission_path.read_text(encoding="utf-8")
+    assert imports_solver_library(code, solver), (
+        f"submission does not import {SOLVER_MODULES[solver]} ({solver} backend)"
     )
 
     log_data = json.loads(logger.log_path.read_text())

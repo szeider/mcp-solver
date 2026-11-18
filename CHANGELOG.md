@@ -2,9 +2,11 @@
 
 ### [4.5.0] - unreleased
 
-- **Behavior Change:** Requires agentic-python-coder >=4,<5 (its new
-  kernel-id rules; the CLI and the server stop at startup with a message
-  naming the required version when an older engine is installed).
+- **Behavior Change:** Requires agentic-python-coder >=4,<5 (4.0.0 final;
+  its new kernel-id rules; the CLI and the server stop at startup with a
+  message naming the required version when an older engine, a 4.0.0 release
+  candidate included, is installed) and mcp-minion >=0.3.1 (kernel tracking
+  only on the CLI path, see below).
 - **Behavior Change:** `mcp-solver-serve` gives the solving kernel the fixed
   engine kernel id `solver`. Each `select_backend` call creates it (first
   use) or restarts it (new problem, backend switch, after a crash) with one
@@ -29,7 +31,7 @@
   re-executes it: `uv run --isolated` with the solving kernel's packages (the
   backend's plus those a routed `python_reset` added) in a fresh temporary
   directory, the filtered environment, 240 s limit, killed with its
-  descendants on timeout. The reply adds `executed`, `exit_code` and
+  process group on timeout. The reply adds `executed`, `exit_code` and
   `stdout` (last 20,000 characters). A program that exits nonzero, times out
   or prints nothing is rejected with its stdout and stderr and is not stored
   (the statistics count a failed submit attempt). Formerly the server only
@@ -52,8 +54,10 @@
   skipped it in 28 of 31 optimization sessions); a cpmpy solution is optimal
   only if `model.status().exitstatus` is `OPTIMAL` (`solve()` returns True
   also after a time limit with a feasible solution), a z3 `Optimize` result
-  only if `check()` returned `sat` (after a timeout it returns `unknown`
-  with the best model so far), a clingo result only if the solve result is
+  only if `check()` returned `sat` and the objective's value is a number
+  (`oo` means unbounded, a term with `epsilon` a bound never attained;
+  after a timeout `check()` returns `unknown` and the model may be missing,
+  empty or the best found so far), a clingo result only if the solve result is
   `exhausted`; didp keeps `is_optimal`; maxsat notes that RC2's `compute()`
   is exact. A solution not proven optimal is marked so in a program comment.
 - **Change:** `submit_code` no longer warns when a program defines no
@@ -86,6 +90,57 @@
   environment as the base when the Python version matched (for example the
   project's `.venv` when run from a checkout), so the program could import
   packages that are not in the backend's list.
+- **Fix:** When the program run by `submit_code` or the CLI's re-execution
+  exits, the processes it left in its process group are killed (POSIX).
+  Formerly a background child kept running after a successful or failing
+  run; only a timeout killed it. A child that starts a session of its own
+  is not reached.
+- **Fix:** The engine version check orders pre-releases by PEP 440
+  (4.0.0rc0 is below 4.0.0rc1, 4.0.0rc2 below 4.0.0). Formerly it compared
+  only the numeric release, so every pre-release of the minimum passed.
+- **Fix:** A `submit_code` rejection because `uv` is not on PATH reports
+  `executed: false` (the program never started), and its `error` says that
+  the server's setup lacks uv and that the program can be submitted
+  unchanged once uv is installed. Formerly it advised fixing the program
+  with `python_exec`.
+- **Fix:** Cancelling a `submit_code` call (or disconnecting the host)
+  kills the program's standalone run with its process group, and server
+  shutdown kills every run still in flight. Formerly the run went on until
+  its 240 s limit, since the worker thread that waits for it cannot be
+  interrupted. A SIGTERM to the server process is not handled: the run
+  then goes on until its limit.
+- **Fix:** A `select_backend` while a submission is in flight no longer
+  affects it: the submission runs with the packages of the backend it was
+  made under and is counted on that backend's episode. Formerly it could
+  run with the new backend's packages, and its success was counted on the
+  new episode. A success that arrives after its episode closed is not in
+  that episode's `MCP_SOLVER_STATS` row, which was written at the close.
+- **Fix:** `submit_code` kills a standalone run whose output (stdout and
+  stderr together) passes 4,000,000 bytes, checked while it runs, and
+  rejects it with "Too much output"; a run that wrote more and exited is
+  rejected too. Formerly only the returned text was bounded, and the
+  capture files could grow without limit for 240 s.
+- **Fix:** When an accepted program's stdout is longer than the 20,000
+  characters returned, the success message says that only its end is shown
+  and that running the program gives the complete output. Formerly it
+  called the cut output the result.
+- **Fix:** The CLI re-executes the submission with the packages of the
+  last successful `python_reset` with a package list in the run (minion
+  merges the backend's packages into it), else the backend's packages.
+  Formerly a package the agent added with `python_reset` was missing in the
+  re-execution.
+- **Change (documented, not changed):** An empty output is judged
+  differently on the two paths. `mcp-solver-serve`'s `submit_code` rejects
+  a program that exits 0 and prints nothing; the CLI, whose engine
+  `submit_code` only compiles, persists and re-executes it and exits 0 with
+  nothing on stdout, as its exit-code contract says (0: the program ran and
+  exited 0). Neither path checks that the output is JSON.
+- **Change:** The guide, the `submit_code` description and all six
+  templates state that the submitted program must finish within 240 s when
+  run on its own, environment setup included (the guide and the templates
+  add: a solver time limit of at most about 200 s). Formerly they
+  mentioned only the `python_exec` maximum of 300 s, so a program tested
+  with a 300 s timeout could be rejected by `submit_code`.
 
 ### [4.4.0] - 2026-11-14
 

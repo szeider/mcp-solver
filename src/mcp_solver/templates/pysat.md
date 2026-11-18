@@ -148,6 +148,9 @@ formula.extend(PBEnc.atmost(lits=cells[:3], weights=[3, 2, 4], bound=5,
   harder instances (`from pysat.solvers import Cadical153`).
 - Each `python_exec` call stops after 30 seconds by default; for longer
   solver runs pass its `timeout` argument (at most 300 seconds).
+  The submitted program must finish within 240 seconds when run on its own,
+  environment setup included; a solver time limit in it should be at most
+  about 200 seconds.
 
 ## Output Format Rules
 

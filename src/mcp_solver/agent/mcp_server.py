@@ -42,6 +42,7 @@ import logging
 import math
 import os
 import re
+import signal
 import sys
 import tempfile
 import time
@@ -56,7 +57,13 @@ from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
 
 from mcp_solver.agent import engine
-from mcp_solver.agent.cli import ProgramRun, build_with_packages, run_isolated
+from mcp_solver.agent.cli import (
+    CAPTURE_BUDGET_BYTES,
+    ProgramRun,
+    build_with_packages,
+    run_isolated,
+    signal_process_group,
+)
 from mcp_solver.templates import SOLVERS, get_template
 
 SELECT_BACKEND_DESCRIPTION = """\
@@ -119,7 +126,9 @@ legitimate answer, re-check the encoding before reporting it; keep the final
 program self-contained (all imports, no session state) and print only the
 solution JSON. Long solver runs: python_exec defaults to a 30 s limit —
 raise its `timeout` (up to 300) and give the solver an explicit time limit
-rather than concluding the model is wrong.
+rather than concluding the model is wrong. submit_code runs the finished
+program on its own with a 240 s limit, environment setup included, so a
+solver time limit in the submitted program should be at most about 200 s.
 """
 
 # Engine connection (one per server process; kernels persist across calls).
@@ -141,6 +150,10 @@ _kernel_lock = asyncio.Lock()
 # python_reset added. submit_code runs the submitted program with them.
 _kernel_packages: list[str] | None = None
 
+# Processes (Popen) of submit_code's standalone runs in flight; the
+# lifespan kills those still registered at shutdown.
+_standalone_runs: set = set()
+
 # Server-side execution cap of the engine's python_exec (seconds); clamp
 # here too so an oversized host value cannot stretch the client-side wait.
 _MAX_EXEC_TIMEOUT = 300
@@ -161,6 +174,12 @@ RUN_OK_MESSAGE = (
     "The server ran the program on its own in a clean environment with the"
     ' backend\'s packages; its output is in "stdout" and is the result, so'
     " there is no need to run the program again outside these tools."
+)
+RUN_OK_CUT_MESSAGE = (
+    "The server ran the program on its own in a clean environment with the"
+    f" backend's packages. Its output was longer than {_STDOUT_CAP:,}"
+    ' characters, so "stdout" shows only its end; run the program to obtain'
+    " the complete output."
 )
 NOT_EXECUTED_MESSAGE = "Compile check only, not executed: no backend selected."
 
@@ -239,15 +258,15 @@ def _episode_count(tool: str) -> None:
         _episode_sync()
 
 
-def _episode_snapshot() -> dict | None:
-    if _episode is None:
+def _episode_snapshot(episode: dict | None) -> dict | None:
+    if episode is None:
         return None
     return {
-        "exec_calls": _episode["tool_calls"].get("python_exec", 0),
-        "exec_failures": _episode["exec_failures"],
-        "submit_attempts": _episode["submit_attempts"],
-        "exec_before_first_submit": _episode["exec_before_first_submit"],
-        "wall_seconds": round(time.monotonic() - _episode["t0"], 1),
+        "exec_calls": episode["tool_calls"].get("python_exec", 0),
+        "exec_failures": episode["exec_failures"],
+        "submit_attempts": episode["submit_attempts"],
+        "exec_before_first_submit": episode["exec_before_first_submit"],
+        "wall_seconds": round(time.monotonic() - episode["t0"], 1),
     }
 
 
@@ -269,6 +288,9 @@ async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        for proc in list(_standalone_runs):
+            signal_process_group(proc, signal.SIGKILL)
+        _standalone_runs.clear()
         _episode_close("shutdown")
         _engine = None
         _backend_packages = None
@@ -512,11 +534,11 @@ async def python_interrupt(kernel_id: str | None = None) -> str:
     return await _engine_call("python_interrupt", args)
 
 
-def _run_standalone(code: str, packages: list[str]) -> ProgramRun:
+def _run_standalone(code: str, packages: list[str], on_start=None) -> ProgramRun:
     """Run *code* once on its own: a fresh temporary directory, an isolated
     uv environment with *packages*, the filtered environment, its own
     process group, STANDALONE_TIMEOUT. Blocking; submit_code calls it in a
-    worker thread."""
+    worker thread (*on_start* receives the Popen, see run_isolated)."""
     with tempfile.TemporaryDirectory(
         prefix="mcp-solver-run-", ignore_cleanup_errors=True
     ) as tmp:
@@ -524,7 +546,12 @@ def _run_standalone(code: str, packages: list[str]) -> ProgramRun:
         program.write_text(code, encoding="utf-8")
         try:
             return run_isolated(
-                program, packages, STANDALONE_TIMEOUT, capture=True, cwd=tmp
+                program,
+                packages,
+                STANDALONE_TIMEOUT,
+                capture=True,
+                cwd=tmp,
+                on_start=on_start,
             )
         except FileNotFoundError:
             return ProgramRun(None, "", "uv not found on PATH", False)
@@ -594,6 +621,22 @@ def _run_failure(run: ProgramRun, packages: list[str]) -> str | None:
     the failure shows it (kernel-session state only for NameError and
     import failures).
     """
+    if run.output_exceeded:
+        killed = ", and was killed" if run.exit_code is None else ""
+        return (
+            f"Too much output: the program wrote more than"
+            f" {CAPTURE_BUDGET_BYTES:,} bytes (stdout and stderr together) when"
+            f" the server ran it on its own{killed}. It must print only the"
+            " solution JSON; remove progress, debug and solver log output. " + _FIX
+        )
+    if run.exit_code is None and not run.timed_out:
+        reason = _sentence((run.stderr or "").strip() or "unknown reason")
+        return (
+            f"The run could not start: {reason} This is a problem of the"
+            " server's setup, not of the program: install uv"
+            " (https://docs.astral.sh/uv/) where mcp-solver-serve runs, restart"
+            " the server, and submit the program unchanged."
+        )
     if run.timed_out:
         return (
             f"Timed out: the program did not finish within {STANDALONE_TIMEOUT} s"
@@ -672,19 +715,26 @@ async def submit_code(code: str) -> CallToolResult:
     print) with python_exec and check its output; submit_code is for the
     finished, tested program, not for a first try.
     The server checks that it compiles and, once a backend is selected,
-    runs it once more on its own in a clean environment (no kernel state)
-    and returns its output; a program that fails there is rejected with the
-    reason and may be fixed and submitted again.
+    runs it once more on its own in a clean environment (no kernel state,
+    at most 240 s including environment setup, at most 4 MB of output) and
+    returns its output; a
+    program that fails there is rejected with the reason and may be fixed
+    and submitted again.
     Accepted programs are stored and linked as a resource (the last 50).
     """
+    # The episode and the packages of the backend this submission is made
+    # under, taken before the first await: a select_backend during the
+    # submission changes neither its run nor which episode it is counted on.
+    episode = _episode
+    packages = _kernel_packages
     # Count the attempt BEFORE _episode_count syncs the .open snapshot, so a
     # failed submission (which never syncs again) is not lost on a host kill.
-    if _episode is not None:
-        if _episode["submit_attempts"] == 0:
-            _episode["exec_before_first_submit"] = _episode["tool_calls"].get(
+    if episode is not None:
+        if episode["submit_attempts"] == 0:
+            episode["exec_before_first_submit"] = episode["tool_calls"].get(
                 "python_exec", 0
             )
-        _episode["submit_attempts"] += 1
+        episode["submit_attempts"] += 1
     _episode_count("submit_code")
     result_text = await _engine_call("submit_code", {"code": code})
     verdict = _parse_engine_json(result_text)
@@ -694,24 +744,45 @@ async def submit_code(code: str) -> CallToolResult:
     # result, so every host sees it as a failed call.
     text = result_text if accepted else str(verdict.get("error") or result_text)
     reply = dict(verdict)
-    packages = _kernel_packages
     if accepted and packages is None:
         reply["executed"] = False
         reply["message"] = NOT_EXECUTED_MESSAGE
     elif accepted:
         # Run without the kernel lock and off the event loop: kernel tools
         # (python_status, python_interrupt, a reset) stay responsive.
-        run = await asyncio.to_thread(_run_standalone, code, list(packages))
+        # A cancelled call (or a disconnect) kills the run: the worker thread
+        # cannot be interrupted, its process group can.
+        procs: list = []
+        cancelled = False
+
+        def started(proc) -> None:
+            procs.append(proc)
+            _standalone_runs.add(proc)
+            if cancelled:
+                signal_process_group(proc, signal.SIGKILL)
+
+        try:
+            run = await asyncio.to_thread(
+                _run_standalone, code, list(packages), started
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            for proc in procs:
+                signal_process_group(proc, signal.SIGKILL)
+            raise
+        finally:
+            _standalone_runs.difference_update(procs)
         stdout, out_cut = _tail(run.stdout, _STDOUT_CAP)
         notes = [f"stdout cut to its last {_STDOUT_CAP} characters."] if out_cut else []
         failure = _run_failure(run, list(packages))
         if failure is None:
             message = reply.get("message")
+            ran = RUN_OK_CUT_MESSAGE if out_cut else RUN_OK_MESSAGE
             reply.update(
                 executed=True,
                 exit_code=0,
                 stdout=stdout,
-                message=f"{message} {RUN_OK_MESSAGE}" if message else RUN_OK_MESSAGE,
+                message=f"{message} {ran}" if message else ran,
             )
         else:
             accepted = False
@@ -720,7 +791,10 @@ async def submit_code(code: str) -> CallToolResult:
                 notes.append(f"stderr cut to its last {_STDERR_CAP} characters.")
             reply = {
                 "ok": False,
-                "executed": True,
+                # False when the run could not start (no uv on PATH).
+                "executed": run.exit_code is not None
+                or run.timed_out
+                or run.output_exceeded,
                 "exit_code": run.exit_code,
                 "timed_out": run.timed_out,
                 "stdout": stdout,
@@ -733,10 +807,11 @@ async def submit_code(code: str) -> CallToolResult:
         text = json.dumps(reply)
     content: list = [TextContent(type="text", text=text)]
     if accepted:
-        if _episode is not None:
-            _episode["submit_ok"] += 1
-            _episode["code_bytes"] = len(code.encode())
-            _episode_sync()
+        if episode is not None:
+            episode["submit_ok"] += 1
+            episode["code_bytes"] = len(code.encode())
+            if episode is _episode:
+                _episode_sync()
         submission_id = uuid.uuid4().hex
         _submissions[submission_id] = code
         while len(_submissions) > _MAX_SUBMISSIONS:
@@ -752,7 +827,7 @@ async def submit_code(code: str) -> CallToolResult:
             )
         )
     structured = reply
-    stats = _episode_snapshot()
+    stats = _episode_snapshot(episode)
     if stats:
         structured["stats"] = stats
     return CallToolResult(

@@ -65,6 +65,8 @@ constants; importing the module must not solve or print.
   pass a solver budget (`model.solve(time_limit=...)`) and raise the
   execution timeout (`python_exec` accepts `timeout` up to 300) — a
   timeout does NOT mean the model is wrong
+- The submitted program must finish within 240 seconds when run on its own,
+  environment setup included; keep its `time_limit` at most about 200 seconds
 
 ## Output Format Rules
 - Follow the output JSON format specification EXACTLY — do not invent alternative encodings

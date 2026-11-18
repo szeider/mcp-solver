@@ -3,6 +3,19 @@
 Changes to the `mcp-minion` package. The monorepo's root `CHANGELOG.md`
 tracks `mcp-solver` releases, which version independently of this package.
 
+### [0.3.1] - unreleased
+
+- **Behavior Change:** The kernel convenience (tracking the `kernel_id` of
+  `python_reset` results and adding it to kernel tool calls without one,
+  merging the configured packages into a model reset) applies only when
+  `packages` are configured, that is when minion set up the kernel itself
+  (the mcp-solver CLI path). Without configured packages, as against
+  `mcp-solver-serve`, which routes calls without `kernel_id` to its solving
+  kernel itself, minion passes kernel tool calls unchanged. Formerly a
+  model's reset of another kernel (or a `python_reset()` before
+  `select_backend`, which reaches the engine's default kernel) made minion
+  send every later call without `kernel_id` to that kernel.
+
 ### [0.3.0] - 2026-11-14
 
 - **Behavior Change:** `MCPManager.call_tool` returns a `ToolOutcome`

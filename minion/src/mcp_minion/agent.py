@@ -374,7 +374,8 @@ class Agent:
         # chat.completions.create); None: one AsyncOpenAI client per run.
         self.client: Any = None
         # Kernel tracked from python_reset results, injected into kernel
-        # tool calls that carry no kernel_id.
+        # tool calls that carry no kernel_id; only when minion sets up the
+        # kernel itself (config.packages), see _execute_tool.
         self._kernel_id: str | None = None
 
     def _build_tool_sections(self) -> str:
@@ -887,17 +888,23 @@ class Agent:
     ) -> ToolOutcome:
         """Execute a tool (MCP, built-in read_resource, or registry tool).
 
-        Kernel convenience: a python_reset with a non-empty ``packages`` list
-        gets the configured packages first (see ``merge_packages``); a kernel
-        tool call without a kernel_id gets the tracked one, so a python_reset issued by the model restarts the same
-        kernel (keeping its packages) instead of creating a new one; a
+        Kernel convenience, only when ``config.packages`` is set (minion set
+        up the kernel itself, as on the mcp-solver CLI path): a python_reset
+        with a non-empty ``packages`` list gets the configured packages first
+        (see ``merge_packages``); a kernel tool call without a kernel_id gets
+        the tracked one, so a python_reset issued by the model restarts the
+        same kernel (keeping its packages) instead of creating a new one; a
         successful python_reset that returns another kernel_id switches the
-        tracked kernel.
+        tracked kernel. Without configured packages the server routes calls
+        without kernel_id itself (mcp-solver-serve), so minion passes them
+        unchanged and tracks nothing.
         """
         is_mcp = self.mcp_manager is not None and self.mcp_manager.has_tool(tool_name)
+        tracking = bool(self.config.packages)
 
         if (
             is_mcp
+            and tracking
             and tool_name in KERNEL_TOOLS
             and self._kernel_id
             and "kernel_id" not in tool_args
@@ -919,7 +926,7 @@ class Agent:
 
         if is_mcp:
             outcome = await self.mcp_manager.call_tool(tool_name, tool_args)
-            if tool_name == "python_reset":
+            if tracking and tool_name == "python_reset":
                 kernel_id = _extract_kernel_id(outcome)
                 if kernel_id:
                     self._kernel_id = kernel_id

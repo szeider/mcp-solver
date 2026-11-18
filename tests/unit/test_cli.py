@@ -1,8 +1,10 @@
 """Unit tests for the v4 mcp-solver CLI (no engine, no network)."""
 
 import contextlib
+import importlib.util
 import json
 import os
+import shutil
 import signal
 import sys
 import time
@@ -702,6 +704,10 @@ def test_run_program_uses_kernel_env(monkeypatch, tmp_path):
             return 0
 
     monkeypatch.setattr(cli.subprocess, "Popen", Done)
+    # Done is no real process: record the group kill after its exit.
+    monkeypatch.setattr(
+        cli, "signal_process_group", lambda proc, sig: seen.setdefault("sig", sig)
+    )
     program = tmp_path / "p.py"
     assert cli.run_program(program, ["z3-solver"]) == 0
     assert seen["cmd"][-2:] == ["python", str(program)]
@@ -772,6 +778,80 @@ def test_run_program_timeout_kills_program_and_descendants(
             assert _gone(pid)
     finally:
         _reap(pids)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_run_isolated_kills_background_children_after_exit(
+    monkeypatch, tmp_path, exit_code
+):
+    # The program starts a sleeping child, prints and exits (successfully or
+    # not) without waiting for it: the child must not outlive the run.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(f'#!/bin/sh\nfor last; do :; done\n"{sys.executable}" "$last"\n')
+    fake_uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    pid_file = tmp_path / "pid.txt"
+    program = tmp_path / "p_code.py"
+    program.write_text(
+        "import subprocess, sys\n"
+        "child = subprocess.Popen("
+        "[sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+        "print('{}')\n"
+        f"sys.exit({exit_code})\n"
+    )
+    pids = []
+    try:
+        run = cli.run_isolated(program, [], 30, capture=True)
+        pids = [int(pid_file.read_text())]
+        assert run.exit_code == exit_code and run.stdout == "{}\n"
+        assert _gone(pids[0])
+    finally:
+        _reap(pids)
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
+def test_run_isolated_hides_the_surrounding_environment(monkeypatch, tmp_path):
+    # Real uv, network-free (no packages; UV_OFFLINE passes the environment
+    # filter). The run starts in this checkout (a .venv in the cwd) with
+    # VIRTUAL_ENV, PYTHONPATH and a marker variable set: the program sees
+    # neither the variable, nor a package on PYTHONPATH, nor a package of
+    # the surrounding environment (pytest, mcp_minion, mcp_solver).
+    site = tmp_path / "site" / "isolation_probe_pkg"
+    site.mkdir(parents=True)
+    (site / "__init__.py").write_text("")
+    monkeypatch.setenv("PYTHONPATH", str(site.parent))
+    monkeypatch.setenv("ISOLATION_PROBE_MARKER", "visible")
+    monkeypatch.setenv("VIRTUAL_ENV", sys.prefix)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    program = tmp_path / "probe.py"
+    program.write_text(
+        "import importlib.util, json, os\n"
+        "mods = ['isolation_probe_pkg', 'pytest', 'mcp_minion', 'mcp_solver']\n"
+        "print(json.dumps({'marker': os.environ.get('ISOLATION_PROBE_MARKER'),"
+        " 'found': [m for m in mods if importlib.util.find_spec(m)]}))\n"
+    )
+    # The surrounding environment does have them (positive control).
+    assert importlib.util.find_spec("mcp_minion") and importlib.util.find_spec("pytest")
+    run = cli.run_isolated(program, [], 120, capture=True, cwd=engine.local_checkout())
+    assert run.exit_code == 0, run.stderr
+    assert json.loads(run.stdout) == {"marker": None, "found": []}
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
+def test_run_isolated_installs_the_declared_packages(monkeypatch, tmp_path):
+    # Real uv from its cache only: a declared package is importable.
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    program = tmp_path / "probe.py"
+    program.write_text("import z3\nprint(z3.get_version_string())\n")
+    run = cli.run_isolated(program, ["z3-solver"], 120, capture=True, cwd=tmp_path)
+    if run.exit_code != 0 and "offline" in (run.stderr or "").lower():
+        pytest.skip("z3-solver is not in the uv cache (the test is network-free)")
+    assert run.exit_code == 0, run.stderr
+    assert run.stdout.strip()
 
 
 # --- custom endpoint: base_url and api_key_env -----------------------------
@@ -991,3 +1071,130 @@ async def test_minion_continues_after_default_kernel_restart():
     assert json.loads(first["result"]) == restarted
     assert requests[1][-1]["content"] == json.dumps(restarted)  # no ERROR: prefix
     assert result.steps[1]["tool_calls"][0]["result"] == json.dumps(ran)
+
+
+# --- re-execution packages: the kernel's packages at the end of the run ------
+
+
+def _reset_call(packages, success=True, **extra):
+    return {
+        "name": "python_reset",
+        "arguments": {"packages": packages, **extra},
+        "result": json.dumps({"success": success, "kernel_id": "_default"}),
+        "is_error": False,
+    }
+
+
+def test_main_reexecutes_with_packages_of_last_successful_reset(monkeypatch, tmp_path):
+    # minion merged the configured packages into the model's reset (the step
+    # record holds what was sent); a later failed reset changes nothing.
+    async def fake_solve(task, api_key, config, logger, quiet):
+        result = _fake_solve_result("import networkx, z3\nprint('{}')")
+        result.steps.insert(
+            0,
+            {
+                "step": 0,
+                "content": None,
+                "tool_calls": [
+                    _reset_call(["z3-solver", "networkx"]),
+                    _reset_call(["z3-solver", "bogus"], success=False),
+                    {
+                        "name": "python_reset",
+                        "arguments": {"packages": ["z3-solver", "other"]},
+                        "result": "Tool 'python_reset' timed out",
+                        "is_error": True,
+                    },
+                ],
+            },
+        )
+        return result
+
+    seen = {}
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(
+        cli, "run_program", lambda program, pk: seen.setdefault("packages", pk) and 0
+    )
+    monkeypatch.setattr(cli, "find_api_key", lambda *_: "sk-test")
+    assert cli.main(["z3", "hi", "--workdir", str(tmp_path), "-q"]) == 0
+    assert seen["packages"] == ["z3-solver", "networkx"]
+
+
+def test_rerun_packages_falls_back_to_the_backend():
+    backend = ["z3-solver"]
+    assert cli.rerun_packages([], backend) == backend
+    steps = [
+        {
+            "step": 1,
+            "tool_calls": [
+                _reset_call([]),
+                {
+                    "name": "python_reset",
+                    "arguments": {},
+                    "result": '{"success": true}',
+                    "is_error": False,
+                },
+            ],
+        },
+        {"step": 2, "tool_calls": None},
+    ]
+    assert cli.rerun_packages(steps, backend) == backend
+
+
+# --- captured output budget -----------------------------------------------
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
+def test_run_isolated_kills_a_run_over_the_output_budget(monkeypatch, tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(
+        f'#!/bin/sh\nfor last; do :; done\nexec "{sys.executable}" "$last"\n'
+    )
+    fake_uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(cli, "CAPTURE_BUDGET_BYTES", 2_000_000)
+    program = tmp_path / "p.py"
+    program.write_text(
+        "import sys, time\nchunk = 'x' * 100_000 + '\\n'\n"
+        "for _ in range(100):\n    sys.stderr.write(chunk)\n    sys.stderr.flush()\n"
+        "    time.sleep(0.005)\ntime.sleep(600)\n"
+    )
+    sizes = []
+    real_read_tail = cli._read_tail
+
+    def spy(fh):
+        if fh is not None:
+            sizes.append(fh.seek(0, os.SEEK_END))
+        return real_read_tail(fh)
+
+    monkeypatch.setattr(cli, "_read_tail", spy)
+    start = time.monotonic()
+    run = cli.run_isolated(program, [], 15, capture=True)
+    assert time.monotonic() - start < 10
+    assert run.output_exceeded is True and run.timed_out is False
+    assert run.exit_code is None
+    # Checked while waiting: at most one poll interval of output past it.
+    assert cli.CAPTURE_BUDGET_BYTES < sum(sizes) < 3 * cli.CAPTURE_BUDGET_BYTES
+
+
+@pytest.mark.skipif(os.name != "posix", reason="/bin/sh")
+def test_run_isolated_flags_too_much_output_of_a_run_that_exited(monkeypatch, tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_uv = bindir / "uv"
+    fake_uv.write_text(
+        f'#!/bin/sh\nfor last; do :; done\nexec "{sys.executable}" "$last"\n'
+    )
+    fake_uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(cli, "CAPTURE_BUDGET_BYTES", 1000)
+    monkeypatch.setattr(cli, "_CAPTURE_POLL", 60)  # no check while it runs
+    program = tmp_path / "p.py"
+    program.write_text("print('x' * 2000)\n")
+    run = cli.run_isolated(program, [], 30, capture=True)
+    assert run.exit_code == 0 and run.output_exceeded is True
+
+
+def test_program_run_defaults_to_output_within_budget():
+    assert cli.ProgramRun(0, "", "", False).output_exceeded is False

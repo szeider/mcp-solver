@@ -16,7 +16,6 @@ server over stdio through ``mcp_minion.MCPManager``. This module owns
 from __future__ import annotations
 
 import os
-import re
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -26,7 +25,7 @@ import mcp_solver
 
 # Minimum agentic-python-coder release; must equal the pin in the [agent]
 # extra of pyproject.toml (a unit test checks this).
-MIN_ENGINE_VERSION = "4.0.0rc1"
+MIN_ENGINE_VERSION = "4.0.0"
 
 # Name of the engine server in the MCPManager config.
 ENGINE_SERVER_NAME = "ipython"
@@ -45,7 +44,10 @@ ENGINE_TOOLS = (
 # (HOME, LOGNAME, PATH, SHELL, TERM, USER on Unix; the Windows system
 # variables there). This is hygiene that keeps API keys and tokens out of
 # the environment of model-written code; it is not a sandbox (that code can
-# still read files in the home directory, for instance).
+# still read files in the home directory, for instance). Values pass
+# unchanged, so a credential inside a passed URL (UV_INDEX_URL or a proxy
+# URL with user and password) reaches that code; uv needs it to install from
+# a private index.
 _ENV_PREFIXES = ("UV_", "CODER_", "MCP_SOLVER_", "XDG_", "LC_")
 # Prefix-matched variables are dropped when their name contains one of
 # these words (case-insensitive), e.g. UV_PUBLISH_TOKEN or
@@ -109,9 +111,11 @@ def kernel_env() -> dict[str, str]:
     the names in ``_ENV_NAMES`` (locale, temp dirs, proxies, CA bundles,
     native-library and build settings), and variables with the prefixes in
     ``_ENV_PREFIXES`` unless their name looks like a credential. Hygiene,
-    not a sandbox: API keys such as OPENROUTER_API_KEY and tokens stay out
-    of the environment of model-written code, but that code can still read
-    files the user can read.
+    not a sandbox: API keys such as OPENROUTER_API_KEY and variables named
+    like tokens stay out of the environment of model-written code, but a
+    credential inside a passed URL value (an index or proxy URL with user
+    and password) reaches it, and that code can still read files the user
+    can read.
     """
     # Imported here so that the CLI's --help and its install guidance work
     # in a base install without the [agent] extra (no mcp).
@@ -157,10 +161,17 @@ def require_engine(manager: Any) -> None:
         )
 
 
-def _version_tuple(version: str) -> tuple[int, ...]:
-    """Leading numeric release of *version* ("3.6.0.dev1" -> (3, 6, 0))."""
-    match = re.match(r"\d+(\.\d+)*", version)
-    return tuple(int(p) for p in match.group(0).split(".")) if match else ()
+def _too_old(installed: str) -> bool:
+    """True if *installed* is below MIN_ENGINE_VERSION in PEP 440 order
+    (pre-releases count: 4.0.0rc0 < 4.0.0rc1 < 4.0.0), or is no version."""
+    # packaging is a dependency of agentic-python-coder, so it is present
+    # wherever the engine is installed.
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        return Version(installed) < Version(MIN_ENGINE_VERSION)
+    except InvalidVersion:
+        return True
 
 
 def require_engine_version(installed: str | None = None) -> None:
@@ -178,7 +189,7 @@ def require_engine_version(installed: str | None = None) -> None:
             raise EngineError(
                 f"agentic-python-coder is not installed; {hint}"
             ) from None
-    if _version_tuple(installed) < _version_tuple(MIN_ENGINE_VERSION):
+    if _too_old(installed):
         raise EngineError(
             f"agentic-python-coder {installed} is too old (mcp-solver needs"
             f" >={MIN_ENGINE_VERSION}); {hint}"
