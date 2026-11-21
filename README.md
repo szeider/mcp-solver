@@ -301,8 +301,10 @@ tests, for example with `uv run pytest minion/e2e_tests -k didp`.
 
 On two larger benchmarks, Claude Code with Claude Opus 5.5 as the host and
 `mcp-solver-serve` 4.5.0 solved all 229 problems, each in one session with
-one submission: 101 of 101 in CP-Bench v3 (cpmpy backend) and 128 of 128 in
-ASP-Bench v1.2 (clingo backend). The benchmark's validator checked every
+one submission: 101 of 101 in
+[CP-Bench v3](https://doi.org/10.5281/zenodo.24421437) (cpmpy backend) and
+128 of 128 in [ASP-Bench v1.2](https://doi.org/10.5281/zenodo.24421429)
+(clingo backend). The benchmark's validator checked every
 solution. A session took 40 s (CP-Bench) and 59 s (ASP-Bench) in the median.
 The templates were revised while these benchmarks were run, in two places
 after a failure on a single problem, so the figures describe the released
