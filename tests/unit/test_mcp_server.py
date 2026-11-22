@@ -326,6 +326,17 @@ async def test_lifespan_fails_on_engine_without_submit_code(monkeypatch):
 # --- full in-memory round trip ----------------------------------------------
 
 
+async def test_server_info_reports_package_version(engine):
+    import mcp_solver
+
+    assert mcp_solver.__version__
+    async with _session() as session:
+        info = session.server_info
+        assert info is not None
+        assert info.name == "mcp-solver"
+        assert info.version == mcp_solver.__version__
+
+
 async def test_toolkit_round_trip(engine):
     async with _session() as session:
         # Tier 0: all six tools are listed, budgets hold at protocol level.

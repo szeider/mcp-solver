@@ -58,6 +58,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from mcp.types import CallToolResult, ResourceLink, TextContent
 
+import mcp_solver
 from mcp_solver.agent import engine
 from mcp_solver.agent.cli import (
     CAPTURE_BUDGET_BYTES,
@@ -350,6 +351,7 @@ async def _lifespan(server: MCPServer) -> AsyncIterator[None]:
 
 mcp = MCPServer(
     "mcp-solver",
+    version=mcp_solver.__version__,
     instructions=(
         "Constraint-solving toolkit: call select_backend(solver) first, then"
         " write and verify a solver program via python_exec, and finish with"
