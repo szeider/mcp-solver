@@ -76,10 +76,13 @@ exclude = [
 target-version = "py313"
 line-length = 88
 fix = true
-# Untracked local scratch directories.
+force-exclude = true
+# Untracked local scratch directories, and the solver templates: ruff formats
+# Python code blocks in markdown, and a reformatted template is a template change.
 exclude = [
     "local",
     "tmp",
+    "src/mcp_solver/templates",
 ]
 
 [tool.ruff.format]
