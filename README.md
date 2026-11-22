@@ -334,19 +334,22 @@ program and follows the IPython-kernel approach of the
 
 ## Citations
 
-- Stefan Szeider, ["Bridging Language Models and Symbolic Solvers via the
-  Model Context Protocol"](https://doi.org/10.4230/LIPIcs.SAT.2025.30), SAT
-  2025. Describes v3.
-- Stefan Szeider, ["CP-Agent: Agentic Constraint
-  Programming"](https://doi.org/10.1145/3786181.3788711), in *Proceedings of
-  the 3rd International Workshop on Large Language Models For Code (LLM4Code
-  2026)*, pages 6–13, ACM, 2026. The IPython-kernel approach that v4 uses.
-- Stefan Szeider, ["ASP-Bench: From Natural Language to Logic
-  Programs"](https://doi.org/10.1145/3786168.3788402), in *Proceedings of the
-  2026 IEEE/ACM 2nd International Workshop on Neuro-Symbolic Software
-  Engineering (NSE '26)*, pages 1–8, ACM, 2026. Its benchmark accepts a
-  solution only after a validator has checked it, as the test problems of v4
-  do.
+- Stefan Szeider,
+  ["Bridging Language Models and Symbolic Solvers via the Model Context Protocol"](https://doi.org/10.4230/LIPIcs.SAT.2025.30),
+  in *28th International Conference on Theory and Applications of
+  Satisfiability Testing (SAT 2025)*, LIPIcs, volume 341, pages 30:1–30:12,
+  Schloss Dagstuhl – Leibniz-Zentrum für Informatik, 2025. Describes v3.
+- Stefan Szeider,
+  ["CP-Agent: Agentic Constraint Programming"](https://doi.org/10.1145/3786181.3788711),
+  in *Proceedings of the 3rd International Workshop on Large Language Models
+  For Code (LLM4Code 2026)*, pages 6–13, ACM, 2026. The IPython-kernel
+  approach that v4 uses.
+- Stefan Szeider,
+  ["ASP-Bench: From Natural Language to Logic Programs"](https://doi.org/10.1145/3786168.3788402),
+  in *Proceedings of the 2026 IEEE/ACM 2nd International Workshop on
+  Neuro-Symbolic Software Engineering (NSE '26)*, pages 1–8, ACM, 2026. Its
+  benchmark accepts a solution only after a validator has checked it, as the
+  test problems of v4 do.
 
 ## License
 
