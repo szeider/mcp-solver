@@ -298,6 +298,35 @@ def test_model_json_file_resolved(tmp_path):
     assert model.request_timeout == 90
 
 
+def test_model_json_file_reasoning_effort(tmp_path):
+    # Present: a top-level call parameter, also for no_sampling_params
+    # models (as in the engine's llm.py). Absent: no such key.
+    with_field = tmp_path / "with.json"
+    with_field.write_text(
+        json.dumps(
+            {
+                "path": "vendor/model-x",
+                "no_sampling_params": True,
+                "max_tokens": 256,
+                "reasoning_effort": "high",
+            }
+        ),
+        encoding="utf-8",
+    )
+    model = cli.resolve_model(str(with_field))
+    assert model.api_params == {"max_tokens": 256, "reasoning_effort": "high"}
+    assert model.extra_body == {}
+
+    without = tmp_path / "without.json"
+    without.write_text(
+        json.dumps({"path": "vendor/model-x", "no_sampling_params": True}),
+        encoding="utf-8",
+    )
+    model = cli.resolve_model(str(without))
+    assert model.api_params == {}
+    assert model.extra_body == {}
+
+
 def test_missing_model_json_file_raises(tmp_path):
     with pytest.raises(ValueError, match="unknown model alias"):
         cli.resolve_model(str(tmp_path / "nope.json"))

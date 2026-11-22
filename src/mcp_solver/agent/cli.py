@@ -158,12 +158,15 @@ def model_settings(config: dict[str, Any]) -> ModelSettings:
 
     Follows the engine's own translation: ``no_sampling_params`` models get
     only ``max_tokens`` (and no ``top_k``); ``provider`` and ``reasoning``
-    apply to every model; ``base_url`` and ``api_key_env`` select another
-    OpenAI-compatible endpoint and its key variable.
+    apply to every model; ``reasoning_effort`` goes into the call as a
+    top-level parameter for every model; ``base_url`` and ``api_key_env``
+    select another OpenAI-compatible endpoint and its key variable.
     """
     no_sampling = bool(config.get("no_sampling_params"))
     keys = ("max_tokens",) if no_sampling else _SAMPLING_KEYS
     api_params = {k: config[k] for k in keys if k in config}
+    if "reasoning_effort" in config:
+        api_params["reasoning_effort"] = config["reasoning_effort"]
     extra_body: dict[str, Any] = {}
     if not no_sampling and "top_k" in config:
         extra_body["top_k"] = config["top_k"]
