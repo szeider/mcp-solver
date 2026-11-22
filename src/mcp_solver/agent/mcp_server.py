@@ -906,8 +906,12 @@ async def submit_code(code: str) -> CallToolResult:
         def started(proc) -> None:
             procs.append(proc)
             _standalone_runs.add(proc)
+            # Checked after the add: a start that comes after the
+            # cancellation (and after the finally below has deregistered
+            # procs) is killed and deregistered here, nothing else would.
             if cancelled:
                 signal_process_group(proc, signal.SIGKILL)
+                _standalone_runs.discard(proc)
 
         # The plain run decides acceptance. After an accepted one, the
         # self-check, main(check=True), runs within what is left of the

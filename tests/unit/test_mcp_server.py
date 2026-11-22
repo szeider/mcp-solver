@@ -1720,6 +1720,52 @@ async def test_cancelled_submission_kills_its_program(engine, tmp_path):
         _kill(pids)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="process groups")
+async def test_late_start_after_cancellation_leaves_no_entry(engine, monkeypatch):
+    # The worker thread reaches on_start only after the call was cancelled
+    # and its finally ran: the late process is killed and not left in
+    # _standalone_runs.
+    import subprocess
+    import threading
+
+    entered, release, done = threading.Event(), threading.Event(), threading.Event()
+    procs = []
+
+    def late_run(code, packages, on_start=None, **kwargs):
+        try:
+            entered.set()
+            release.wait(10)
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(600)"],
+                start_new_session=True,
+            )
+            procs.append(proc)
+            on_start(proc)
+            proc.wait(timeout=10)
+            return ProgramRun(proc.returncode, "", "", False)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(mcp_server, "_run_standalone", late_run)
+    try:
+        async with _session() as session:
+            await session.call_tool("select_backend", {"solver": "z3"})
+            task = asyncio.create_task(mcp_server.submit_code("print(1)"))
+            assert await asyncio.to_thread(entered.wait, 10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            release.set()
+            assert await asyncio.to_thread(done.wait, 15)
+            assert procs and procs[0].poll() is not None
+            assert not mcp_server._standalone_runs
+    finally:
+        release.set()
+        for proc in procs:
+            proc.kill()
+            proc.wait()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process groups, /bin/sh")
 async def test_disconnect_during_submission_kills_its_program(engine, tmp_path):
     pid_file = tmp_path / "pid"
